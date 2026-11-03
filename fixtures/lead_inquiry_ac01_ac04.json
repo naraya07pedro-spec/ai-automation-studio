@@ -39,6 +39,8 @@
       "expected": {
         "activation_status": "BLOCKED",
         "validation_errors": [
+          "ai_mode_missing",
+          "timezone_missing",
           "mapping_missing"
         ],
         "secrets_in_output": false,
