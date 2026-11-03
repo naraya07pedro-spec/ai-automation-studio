@@ -172,3 +172,24 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - GitHub Actions run [41682902955](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41682902955) completed with **success** for PR #7 at commit `6f7e010499bf1b21dbcf88d8bf1cb5161c037507`.
 - Both `Validate synthetic fixture contract` and `Run all standard-library tests` job steps were reported successful by GitHub.
 - A subsequent docs-only progress-log commit must still be checked separately; do not reuse the earlier green status to assert the new HEAD has passed.
+
+
+## Slice 08 · 2026-11-04 · Durable mock event decisions
+
+**Goal:** Prove that an event's mock decision is preserved after a new process/store instance and that a replay cannot silently become a new record.
+
+**Completed**
+- Added `prototype/durable_mock_state.py`, a deliberately bounded SQLite-on-disk experiment. Record key: source plus source-event ID, with an atomic transaction and unique constraint. Only a SHA-256 payload fingerprint and explicit `NEEDS_REVIEW` / `READY_FOR_REVIEW` decision are stored. No raw inquiry payload, secrets, or outbound actions.
+- Added `tests/test_durable_mock_state.py` with 12 tests for process-instance restart, conflicting payload after restart, namespaced identities, 100 concurrent independent connections, invalid inputs and location, canonical JSON, size bound, and no raw payload stored.
+- Persistence and replay are implemented **only in this store**. The existing integrated `MockInquiryFlow` still uses in-memory deduplication and is not yet wired to the durable store.
+- Fixed deterministic SQLite connection closing in the prototype.
+
+**Verification and evidence gate**
+- Both files must be read back from the GitHub review branch and run in GitHub Actions with the full suite before claiming CI success.
+- This step does not prove process-crash power-loss durability, disk corruption recovery, multi-host consensus, or exactly-once side effects.
+- SQLite is a narrow experiment, **not** a selection of the final architecture or database.
+
+**Risks / next slice**
+- Database write failures must block processing; no fallback to unsafe in-memory reservations.
+- Local database needs appropriate filesystem permissions and user-controlled retention; do not store customer payloads here.
+- Next: make the integrated mock flow optionally use the durable state store under an explicitly mock-only path; test cross-instance recovery, then audit approval and unknown-outcome requirements before any external actions.
