@@ -96,3 +96,27 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No change to `main` from this slice until its PR is merged.
 
 **Next smallest slice (proposed):** Implement and test in-memory AC03 event deduplication with unique event keys, bounded action identities and explicit nonpersistent limitations. Do not claim exactly-once external delivery.
+
+
+## Slice 05 · 2026-11-03 · In-memory mock event deduplication (AC03)
+
+**Goal:** Implement a small executable AC03 behavior that classifies duplicate incoming mock inquiry events without creating external side effects.
+
+**Completed**
+- Added `prototype/lead_inquiry_dedup.py`, with normalized JSON payload hashing, per-source event keys, an in-process lock for concurrent calls, bounded entries, and explicit `FIRST_SEEN`, `DUPLICATE`, `CONFLICT`, `INVALID_ID`, `INVALID_PAYLOAD`, `MOCK_ONLY`, `PAYLOAD_TOO_LARGE`, and `CAPACITY_EXHAUSTED` outcomes.
+- Added `tests/test_lead_inquiry_dedup.py` with 12 standard-library unit tests including AC03, conflicting IDs, separate source namespaces, canonical JSON, capacity exhaustion, invalid input and 100 concurrent identical events.
+- All results declare `external_dispatch_count: 0`; there is no network transport or live sender.
+- A new instance starts empty: a restart loses the deduplication record, intentionally documenting the non-durable limitation.
+
+**Verification**
+- Local Python unittest run: **12 passed, 0 failed**. Fixture-oriented test used an AC03 excerpt matching the relevant values read from the repository; full GitHub fixture and application suite have not been run together.
+- Re-read committed files from the GitHub review branch before PR.
+- No GitHub CI, production database, actual connector, distributed concurrency or multi-process verification was performed.
+
+**Limitations / security**
+- This is in-memory **deduplication only**, not durable idempotency or a guarantee of exactly-once external actions.
+- No action reservation/dispatch/reconciliation, no live customer events, no persistent storage, and no data retention policy implementation.
+- Exhaustion fails closed rather than evicting old keys, to avoid silently treating previous events as new.
+- SHA-256 is used as a deterministic fingerprint of canonical JSON. This does not prove provenance, message authentication or a malicious source is trusted.
+
+**Next smallest slice (proposal):** Implement AC04 missing-field classification with explicit unknown/needs-review output and tests, then wire the mock configuration validation, deduplication and classification together without external side effects. No architecture locked.
