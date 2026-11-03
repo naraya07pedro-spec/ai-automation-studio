@@ -120,3 +120,27 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - SHA-256 is used as a deterministic fingerprint of canonical JSON. This does not prove provenance, message authentication or a malicious source is trusted.
 
 **Next smallest slice (proposal):** Implement AC04 missing-field classification with explicit unknown/needs-review output and tests, then wire the mock configuration validation, deduplication and classification together without external side effects. No architecture locked.
+
+
+## Slice 06 · 2026-11-04 · Mock qualification of explicit fields (AC04)
+
+**Goal:** Classify whether required inquiry facts are present, without hallucinating missing information or performing external actions.
+
+**Completed**
+- Implemented `prototype/lead_inquiry_qualification.py`: deterministic mock-only `classify_inquiry` output with `VERIFIED_FROM_INPUT` (explicit nonempty primitive value), `UNKNOWN`, `NEEDS_REVIEW` and `READY_FOR_REVIEW`. "VERIFIED_FROM_INPUT" means supplied explicitly by an input, **not independently fact-checked**.
+- Implemented `tests/test_lead_inquiry_qualification.py` with AC04 fixture equality and negative tests for malformed input, missing fields, empty fields, duplicate required fields, attempted inference from free-text messages, mode restrictions, redacted output and zero dispatch.
+- No model, CRM, email, network call or real business records are involved.
+
+**Verification**
+- Local Python 3 standard-library `unittest` execution against a synthetic AC04 fixture excerpt: **12 passed, 0 failed**.
+- The exact AC04 fixture content was first fetched from GitHub. The local test copy used that AC04 case; existing repository tests and the full fixture file were **not** run together in this environment.
+- Committed source and test code were subsequently read back from the review branch.
+- No GitHub Actions CI, live connector, production environment, or security penetration test was performed.
+
+**Known limitations**
+- This verifies explicit field *presence*, not truth, lead qualification quality or business rules.
+- Missing facts are not inferred from free-text messages; `READY_FOR_REVIEW` is not a send/CRM approval.
+- The Python code is a bounded prototype, not a final application architecture choice.
+- Existing mock validator and deduplicator have not yet been wired into an end-to-end run.
+
+**Next small slice:** Connect AC01–AC04 in one mock-only processing path and run integrated tests; preserve the independent deny decisions, no side effects, and in-memory deduplication restart limitations.
