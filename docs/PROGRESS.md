@@ -218,3 +218,9 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No AI provider, CRM, email, customer data or external dispatch.
 
 **Next small slice:** Audit AC05–AC08 via mock approval binding and uncertain-outcome semantics, including integrity of approvals and untrusted inquiry text. Keep externally visible actions disabled.
+
+
+**Verified GitHub Actions evidence (code commit)**
+- PR #9 at commit `4eaa114584110c3f17bc1ea54ba4c0a9f2db0a36`: [Actions run 41687516224](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41687516224) completed **success**.
+- Both fixture validation and full unit/integration suite succeeded; runner log reports **68 tests**.
+- The following documentation-only commit requires a separate HEAD CI check. Do not transfer a prior CI result to a newer SHA.
