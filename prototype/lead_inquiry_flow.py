@@ -1,20 +1,26 @@
 """One end-to-end mock-only inquiry path. No external IO or automatic approvals.
 
 The three existing prototypes are composed without changing their semantics.
-This is process-local and does not implement durable workflow execution.
+An optional transactional mock store preserves decisions across new instances.
+No external dispatch, approval execution, or durable multi-stage runtime exists.
 """
 from collections.abc import Mapping
+import sqlite3
 
 from lead_inquiry_validation import validate_configuration
 from lead_inquiry_dedup import InMemoryDeduplicator
 from lead_inquiry_qualification import classify_inquiry
+from durable_mock_state import DurableMockEventStore
 
 
 class MockInquiryFlow:
-    """Isolated mock workflow with a process-local, bounded event register."""
+    """Isolated mock workflow with optional durable event decisions."""
 
-    def __init__(self, *, max_events=1000):
-        self._dedup = InMemoryDeduplicator(max_events=max_events)
+    def __init__(self, *, max_events=1000, durable_store=None):
+        if durable_store is not None and not isinstance(durable_store, DurableMockEventStore):
+            raise TypeError("durable_store must be DurableMockEventStore")
+        self._dedup = InMemoryDeduplicator(max_events=max_events) if durable_store is None else None
+        self._durable_store = durable_store
 
     def process(self, configuration, event, required_fields, *, mode="mock"):
         """Validate first; never classify/record invalid or non-mock requests.
@@ -46,9 +52,21 @@ class MockInquiryFlow:
             result["qualification"] = qualification
             return result
 
-        dedup = self._dedup.register(source, event_id, inquiry)
+        if self._durable_store is None:
+            dedup = self._dedup.register(source, event_id, inquiry)
+            first_seen = dedup["status"] == "FIRST_SEEN"
+        else:
+            try:
+                dedup = self._durable_store.record(
+                    source, event_id, inquiry, qualification["qualification_status"]
+                )
+            except (sqlite3.Error, OSError):
+                # Never fall back to volatile state after a storage failure.
+                result["workflow_status"] = "STORAGE_UNAVAILABLE"
+                return result
+            first_seen = dedup["status"] == "RECORDED"
         result["deduplication"] = dedup
-        if dedup["status"] != "FIRST_SEEN":
+        if not first_seen:
             result["workflow_status"] = {
                 "DUPLICATE": "SKIPPED_DUPLICATE",
                 "CONFLICT": "BLOCKED_CONFLICT",
