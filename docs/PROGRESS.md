@@ -193,3 +193,9 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Database write failures must block processing; no fallback to unsafe in-memory reservations.
 - Local database needs appropriate filesystem permissions and user-controlled retention; do not store customer payloads here.
 - Next: make the integrated mock flow optionally use the durable state store under an explicitly mock-only path; test cross-instance recovery, then audit approval and unknown-outcome requirements before any external actions.
+
+
+**GitHub CI evidence (pre-log-update revision)**
+- PR #8 commit `19b57d6e8e46a39761a187347814f5847fef914c`: [Actions run 41683586998](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41683586998), completed **success**.
+- Both fixture validation and full unit test suite steps reported success; job log reports **55 tests run**.
+- This new progress-only commit needs its own follow-up CI status check before marking the PR head fully verified.
