@@ -144,3 +144,31 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Existing mock validator and deduplicator have not yet been wired into an end-to-end run.
 
 **Next small slice:** Connect AC01–AC04 in one mock-only processing path and run integrated tests; preserve the independent deny decisions, no side effects, and in-memory deduplication restart limitations.
+
+
+## Slice 07 · 2026-11-04 · Integrated mock inquiry flow (AC01–AC04)
+
+**Goal:** Compose the existing configuration validator, in-memory event deduplicator, and explicit-field qualifier into one runnable path with no external side effects.
+
+**Completed**
+- Added `prototype/lead_inquiry_flow.py` with `MockInquiryFlow.process`: validation first, structural checks, classification before event registration, conflict/duplicate handling, and explicit review outcomes.
+- Added `tests/test_lead_inquiry_flow.py` with 11 integration tests, including all four existing synthetic acceptance scenarios, configuration failure without consuming event identity, event conflicts, malformed input, redacted results, capacity limits, and zero external dispatch.
+- Added `.github/workflows/mock-prototype-tests.yml`: on PRs and main pushes, validate fixture invariants and run the entire Python stdlib unittest suite. The workflow adds no application dependencies and does not choose a final runtime.
+
+**Verification plan and evidence boundary**
+- Confirm all three new files are present on the review branch and contain 11 integration test methods.
+- GitHub Actions workflow must report a completed success before claiming the combined suite passed in CI. If GitHub Actions is unavailable or remains pending, label tests NOT VERIFIED IN CI.
+- These tests remain mock-only, with no real connector, email, CRM, secrets, cloud AI or external write.
+
+**Risks and limitations**
+- Deduplication state is process-local and lost after restart; no durable idempotency or exactly-once external delivery.
+- Qualification proves field presence in input, not correctness. `READY_FOR_REVIEW` is not an authorization.
+- This is a bounded prototype. No architecture, persistence engine or production deployment has been selected.
+
+**Next smallest slice (proposed):** Introduce a durable, testable state/recovery contract for mock execution without enabling outbound effects. Audit the end-to-end run against AC05–AC08 security, approval-binding and uncertain-effect requirements before adding connectors.
+
+
+**CI evidence captured after initial PR**
+- GitHub Actions run [41682902955](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41682902955) completed with **success** for PR #7 at commit `6f7e010499bf1b21dbcf88d8bf1cb5161c037507`.
+- Both `Validate synthetic fixture contract` and `Run all standard-library tests` job steps were reported successful by GitHub.
+- A subsequent docs-only progress-log commit must still be checked separately; do not reuse the earlier green status to assert the new HEAD has passed.
