@@ -73,3 +73,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - `main` is unchanged by this slice until its PR is merged.
 
 **Next smallest slice (proposed):** Introduce a minimal executable mock behavior for just AC01–AC02 (validate configured fields and reject missing mapping), with unit tests comparing actual outputs against these fixtures. Confirm application/toolchain choices independently rather than treating the fixture validator as architecture.
+
+
+## Slice 04 · 2026-11-03 · Executable mock configuration validator (AC01–AC02)
+
+**Goal:** Replace paper-only expectations with a small, executable, side-effect-free validator for two acceptance cases.
+
+**Completed**
+- Added `prototype/lead_inquiry_validation.py`: deterministic mock-only configuration validation. Output includes activation status, named errors, and zero external dispatches; no API, file, database, or network activity.
+- Added `tests/test_lead_inquiry_validation.py`: 8 Python stdlib unit tests covering AC01/AC02 fixture comparisons, rejecting live mode and real connectors, invalid input/mapping, secret-safe output, and negative budgets.
+- Corrected the AC02 fixture expectation: its input lacked **three** required fields (`ai_mode`, `timezone`, `mapping`), not only the mapping. A strict validator should report all three rather than silently defaulting critical configuration.
+
+**Verification**
+- Local test run via `python -m unittest discover -s /mnt/data/ai_studio_slice04/tests -v`: initial result 7 passed / 1 failed, which revealed the AC02 fixture mismatch.
+- After correcting the fixture, **8 tests passed locally** (`Ran 8 tests ... OK`).
+- Branch files should be read back from GitHub prior to opening the PR.
+- **Evidence limit:** This is locally executed code with fixture-derived expectations. No GitHub CI run, independent code review, live connector, agent runtime, UI, or deployment has been verified. The test helper uses Python for a bounded spike only; final application stack remains undecided.
+
+**Not completed**
+- AC03/AC04 runtime behavior is not implemented.
+- No persistent deduplication, approvals, actual CRM/email integration, or production AI work.
+- No change to `main` from this slice until its PR is merged.
+
+**Next smallest slice (proposed):** Implement and test in-memory AC03 event deduplication with unique event keys, bounded action identities and explicit nonpersistent limitations. Do not claim exactly-once external delivery.
