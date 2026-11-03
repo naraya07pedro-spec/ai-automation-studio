@@ -166,3 +166,9 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - This is a bounded prototype. No architecture, persistence engine or production deployment has been selected.
 
 **Next smallest slice (proposed):** Introduce a durable, testable state/recovery contract for mock execution without enabling outbound effects. Audit the end-to-end run against AC05–AC08 security, approval-binding and uncertain-effect requirements before adding connectors.
+
+
+**CI evidence captured after initial PR**
+- GitHub Actions run [41682902955](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41682902955) completed with **success** for PR #7 at commit `6f7e010499bf1b21dbcf88d8bf1cb5161c037507`.
+- Both `Validate synthetic fixture contract` and `Run all standard-library tests` job steps were reported successful by GitHub.
+- A subsequent docs-only progress-log commit must still be checked separately; do not reuse the earlier green status to assert the new HEAD has passed.
