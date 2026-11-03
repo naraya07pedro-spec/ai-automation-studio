@@ -6,6 +6,7 @@ No network access, external action dispatch, credentials, or full input retentio
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -24,7 +25,7 @@ class DurableMockEventStore:
         if str(path) == ":memory:" or not path.name or not path.parent.exists():
             raise ValueError("an existing directory and an on-disk database path are required")
         self.path = str(path)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS mock_events (
                     source TEXT NOT NULL,
@@ -69,7 +70,7 @@ class DurableMockEventStore:
 
         # BEGIN IMMEDIATE serializes competing writers across connections and
         # processes. The unique key is the independent last-line defense.
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
                 existing = db.execute(
