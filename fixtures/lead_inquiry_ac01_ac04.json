@@ -1,0 +1,98 @@
+{
+  "schema_version": "fixture-contract-v1",
+  "description": "Synthetic mock examples, not executed application results",
+  "cases": [
+    {
+      "id": "AC01",
+      "input": {
+        "mode": "mock",
+        "configuration": {
+          "source": "mock_inbox",
+          "destination": "mock_crm",
+          "mapping": {
+            "inquiry_id": "id",
+            "service_requested": "service"
+          },
+          "follow_up_policy": "approval_required",
+          "ai_mode": "mock",
+          "timezone": "Asia/Jakarta",
+          "monthly_budget_idr": 25000
+        }
+      },
+      "expected": {
+        "activation_status": "DRAFT_VALID",
+        "validation_errors": [],
+        "external_dispatch_count": 0
+      }
+    },
+    {
+      "id": "AC02",
+      "input": {
+        "mode": "mock",
+        "configuration": {
+          "source": "mock_inbox",
+          "destination": "mock_crm",
+          "mapping": null,
+          "follow_up_policy": "approval_required"
+        }
+      },
+      "expected": {
+        "activation_status": "BLOCKED",
+        "validation_errors": [
+          "mapping_missing"
+        ],
+        "secrets_in_output": false,
+        "external_dispatch_count": 0
+      }
+    },
+    {
+      "id": "AC03",
+      "input": {
+        "mode": "mock",
+        "source": "mock_inbox",
+        "events": [
+          {
+            "source_event_id": "synthetic-event-001",
+            "inquiry_id": "synthetic-inquiry-001"
+          },
+          {
+            "source_event_id": "synthetic-event-001",
+            "inquiry_id": "synthetic-inquiry-001"
+          }
+        ]
+      },
+      "expected": {
+        "distinct_logical_events": 1,
+        "duplicate_event_count": 1,
+        "maximum_authorized_dispatches_per_logical_event": 1,
+        "external_dispatch_count": 0,
+        "deduplication_status": "DUPLICATE_RECORDED"
+      }
+    },
+    {
+      "id": "AC04",
+      "input": {
+        "mode": "mock",
+        "inquiry": {
+          "source_event_id": "synthetic-event-002",
+          "service_requested": "website",
+          "budget_range": null,
+          "message": "Need a website, budget not decided"
+        },
+        "required_qualification_fields": [
+          "service_requested",
+          "budget_range"
+        ]
+      },
+      "expected": {
+        "qualification_status": "NEEDS_REVIEW",
+        "field_assessments": {
+          "service_requested": "VERIFIED_FROM_INPUT",
+          "budget_range": "UNKNOWN"
+        },
+        "fabricated_verified_fields": [],
+        "external_dispatch_count": 0
+      }
+    }
+  ]
+}
