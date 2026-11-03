@@ -199,3 +199,22 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - PR #8 commit `19b57d6e8e46a39761a187347814f5847fef914c`: [Actions run 41683586998](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41683586998), completed **success**.
 - Both fixture validation and full unit test suite steps reported success; job log reports **55 tests run**.
 - This new progress-only commit needs its own follow-up CI status check before marking the PR head fully verified.
+
+
+## Slice 09 · 2026-11-04 · Optional durable store in integrated mock workflow
+
+**Goal:** Ensure the integrated AC01–AC04 mock workflow can recognize replayed events across newly constructed flow/store instances, while preserving fail-closed behavior.
+
+**Completed**
+- Updated `prototype/lead_inquiry_flow.py` to accept an explicitly typed optional `DurableMockEventStore`. Without this option, prior in-memory behavior is unchanged.
+- For durable mode, a first event yields `RECORDED`, replay yields `SKIPPED_DUPLICATE`, and same ID with different payload yields `BLOCKED_CONFLICT`. Previously stored review decision is shown for duplicate/conflict metadata; no automatic replay of actions occurs.
+- Storage `sqlite3.Error` or `OSError` leads to redacted `STORAGE_UNAVAILABLE`; no fallback to volatile deduplication.
+- Added `tests/test_lead_inquiry_durable_flow.py` with 13 integrated tests for cross-instance replay, conflict, unknown field decision, schema/config blocking, non-mock rejection, storage errors, concurrent connections, privacy, and backward compatibility.
+
+**Evidence and limits**
+- Source and tests must be read back from GitHub; run full suite via GitHub Actions before claiming tests pass. No local-only test result is counted as CI.
+- Prototype supports process restart/new instance behavior, **not a durable multi-stage workflow runtime**. No queued action or recovery of in-flight external side effects.
+- Existing SQLite prototype is only an experiment. No final database choice or production deployment.
+- No AI provider, CRM, email, customer data or external dispatch.
+
+**Next small slice:** Audit AC05–AC08 via mock approval binding and uncertain-outcome semantics, including integrity of approvals and untrusted inquiry text. Keep externally visible actions disabled.
