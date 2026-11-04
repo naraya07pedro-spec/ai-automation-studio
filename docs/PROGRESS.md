@@ -901,3 +901,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - This is a deterministic mock triage, not AI model inference; no real tickets or external queues are created. In-memory state resets on process restart.
 - Still no hosted demo, browser manual visual QA, real provider integration, persistent run history or custom workflow editor. No production-authorization boundary.
 - Next priority is third genuinely executable mock workflow, not a cosmetic preview promotion.
+
+
+**Verified CI evidence**
+- PR #32 revision `4d78633360209a6aca09c2b23ca6343c49eb1f79`: [GitHub Actions run 41804382233](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41804382233), completed **success** across Python 3.11, 3.12, 3.13.
+- Each CI job ran **343 tests, 0 failures** (325 previously plus 18 new support-triage tests); total **1029 test executions**, 343 distinct test methods per runtime.
+- Both supported local mock workflows are now exercised by real HTTP tests. No evidence of hosted browser experience, external support queue, AI inference, or persistent processing.
+- This note is a docs-only revision that changes the PR HEAD SHA; require its three-job Actions run to pass again before claiming latest-head CI green.
