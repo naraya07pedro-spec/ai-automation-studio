@@ -282,6 +282,8 @@ $("knowledge-status").textContent=response.ok?"MOCK POLICY EVALUATED · NO TRANS
 // Separate functional local-rule workbench. It has no provider adapters,
 // no AI calls and no route to initiate external dispatches.
 let localRows=[];
+const savedLocalWorkflow=()=>{try{return sessionStorage.getItem("aas.activeLocalWorkflow.v1")||"";}catch{return "";}};
+const rememberLocalWorkflow=id=>{try{if(id)sessionStorage.setItem("aas.activeLocalWorkflow.v1",id);}catch{/* Optional UI preference only. */}};
 const localRead=async(path,options)=>{
  const response=await fetch(path,options);const data=await response.json();
  if(!response.ok)throw Error(data.error||"local_request_failed");return data;
@@ -306,7 +308,10 @@ const refreshLocalWorkflows=async(preferred)=>{
  for(const w of localRows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" (v"+w.version+")";
  if(w.status==="DRAFT")draft.append(option);else if(w.status==="ACTIVE")active.append(option);}
  if([...draft.options].some(o=>o.value===preferred||o.value===previousDraft))draft.value=[...draft.options].some(o=>o.value===preferred)?preferred:previousDraft;
- if([...active.options].some(o=>o.value===preferred||o.value===previousActive))active.value=[...active.options].some(o=>o.value===preferred)?preferred:previousActive;
+ const selectedActive=[preferred,previousActive,savedLocalWorkflow()].find(
+  id=>[...active.options].some(option=>option.value===id));
+ if(selectedActive)active.value=selectedActive;
+ rememberLocalWorkflow(active.value);
  $("local-activate").disabled=!draft.options.length;$("local-run").disabled=!active.options.length;
  await refreshLocalHistory();
  }catch(error){$("local-workflows").textContent="Local registry unavailable: "+error.message;$("local-activate").disabled=true;$("local-run").disabled=true;}
@@ -338,7 +343,7 @@ $("local-run-form").addEventListener("submit",async event=>{event.preventDefault
  catch(error){$("local-run-status").textContent="Local execution blocked: "+error.message;
  $("local-result").textContent="No new local run was committed.";}
  finally{button.disabled=!$("local-run-choice").options.length;}});
-$("local-run-choice").addEventListener("change",refreshLocalHistory);
+$("local-run-choice").addEventListener("change",()=>{rememberLocalWorkflow($("local-run-choice").value);refreshLocalHistory();});
 $("local-refresh-history").addEventListener("click",refreshLocalHistory);
 // Local CSV intake is a deliberate two-step workflow, not a connector.
 // A preview token binds the file, active workflow version and DB run count.
