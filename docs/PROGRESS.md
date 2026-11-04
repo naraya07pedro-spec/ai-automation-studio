@@ -770,3 +770,14 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No live connector effects, real customer data, durable backup product, production authorization, or historical migrations.
 
 **Next smallest slice (proposed):** Align the runtime screen with exact observed evidence while preserving unregistered future patch behavior, and test a genuinely separate SQLite version where reproducible before making any expanded SQLite compatibility statement.
+
+
+**Verification evidence, repair and observed runtime drift (2026-11-04)**
+- PR #28 initial GitHub Actions run [41794018269](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41794018269) failed **before any jobs were created** due to a malformed workflow YAML line containing literal `\\n` escape sequences. Corrected the workflow step in commit `f374ccc85ad3359ae9114500ae76de5a9d508dc5`; no test failures were observed on the invalid-workflow run.
+- Corrected-run [41794192981](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41794192981), commit `f374ccc85ad3359ae9114500ae76de5a9d508dc5`: all three matrix jobs **success**, **281 unit tests per job, 0 failures**, 843 total unittest executions, 281 distinct test methods.
+- **Python 3.11.18 + SQLite 3.45.1:** current pinned fixture verification passed; historical registry intentionally returned `CURRENT_FIXTURE_MATCH_RUNTIME_UNREGISTERED` because original evidence was **3.11.17**, not 3.11.18. This is expected non-inheritance, not a failure of the current test.
+- **Python 3.12.16 + SQLite 3.45.1:** current fixture passed; `REGISTERED_AND_CURRENT_FIXTURE_MATCH`.
+- **Python 3.13.17 + SQLite 3.45.1:** current fixture passed; `REGISTERED_AND_CURRENT_FIXTURE_MATCH`.
+- All jobs ran current drift check, historical evidence report, fixture-contract validator, and full unittest suite. Every runtime report explicitly indicated `production_supported: false`.
+- All observed jobs used **SQLite 3.45.1**; this remains **one SQLite version**, not cross-SQLite-version compatibility evidence. The dump-format drift regression is an injected alternate hash, not another SQLite binary.
+- This documentation-only evidence commit changes the final PR HEAD SHA; require another successful three-job CI matrix on that exact commit before making a final latest-head pass claim.
