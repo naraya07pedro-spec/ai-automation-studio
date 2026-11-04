@@ -34,3 +34,12 @@ The rehearsal now checks both destination paths before creating any output. An e
 This reduces accidental partial artifacts and obvious path aliases. **It does not eliminate TOCTOU races, hard-link aliases, malicious source-marker injection, external writers or privilege bypass.** Keep the tool inside an isolated test workspace and do not treat it as a secure production backup utility.
 
 See `docs/STORAGE_CONSOLIDATION_PLAN.md` for the non-destructive compatibility strategy.
+
+
+## Slice 21: failure-injection and hard-link isolation tests
+
+The rehearsal rejects synthetic source files whose hard-link count differs from one, along with source paths beneath symlinked parent directories. Four internal test-only checkpoints permit deterministic `OSError` simulation immediately after backup reservation, backup copy, restore reservation, and restore copy.
+
+Expected outcomes: a failure returns `REHEARSAL_FAILED` rather than a false success; source fixture bytes remain unchanged; partial output artifacts are retained, inspected separately and protected from overwrite on retry.
+
+**Scope warning:** Tests do not simulate sudden process termination, persistent hardware corruption or race-free security against hostile filesystem actors. This is only bounded regression evidence for disposable synthetic fixtures.
