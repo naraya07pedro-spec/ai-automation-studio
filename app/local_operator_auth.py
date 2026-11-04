@@ -33,13 +33,14 @@ class OperatorConfigurationError(RuntimeError):
 
 
 class LocalOperatorAuth:
-    def __init__(self, salt, password_hash, clock=None):
+    def __init__(self, salt, password_hash, clock=None, owner_path=None):
         if type(salt) is not bytes or len(salt) != 16:
             raise OperatorConfigurationError("invalid_owner_config")
         if type(password_hash) is not bytes or len(password_hash) != 32:
             raise OperatorConfigurationError("invalid_owner_config")
         self._salt = salt
         self._hash = password_hash
+        self._owner_path = Path(owner_path).expanduser() if owner_path is not None else None
         self._clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
         self._sessions = {}
@@ -117,7 +118,7 @@ class LocalOperatorAuth:
                 raise ValueError("schema")
             salt = bytes.fromhex(record["salt"])
             digest = bytes.fromhex(record["scrypt_hash"])
-            return cls(salt, digest, clock=clock)
+            return cls(salt, digest, clock=clock, owner_path=path)
         except (OSError, ValueError, TypeError, KeyError) as exc:
             raise OperatorConfigurationError("invalid_owner_config") from exc
 
@@ -125,22 +126,68 @@ class LocalOperatorAuth:
     def _session_key(token):
         return hashlib.sha256(token.encode("ascii")).hexdigest()
 
-    def login(self, password):
+    def _confirm_locked(self, password):
+        """Shared failure counter for login, source changes and rotation."""
         if type(password) is not str or len(password) > MAX_PASSWORD:
-            return 401, None
+            return 401
+        now = self._clock()
+        if now < self._locked_until:
+            return 429
+        matched = hmac.compare_digest(self._derive(password, self._salt), self._hash)
+        if not matched:
+            self._failures += 1
+            if self._failures >= MAX_FAILED_ATTEMPTS:
+                self._locked_until = now + LOCKOUT_SECONDS
+                self._failures = 0
+            return 401
+        self._failures = 0
+        self._locked_until = 0
+        return 200
+
+    def confirm_current_password(self, password):
         with self._lock:
+            return self._confirm_locked(password)
+
+    def rotate_password(self, current_password, new_password):
+        """Rotate verified owner password atomically and revoke every session.
+
+        Caller already passed session+CSRF but must also reenter old password.
+        A storage failure preserves old verifier and existing sessions.
+        """
+        if not self._validate_password(new_password):
+            return 422, {"error": "invalid_new_operator_password"}
+        if self._owner_path is None:
+            return 503, {"error": "owner_file_unavailable"}
+        with self._lock:
+            confirmed = self._confirm_locked(current_password)
+            if confirmed != 200:
+                return confirmed, {"error": (
+                    "operator_login_locked" if confirmed == 429
+                    else "invalid_operator_credentials")}
+            if hmac.compare_digest(current_password, new_password):
+                return 422, {"error": "operator_password_unchanged"}
+            salt = secrets.token_bytes(16)
+            digest = self._derive(new_password, salt)
+            # Existing sessions must remain active if disk persistence fails.
+            from local_source_policy import secure_replace_json
+            try:
+                secure_replace_json(self._owner_path, {
+                    "version": FILE_VERSION,
+                    "salt": salt.hex(),
+                    "scrypt_hash": digest.hex()})
+            except (OSError, RuntimeError):
+                return 503, {"error": "owner_rotation_storage_failed"}
+            self._salt, self._hash = salt, digest
+            self._sessions.clear()
+            self._failures, self._locked_until = 0, 0
+            return 200, {"status": "OWNER_PASSWORD_ROTATED_SESSIONS_REVOKED"}
+
+    def login(self, password):
+        with self._lock:
+            accepted = self._confirm_locked(password)
+            if accepted != 200:
+                return accepted, None
             now = self._clock()
-            if now < self._locked_until:
-                return 429, None
-            matched = hmac.compare_digest(self._derive(password, self._salt), self._hash)
-            if not matched:
-                self._failures += 1
-                if self._failures >= MAX_FAILED_ATTEMPTS:
-                    self._locked_until = now + LOCKOUT_SECONDS
-                    self._failures = 0
-                return 401, None
-            self._failures = 0
-            self._locked_until = 0
             token = secrets.token_urlsafe(32)
             csrf = secrets.token_urlsafe(32)
             self._prune(now)
