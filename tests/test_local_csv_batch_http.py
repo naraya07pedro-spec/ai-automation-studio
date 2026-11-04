@@ -285,7 +285,7 @@ class LocalCSVBatchHTTPTests(unittest.TestCase):
         p = self.preview()[1]
         with ThreadPoolExecutor(max_workers=2) as executor:
             statuses = list(executor.map(lambda _: self.commit(p)[0], range(2)))
-        self.assertEqual([200, 409], sorted(statuses, reverse=True))
+        self.assertEqual([200, 409], sorted(statuses))
         self.assertEqual(2, self.count())
 
     def test_partial_existing_rows_can_commit_new_rows(self):
