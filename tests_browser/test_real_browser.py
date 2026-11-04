@@ -424,6 +424,12 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#local-control-status")).to_contain_text(
             "RESUMED_LOCAL")
         expect(self.page.locator("#local-run")).to_be_enabled()
+        # A reload deliberately does NOT retain the selected file bytes.
+        self.assertTrue(self.page.locator("#local-batch-preview").is_disabled())
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "fresh-after-resume.csv", "mimeType": "text/csv",
+            "buffer": b"event_id,service_code,budget_tier,timeline\n"
+                      b"resumed_001,automation,3,soon\n"})
         expect(self.page.locator("#local-batch-preview")).to_be_enabled()
 
     def test_publish_staged_revision_while_paused_keeps_stop_state(self):
