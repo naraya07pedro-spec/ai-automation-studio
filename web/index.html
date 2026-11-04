@@ -264,6 +264,14 @@ aas:timeline:urgent
 <div class="field"><label for="rotate-new-password">New password</label><input type="password" id="rotate-new-password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
 </div><button type="submit" id="rotate-password-button" class="secondary" style="margin-top:16px">Rotate password and revoke all sessions</button>
 <div id="rotate-password-status" role="status" aria-live="polite" class="setup-msg">Offline recovery is not enabled. Keep the current password safe.</div></form></section>
+<section class="panel" id="operator-security-audit-panel" style="margin-top:20px" aria-label="Local operator security audit">
+<div class="kicker">LOCAL OPERATOR SECURITY AUDIT · REDACTED</div>
+<h2>Recent security events</h2>
+<p class="muted">Latest local login, logout, password rotation, recovery and public-source permission events. The ledger records only event type, outcome, UTC time, and an optional irreversible source fingerprint. No password, recovery code, session token, issue body or raw repository name is stored here. It is local and not tamper-proof against malware running as your OS account.</p>
+<button id="operator-audit-refresh" type="button" class="secondary">Refresh audit records</button>
+<div id="operator-audit-status" role="status" aria-live="polite" class="setup-msg">Log in to see the local operator security history.</div>
+<pre id="operator-audit-list" class="trace">Protected by operator session.</pre>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -663,6 +671,7 @@ const changeSourcePermission=async operation=>{
   $("source-permission-password").value="";
   invalidatePublicGithub("Source permissions changed. Preview again.");
   await refreshOperatorSources();
+  await refreshOperatorAudit();
  }catch(error){
   status.textContent="Permission change rejected: "+error.message;
   $("source-permission-password").value="";
@@ -692,6 +701,21 @@ $("owner-rotation-form").addEventListener("submit",async event=>{
   button.disabled=false;
  }
 });
+const refreshOperatorAudit=async()=>{
+ const target=$("operator-audit-list");
+ try{
+  const response=await appFetch("/api/operator-audit?limit=40");
+  if(!response.ok)throw Error("audit_read_blocked_"+response.status);
+  const data=await response.json();
+  target.textContent=JSON.stringify(data.events,null,2);
+  $("operator-audit-status").textContent=
+    data.events.length+" recent local security events · bounded retention.";
+ }catch(error){
+  target.textContent="Security audit unavailable. No raw credentials displayed.";
+  $("operator-audit-status").textContent="Cannot read local audit: "+error.message;
+ }
+};
+$("operator-audit-refresh").addEventListener("click",refreshOperatorAudit);
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
@@ -699,6 +723,7 @@ const operatorReady=()=>{
  loadGallery();
  refreshLocalWorkflows();
  refreshOperatorSources();
+ refreshOperatorAudit();
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
