@@ -85,15 +85,26 @@ class SingleUseGrantsTests(unittest.TestCase):
                                       token=secrets.token_urlsafe(32), now=self.now)
         self.assertEqual("INVALID_GRANT", bad["status"])
 
-    def test_old_version_after_other_review_transition_denied(self):
+    def test_old_version_after_other_grant_transition_denied(self):
+        first_token = self.issue()["token"]
+        second_token = self.issue()["token"]
+        self.assertEqual("ACKNOWLEDGED_HOLD",
+                         self.grants.consume_hold("mock_inbox", "event-one",
+                                                  token=first_token, now=self.now)["status"])
+        self.assertEqual("STALE_VERSION",
+                         self.grants.consume_hold("mock_inbox", "event-one",
+                                                  token=second_token, now=self.now)["status"])
+
+    def test_legacy_bare_preflight_cannot_spend_or_bypass_grant(self):
         token = self.issue()["token"]
-        other = MockReviewTransitions(self.store).acknowledge_hold(
+        denied = MockReviewTransitions(self.store).acknowledge_hold(
             "mock_inbox", "event-one", event_ref=_event_ref("mock_inbox", "event-one"),
             expected_version=0, preflight_status="PRECHECK_PASSED_NO_TRANSITION",
             reviewer_ref="simulated")
-        self.assertEqual("ACKNOWLEDGED_HOLD", other["status"])
-        self.assertEqual("STALE_VERSION",
-                         self.grants.consume_hold("mock_inbox", "event-one", token=token, now=self.now)["status"])
+        self.assertEqual("LEGACY_PATH_DISABLED", denied["status"])
+        self.assertEqual("ACKNOWLEDGED_HOLD",
+                         self.grants.consume_hold("mock_inbox", "event-one",
+                                                  token=token, now=self.now)["status"])
 
     def test_completed_underlying_event_blocks_grant(self):
         token = self.issue()["token"]
