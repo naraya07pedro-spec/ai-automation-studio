@@ -19,6 +19,7 @@ import threading
 import time
 
 FILE_VERSION = 1
+RECOVERY_VERSION = 2
 MIN_PASSWORD = 12
 MAX_PASSWORD = 128
 SESSION_TTL_SECONDS = 3600
@@ -33,7 +34,8 @@ class OperatorConfigurationError(RuntimeError):
 
 
 class LocalOperatorAuth:
-    def __init__(self, salt, password_hash, clock=None, owner_path=None):
+    def __init__(self, salt, password_hash, clock=None, owner_path=None,
+                 recovery_salt=None, recovery_hash=None):
         if type(salt) is not bytes or len(salt) != 16:
             raise OperatorConfigurationError("invalid_owner_config")
         if type(password_hash) is not bytes or len(password_hash) != 32:
@@ -41,6 +43,14 @@ class LocalOperatorAuth:
         self._salt = salt
         self._hash = password_hash
         self._owner_path = Path(owner_path).expanduser() if owner_path is not None else None
+        if ((recovery_salt is None) != (recovery_hash is None)):
+            raise OperatorConfigurationError("invalid_recovery_config")
+        if recovery_salt is not None and (
+                type(recovery_salt) is not bytes or len(recovery_salt) != 16
+                or type(recovery_hash) is not bytes or len(recovery_hash) != 32):
+            raise OperatorConfigurationError("invalid_recovery_config")
+        self._recovery_salt = recovery_salt
+        self._recovery_hash = recovery_hash
         self._clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
         self._sessions = {}
@@ -111,14 +121,28 @@ class LocalOperatorAuth:
             if len(raw) > 512:
                 raise ValueError("oversized")
             record = json.loads(raw)
-            if (type(record) is not dict or set(record) != {
-                "version", "salt", "scrypt_hash"} or record["version"] != FILE_VERSION
-                    or type(record["salt"]) is not str
+            if type(record) is not dict or type(record.get("version")) is not int:
+                raise ValueError("schema")
+            version = record["version"]
+            if version == FILE_VERSION and set(record) == {
+                    "version", "salt", "scrypt_hash"}:
+                recovery_salt, recovery_hash = None, None
+            elif version == RECOVERY_VERSION and set(record) == {
+                    "version", "salt", "scrypt_hash", "recovery_salt", "recovery_hash"}:
+                if (type(record["recovery_salt"]) is not str
+                        or type(record["recovery_hash"]) is not str):
+                    raise ValueError("schema")
+                recovery_salt = bytes.fromhex(record["recovery_salt"])
+                recovery_hash = bytes.fromhex(record["recovery_hash"])
+            else:
+                raise ValueError("schema")
+            if (type(record["salt"]) is not str
                     or type(record["scrypt_hash"]) is not str):
                 raise ValueError("schema")
             salt = bytes.fromhex(record["salt"])
             digest = bytes.fromhex(record["scrypt_hash"])
-            return cls(salt, digest, clock=clock, owner_path=path)
+            return cls(salt, digest, clock=clock, owner_path=path,
+                       recovery_salt=recovery_salt, recovery_hash=recovery_hash)
         except (OSError, ValueError, TypeError, KeyError) as exc:
             raise OperatorConfigurationError("invalid_owner_config") from exc
 
@@ -178,9 +202,84 @@ class LocalOperatorAuth:
             except (OSError, RuntimeError):
                 return 503, {"error": "owner_rotation_storage_failed"}
             self._salt, self._hash = salt, digest
+            # A password rotation also invalidates any previously printed
+            # offline recovery code, avoiding indefinite older credentials.
+            self._recovery_salt, self._recovery_hash = None, None
             self._sessions.clear()
             self._failures, self._locked_until = 0, 0
             return 200, {"status": "OWNER_PASSWORD_ROTATED_SESSIONS_REVOKED"}
+
+    @staticmethod
+    def _recovery_digest(code, salt):
+        return hashlib.sha256(salt + code.encode("ascii")).digest()
+
+    def setup_recovery(self, current_password):
+        """Offline-only: issue 256-bit one-time recovery code; persist hash.
+
+        Re-enrolling consumes the prior recovery code, never reveals it.
+        CLI checks the production TCP socket is unbound before this call.
+        """
+        if self._owner_path is None:
+            return 503, {"error": "owner_file_unavailable"}
+        with self._lock:
+            accepted = self._confirm_locked(current_password)
+            if accepted != 200:
+                return accepted, {"error": (
+                    "operator_login_locked" if accepted == 429
+                    else "invalid_operator_credentials")}
+            code = secrets.token_urlsafe(32)
+            rsalt = secrets.token_bytes(16)
+            digest = self._recovery_digest(code, rsalt)
+            from local_source_policy import secure_replace_json
+            try:
+                secure_replace_json(self._owner_path, {
+                    "version": RECOVERY_VERSION,
+                    "salt": self._salt.hex(),
+                    "scrypt_hash": self._hash.hex(),
+                    "recovery_salt": rsalt.hex(),
+                    "recovery_hash": digest.hex()})
+            except (OSError, RuntimeError):
+                return 503, {"error": "recovery_setup_storage_failed"}
+            self._recovery_salt, self._recovery_hash = rsalt, digest
+            # Existing HTTP login sessions cannot survive source verifier
+            # replacement; the server must be stopped during CLI setup.
+            self._sessions.clear()
+            return 200, {"recovery_code": code,
+                         "status": "OFFLINE_RECOVERY_CODE_ENABLED"}
+
+    def recover_with_code(self, code, new_password):
+        """Offline only: atomically consume recovery proof + reset password.
+
+        Rewrites the owner config as v1 with no recovery code, so a code
+        can never be replayed after a successful owner recovery.
+        """
+        if self._owner_path is None:
+            return 503, {"error": "owner_file_unavailable"}
+        if not self._validate_password(new_password):
+            return 422, {"error": "invalid_new_operator_password"}
+        if type(code) is not str or len(code) != 43 or not code.isascii():
+            return 403, {"error": "invalid_recovery_proof"}
+        with self._lock:
+            if self._recovery_salt is None or self._recovery_hash is None:
+                return 403, {"error": "recovery_not_enabled"}
+            trial = self._recovery_digest(code, self._recovery_salt)
+            if not hmac.compare_digest(trial, self._recovery_hash):
+                return 403, {"error": "invalid_recovery_proof"}
+            new_salt = secrets.token_bytes(16)
+            new_hash = self._derive(new_password, new_salt)
+            from local_source_policy import secure_replace_json
+            try:
+                secure_replace_json(self._owner_path, {
+                    "version": FILE_VERSION,
+                    "salt": new_salt.hex(),
+                    "scrypt_hash": new_hash.hex()})
+            except (OSError, RuntimeError):
+                return 503, {"error": "recovery_storage_failed"}
+            self._salt, self._hash = new_salt, new_hash
+            self._recovery_salt, self._recovery_hash = None, None
+            self._sessions.clear()
+            self._failures, self._locked_until = 0, 0
+            return 200, {"status": "OWNER_RECOVERED_CODE_CONSUMED"}
 
     def login(self, password):
         with self._lock:

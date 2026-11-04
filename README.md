@@ -17,6 +17,26 @@ The first command prompts securely for a **12–128-character password** and con
 
 The server binds only to `127.0.0.1`. Sessions are one-hour, short-lived process-memory tokens in HttpOnly, SameSite=Strict cookies; every mutation requires the matching session CSRF token, including old mock APIs and GitHub source preview. No real user accounts, cloud provider credentials, outside identity provider or GitHub login are created. Do not expose this unauthenticated-at-the-network-layer local HTTP service using public proxies or port forwarding. It remains unsuitable for real customer data or a compromised local PC.
 
+## Optional one-time offline owner recovery (Slice 45)
+
+A forgotten local owner password cannot be reset through the web UI. If you still know the current password, **stop the server** and generate a high-entropy, one-time recovery code in the local terminal:
+
+```bash
+python app/local_server.py --enable-recovery
+```
+
+Enter the current password when prompted. The CLI displays one 43-character random recovery code **exactly once**. Save it securely **outside this computer**; the owner file contains only a salted digest. The optional enrollment upgrades the existing version-1 owner verifier to a backward-compatible version-2 owner file, without touching workflow SQLite.
+
+If you later lose the password but still possess the saved recovery code, **stop the local server** and run:
+
+```bash
+python app/local_server.py --recover-owner
+```
+
+Enter the one-time code and choose a new password. The code is **consumed permanently**, all sessions are revoked, and the existing SQLite history and approved public GitHub repositories remain unchanged. Restart the server and sign in with the new password, then enroll a *new* offline recovery code.
+
+Both commands refuse to operate if a normal server is using `127.0.0.1:8765`. Normal authenticated password rotation also invalidates an enrolled recovery code. **There is no anonymous HTTP reset or guaranteed recovery if both password and code are lost.** Do not paste the recovery code into chat, tickets, GitHub Issues or screenshots. See [full offline recovery contract](docs/OFFLINE_OWNER_RECOVERY_V1.md).
+
 ## Password rotation and explicit public-source permissions (Slice 44)
 
 The local owner can now use **Change operator password** to rotate the credential after proving knowledge of the current password. On successful atomic verifier replacement, **all operator sessions are revoked immediately**; sign in again with the new password. A storage failure leaves the previous credential and sessions unchanged. **Lost-password recovery is not implemented**; don't remove the owner file or assume there is an anonymous reset route.
