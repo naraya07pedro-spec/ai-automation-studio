@@ -1023,3 +1023,24 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The same head passed [Python matrix run 41814657665](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41814657665): **402 tests each, 0 failures** on Python 3.11, 3.12 and 3.13 (**1206 Python executions**). Full fixture and runtime checks stayed enabled.
 - Updated `README.md` to provide local demo launch, five workflow descriptions, test commands and non-production caveats.
 - Exact-head final verification remains required after this documentation-only progress commit. The local server is **not internet-ready** and no public deployment was attempted.
+
+
+## Slice 35 · 2026-11-04 · Async validation and stale Lead Inquiry response protection
+
+**Goal:** Close browser state-consistency race conditions found during actual Chromium interaction testing. Keep all prior five mock workflows and backend fail-closed checks unchanged.
+
+**Implemented**
+- Based on PR #36's browser-tested head while #36 remains unmerged; this slice is a **stacked PR**, not an independent main-branch feature.
+- Modified `web/index.html`: monotonic setup revision increments on edits and validation attempts; validation requests snapshot current configuration; outdated replies are ignored. An in-flight Lead Inquiry run cannot restore stale state/approval controls or reenable the Run button after setup changes. Old mock draft is visibly invalidated.
+- Added two browser regressions in `tests_browser/test_real_browser.py` using delayed **real local HTTP responses** after UI setup edits. Expected suite: previous eight journeys plus two new race tests, with original suite unchanged.
+- Added `docs/ASYNC_SETUP_RACE_HARDENING.md` detailing risk, implementation, acceptance criteria and lack of server-side cancellation.
+
+**Verification pending**
+- Run Python 3.11/3.12/3.13 matrix and Chromium browser CI on the exact stacked-PR head. Do not claim green, test totals or merge until GitHub Actions evidence is inspected.
+- After PR #36 merges, retarget this PR to `main` and verify the resulting diff and CI before merging #35.
+
+**Known limits**
+- Server-side synthetic process-local dedup can still register a run whose *UI reply* is ignored: this is stale-presentation control, not cancellation.
+- No real providers, persistent user identity, durable approval, public deployment, or generalized concurrency guarantee for all five workflows.
+
+**Next:** verify and merge the browser prerequisite; review screenshot artifacts and race-regression evidence; then pursue a safe public demonstration strategy without publishing the loopback-only server.
