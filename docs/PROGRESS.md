@@ -961,3 +961,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - `review_acknowledged` is user-supplied and is **not** verified identity or real approval. No real customer records, CRM API writes, durable record or live provider.
 - Run-history state is held in process memory, deleted at restart. This remains a local mock demo, not a public or production application.
 - Next: build Knowledge & Document Routing as fifth truly executable mock, then review deployment and visual QA separately.
+
+
+**Verified CI evidence (code and feature documentation commit)**
+- PR #34 initial head `476d4a33821dc32f5987ba07dda9b93e50d963db`: [GitHub Actions run 41809493841](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41809493841) completed **success** on all three Python versions 3.11, 3.12 and 3.13.
+- Logs confirm **382 tests per interpreter, zero failures** (363 previous + 19 CRM handoff acceptance tests), **1146 executions across three jobs**. All also pass pinned fixture runtime drift, evidence registry reporting and fixture contract.
+- Verified only process-local synthetic record preview; no live CRM write, valid independent approval/authentication or public deployment was exercised.
+- This documentation evidence update creates a new PR HEAD and must pass all three matrix jobs again before claiming final-head success.
