@@ -497,3 +497,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Python/SQLite remain an isolated mock prototype, not an application architecture commitment. There are no real sends.
 
 **Next smallest slice (proposed):** Define migration and retention controls for legacy COMPLETED records, then reduce duplicate durable-store APIs without destroying inspectable historical data. Do not introduce live completion paths until independent evidence and authorization exist.
+
+
+**GitHub Actions verification evidence**
+- PR #19 commit `77f9cb02811667d2b775cd72627bbb4b8d495475`: [run 41776287184](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41776287184), completed **success**.
+- Fixture contract and full Python standard-library unittest steps both succeeded. CI job log: **162 tests run, 0 failures**. Test count stayed constant because this slice revised existing tests to enforce deny-only semantics rather than adding test methods.
+- A Node.js 20 deprecation warning remains for older GitHub Action dependencies; it did not fail this run.
+- This documentation-only commit requires a fresh GitHub Actions result on the new SHA before claiming latest-HEAD success.
