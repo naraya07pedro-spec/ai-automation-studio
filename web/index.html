@@ -644,7 +644,7 @@ const refreshOperatorSources=async()=>{
   if(!response.ok)throw Error("source_permissions_unavailable");
   const data=await response.json();
   allowedPublicSources=new Set(data.allowed||[]);
-  $("source-permission-list").textContent=data.allowed.length?data.allowed.join("\\n"):"No approved sources";
+  $("source-permission-list").textContent=data.allowed.length?data.allowed.join("\n"):"No approved sources";
   refreshPublicGithubButton();
  }catch(error){
   allowedPublicSources=new Set();
