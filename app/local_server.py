@@ -436,7 +436,11 @@ def main(argv=None):
     home = Path.home() / ".ai-automation-studio"
     if args.enable_recovery or args.recover_owner:
         # Hold port ownership until on-disk verifier is fully replaced.
-        with _lock_recovery_to_offline_port():
+        try:
+            recovery_lock = _lock_recovery_to_offline_port()
+        except OperatorConfigurationError as exc:
+            raise SystemExit("Recovery blocked: " + str(exc)) from None
+        with recovery_lock:
             try:
                 owner = LocalOperatorAuth.load(home / "operator.json")
             except OperatorConfigurationError as exc:
