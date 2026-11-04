@@ -371,6 +371,84 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertNotIn("someone@example.com",
                          self.page.locator("#local-batch-result").inner_text())
 
+    def test_publish_new_rules_keeps_prior_local_results_versioned(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#local-event").fill("version_old_001")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-history")).to_contain_text(
+            "version_old_001")
+        self.page.locator("#local-stage-service").select_option("integration")
+        self.page.locator("#local-stage-budget").select_option("3")
+        self.page.locator("#local-stage").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "REVISION_DRAFTED")
+        expect(self.page.locator("#local-publish")).to_be_enabled()
+        expect(self.page.locator("#local-revisions")).to_contain_text('"DRAFT"')
+        self.page.locator("#local-publish").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "REVISION_PUBLISHED_LOCAL")
+        expect(self.page.locator("#local-workflows")).to_contain_text("V2")
+        self.page.locator("#local-event").fill("version_new_002")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "NOT_QUALIFIED_LOCAL")
+        expect(self.page.locator("#local-history")).to_contain_text(
+            '"workflow_version": 1')
+        expect(self.page.locator("#local-history")).to_contain_text(
+            '"workflow_version": 2')
+        self.page.reload(wait_until="networkidle")
+        expect(self.page.locator("#local-revisions")).to_contain_text("ARCHIVED")
+        expect(self.page.locator("#local-history")).to_contain_text(
+            "version_old_001")
+
+    def test_pause_blocks_manual_and_csv_then_resume_enables(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "pause-demo.csv", "mimeType": "text/csv",
+            "buffer": b"event_id,service_code,budget_tier,timeline\n"
+                      b"paused_001,automation,3,soon\n"})
+        self.page.locator("#local-batch-preview").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text(
+            "PREVIEW READY")
+        self.page.locator("#local-pause").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "PAUSED_LOCAL")
+        self.assertTrue(self.page.locator("#local-run").is_disabled())
+        self.assertTrue(self.page.locator("#local-batch-preview").is_disabled())
+        self.assertTrue(self.page.locator("#local-batch-commit").is_disabled())
+        self.page.reload(wait_until="networkidle")
+        expect(self.page.locator("#local-control-choice")).to_have_count(1)
+        expect(self.page.locator("#local-resume")).to_be_enabled()
+        self.assertTrue(self.page.locator("#local-run").is_disabled())
+        self.page.locator("#local-resume").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "RESUMED_LOCAL")
+        expect(self.page.locator("#local-run")).to_be_enabled()
+        # A reload deliberately does NOT retain the selected file bytes.
+        self.assertTrue(self.page.locator("#local-batch-preview").is_disabled())
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "fresh-after-resume.csv", "mimeType": "text/csv",
+            "buffer": b"event_id,service_code,budget_tier,timeline\n"
+                      b"resumed_001,automation,3,soon\n"})
+        expect(self.page.locator("#local-batch-preview")).to_be_enabled()
+
+    def test_publish_staged_revision_while_paused_keeps_stop_state(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#local-pause").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "PAUSED_LOCAL")
+        self.page.locator("#local-stage-policy").select_option("draft_only")
+        self.page.locator("#local-stage").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "REVISION_DRAFTED")
+        self.page.locator("#local-publish").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "REVISION_PUBLISHED_LOCAL")
+        expect(self.page.locator("#local-resume")).to_be_enabled()
+        self.assertTrue(self.page.locator("#local-run").is_disabled())
+        self.page.locator("#local-resume").click()
+        expect(self.page.locator("#local-run")).to_be_enabled()
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())

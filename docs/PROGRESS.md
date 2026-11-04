@@ -1160,3 +1160,22 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Unfinished product core:** user/identity authorization, editing and pausing versioned workflows, real read-only connector and externally triggered events, persistent queue, actual AI model integration and permissioned external writes. The current server remains intentionally loopback-only, unauthenticated and **not suitable for real customer data**.
 - This final change is a **post-merge progress-documentation-only** update; it does not alter the exact tested implementation commit.
 
+
+
+## Slice 39 · 2026-11-04 · Versioned local workflow revisions & pause/resume
+
+**Product objective:** Make the previously delivered account-free SQLite workflow core controllable over time: allow a beginner to **stage rule changes without affecting current processing**, publish them explicitly, stop new local evaluations safely, and inspect past results pinned to their original version. This is a functional lifecycle change, not another mock workflow.
+
+**Implemented on branch `feat/workflow-versions-pause-slice-39`, from `main` after merged Slice 38:**
+- `app/local_workflow_core.py`: adds `local_workflow_revisions` (immutable draft/active/archived rule snapshot), non-destructive migration of pre-v39 SQLite data, and a monotonically increasing `control_epoch` on publish, pause and resume. `stage_revision` creates one new DRAFT; `publish_revision` atomically activates it while keeping the preceding revision ARCHIVED and leaving `local_runs` untouched. Versions are pinned per historic event. `set_paused` validates exact version+control epoch and blocks new events until explicitly resumed. Max 30 revisions per workflow.
+- `app/local_server.py`: adds `GET /api/local-revisions` and four allowlisted localhost-only POST controls `/api/local-stage`, `/api/local-publish`, `/api/local-pause`, `/api/local-resume` with existing Host/Origin/JSON gates.
+- `app/local_csv_batch.py`: adds `control_epoch` to CSV preview digest, invalidating all earlier previews after pause→resume and publish, even with an unchanged event count. A pure staged draft does not affect active policy or preview.
+- `web/index.html`: adds browser controls to stage, inspect and publish new rule revisions, pause/resume, and preserve a paused workflow in the selection/history view while blocking manual runs and file imports. Nonpersonal local history remains inspectable without deleting records.
+- `tests/test_local_workflow_controls_http.py`: **23 new** HTTP/SQLite acceptance tests for version pinning, migration from hand-built legacy SQLite schema, publish while paused, invalid stage/control payload, epoch conflict, CSV preview invalidation, race between pause and run, and intact stored evidence.
+- `tests_browser/test_real_browser.py`: **3 new** real Chromium journeys for UI version publish plus old/new history, pause across reload then resume, and publish while paused.
+- Updated `README.md`, added `docs/LOCAL_WORKFLOW_CONTROL_V1.md` to document honest boundaries, contract and recoverability.
+
+**Important boundaries:** No encrypted or authenticated multiuser SaaS, no real AI model inference, no externally triggered event connector, no durable external-effect cancellation, no rollback action to older rule versions, no customer PII protection, no live email/CRM. Pause only applies to local requests evaluated **after** the pause is recorded. Already completed events remain in immutable evidence.
+
+**Verification gate:** Expected Python suite **472 tests per interpreter** (449+23), expected Chromium suite **22 tests** (19+3), pending real CI execution. Verify exact-head GitHub Actions for Python 3.11/3.12/3.13 and Chromium. Diagnose failures, fix without weakening constraints, then attach evidence to PR and merge only verified code. Follow-on capability is controlled read-only real input, not uncontrolled external writes.
+

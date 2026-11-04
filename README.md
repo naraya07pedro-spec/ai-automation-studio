@@ -18,6 +18,14 @@ Scroll to **Build and run your first local rule workflow**. Create a private rul
 
 **Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server is unauthenticated, SQLite is not encrypted by the app, no connector is present, and everything runs on localhost. No outbound message or external CRM change occurs. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
 
+## Safe local rule versions and pause/resume (Slice 39)
+
+Inside **Change rules without rewriting earlier results**, select an active or paused workflow, stage a new set of service/budget/review rules as a **draft version**, inspect the revision history, then explicitly **Publish**. Earlier event records retain the exact version and result they were processed under. A repeated event ID still replays the original outcome, even after rules change.
+
+Use **Pause local workflow** to stop new local rule evaluations and CSV imports; **Resume** to opt back in. Publishing rules while paused **does not** automatically resume them. The controls require an expected version and change epoch; stale commands fail closed. Any CSV preview made before pause/resume/publish becomes invalid.
+
+Older SQLite databases are migrated non-destructively on startup; stored local history remains intact. The core remains **localhost-only and unauthenticated**. Pause is **not cancellation of already committed work** and does not control any external system because no live provider adapters exist. [Full version-control and migration contract](docs/LOCAL_WORKFLOW_CONTROL_V1.md).
+
 ## Local CSV event intake (Slice 38)
 
 Use the **Import events from a local CSV** panel below the functional local workflow workbench to import up to **25 small categorical events** at once, with an explicit no-write **Preview** before **Commit**. Both stages validate the exact file contents against the active workflow and its SQLite event ledger; stale previews, conflicting event IDs and invalid columns are rejected. Records share the existing durable local run history, and manual/batch duplicates use the same event fingerprint and decision rules.
