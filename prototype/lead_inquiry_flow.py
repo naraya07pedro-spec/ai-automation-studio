@@ -4,6 +4,7 @@ The three existing prototypes are composed without changing their semantics.
 This is process-local and does not implement durable workflow execution.
 """
 from collections.abc import Mapping
+import sqlite3
 
 from lead_inquiry_validation import validate_configuration
 from lead_inquiry_dedup import InMemoryDeduplicator
@@ -13,8 +14,20 @@ from lead_inquiry_qualification import classify_inquiry
 class MockInquiryFlow:
     """Isolated mock workflow with a process-local, bounded event register."""
 
-    def __init__(self, *, max_events=1000):
-        self._dedup = InMemoryDeduplicator(max_events=max_events)
+    def __init__(self, *, max_events=1000, durable_store=None):
+        """An explicitly supplied store opts into persistent mock behavior.
+
+        Default remains in-memory to preserve previous prototype tests. The
+        durable store must expose reserve() and mark_mock_completed(); no
+        automatic fallback to memory is allowed on storage failures.
+        """
+        if durable_store is not None and not (
+            callable(getattr(durable_store, "reserve", None))
+            and callable(getattr(durable_store, "mark_mock_completed", None))
+        ):
+            raise TypeError("durable_store must implement reserve and mark_mock_completed")
+        self._durable_store = durable_store
+        self._dedup = None if durable_store is not None else InMemoryDeduplicator(max_events=max_events)
 
     def process(self, configuration, event, required_fields, *, mode="mock"):
         """Validate first; never classify/record invalid or non-mock requests.
@@ -46,14 +59,38 @@ class MockInquiryFlow:
             result["qualification"] = qualification
             return result
 
-        dedup = self._dedup.register(source, event_id, inquiry)
+        durable = self._durable_store is not None
+        try:
+            dedup = (
+                self._durable_store.reserve(source, event_id, inquiry)
+                if durable else self._dedup.register(source, event_id, inquiry)
+            )
+        except (sqlite3.Error, OSError):
+            # Do not leak database paths, SQL messages, or customer content.
+            result["deduplication"] = {"status": "STORAGE_UNAVAILABLE", "external_dispatch_count": 0}
+            return result
+
         result["deduplication"] = dedup
-        if dedup["status"] != "FIRST_SEEN":
+        accepted = "RESERVED_PENDING" if durable else "FIRST_SEEN"
+        if dedup["status"] != accepted:
             result["workflow_status"] = {
                 "DUPLICATE": "SKIPPED_DUPLICATE",
                 "CONFLICT": "BLOCKED_CONFLICT",
+                "NEEDS_RECONCILIATION": "BLOCKED_RECONCILIATION",
             }.get(dedup["status"], "BLOCKED")
             return result
+
+        if durable:
+            # Reserve is committed first; a process crash here leaves PENDING.
+            # A restart must not reclassify it as a fresh action.
+            try:
+                completion = self._durable_store.mark_mock_completed(source, event_id)
+            except (sqlite3.Error, OSError):
+                result["deduplication"] = {"status": "STORAGE_UNAVAILABLE", "external_dispatch_count": 0}
+                return result
+            if completion["status"] != "MOCK_COMPLETED":
+                result["deduplication"] = completion
+                return result
 
         result["qualification"] = qualification
         result["workflow_status"] = (

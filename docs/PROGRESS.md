@@ -230,3 +230,32 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The job log reports **70 tests executed**. This is the repository-wide total at that commit, **not** 70 new slice-08 tests; slice 08 adds 15 test methods.
 - The log also includes an upstream Node.js 20 deprecation warning affecting `actions/checkout@v4` and `actions/setup-python@v5`; the workflow passed, but CI dependency maintenance remains pending.
 - This evidence applies to that exact commit only. The follow-up docs-only commit updating this log requires its own CI result.
+
+
+## Slice 09 · 2026-11-04 · Opt-in durable event gate for integrated mock inquiry flow
+
+**Goal:** Connect the already-built persistent mock event store to the integrated inquiry workflow, without automatic replay or external actions.
+
+**Completed**
+- Updated `prototype/lead_inquiry_flow.py`: `MockInquiryFlow(durable_store=...)` explicitly opts into the existing `lead_inquiry_durable_state.DurableMockEventStore`. The default in-memory behavior remains unchanged for earlier prototype users/tests.
+- After configuration and qualification validation, the durable path atomically reserves the event. `RESERVED_PENDING` permits mock-only local completion; already `PENDING` reports `BLOCKED_RECONCILIATION`, an existing `COMPLETED` event is skipped, and conflicting payloads are blocked. A failed SQLite read/write is redacted as `STORAGE_UNAVAILABLE`; **never** fall back to memory.
+- Added `tests/test_lead_inquiry_durable_flow.py` with 14 integrated checks: persisted duplicate after process/store re-creation, AC04 missing information, prior PENDING reconciliation gate, conflict after restart, validation-first no reservation, live-mode denial, unsafe event ID, secret redaction, injected storage failure during reserve/complete, zero external dispatch, bounded capacity, and invalid store interface.
+- No real CRM, outbound API, customer records, AI model, or paid service involved.
+
+**Evidence status**
+- The changed code, tests, and progress entry must be re-read from the review branch. The GitHub Actions mock test workflow must finish successfully on the exact PR head before the full suite is marked passed. The 14 new test methods are not proof of success until executed.
+- The repository already contains two separate durable-store experiments; this slice **reuses** the one with explicit `PENDING` / `COMPLETED` state and does not introduce a third storage implementation.
+
+**What this does NOT demonstrate**
+- The durable store records event identity, payload fingerprint, and mock completion state, **not** the full classification outcome; a duplicate only reports `SKIPPED_DUPLICATE`, not a reconstructed prior qualification result.
+- `MOCK_COMPLETED` is a locally recorded mock step, never evidence of provider delivery. A crash between reservation and mock completion leaves `PENDING` requiring operator reconciliation, rather than auto-processing.
+- No crash/power-loss durability guarantee, corruption repair, encryption, backup, retention policy, high-availability, distributed consensus, exactly-once external effects, UI, or production architecture selected.
+
+**Next smallest slice (proposal):** Make unresolved PENDING work visible to an operator with redacted inspection and explicit mock-only reconciliation, then consolidate overlapping storage prototypes after regression tests.
+
+
+**GitHub Actions evidence for slice 09**
+- On commit `c730549085dd7089e5fb26eeae9a0b6aabefd441`, [Actions run 41760349282](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41760349282) completed **success**.
+- Both `Validate synthetic fixture contract` and `Run all standard-library tests` steps passed. Job log: **84 tests run, 0 failures** (14 new integrated tests and 70 previous tests).
+- The CI environment reports a Node.js 20 deprecation warning for current action versions; the run still passed. Action-version maintenance remains a separate follow-up.
+- Because the present progress-log update creates a new commit, CI for that latest commit must be checked independently before claiming final-head success.
