@@ -413,3 +413,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - An earlier intermediate PR run at commit `33aaaae4fea8f9551b31a8268115dc8c7499c0f0` had **141 passing tests**; two extra no-write/forged-ref regressions were added before this final code revision. Those prior passed tests are not treated as coverage of the new cases.
 - Node.js 20 deprecation warnings for older GitHub Actions dependencies remain. The warnings did not fail this run.
 - This evidence describes the code revision above; the docs-only commit containing this note requires a separate CI run before claiming the final PR HEAD passed.
+
+
+## Slice 15 · 2026-11-04 · Constructor-owned mock grant policy and clock
+
+**Goal:** Prevent request-level injection of verifier, time and token lifetime in the mock single-use-grant path without committing to a final authentication or application architecture.
+
+**Completed**
+- Verified PR #16 passed on its head and merged it to main before this branch.
+- Updated `prototype/lead_inquiry_single_use_grants.py` so `MockSingleUseReviewGrants` receives `authority` and `clock` only during construction by a would-be trusted composition root. `issue(source,event_id,proposal=...)` no longer accepts request-level `verifier` or `now`, and `consume_hold(...,token=...)` no longer accepts request-level `now`.
+- Proposal accepts only five fields: `event_ref`, `intent`, `evidence_kind`, `evidence_digest`, and `operator_ref`. The component stamps `issued_at` and `expires_at = issued_at + 60 seconds`; callers cannot extend expiry through proposal fields.
+- Missing authority or clock fails closed with `ISSUER_NOT_CONFIGURED` or `TRUSTED_CLOCK_UNAVAILABLE`. Verifier exceptions are redacted as `AUTHORIZATION_UNAVAILABLE`. Previous atomic token hash consumption, event binding, version checks, and source `PENDING` isolation are retained.
+- Updated `tests/test_lead_inquiry_single_use_grants.py` with 21 tests covering expiry, request-level verifier/time injection rejection, malformed clock, default deny, no caller-controlled lifetime, 30 competing token consumers, replay, independent grants and redacted results.
+
+**Verification gate**
+- Re-read modified files and verify test count. Check GitHub Actions fixture-contract validation and entire Python stdlib test suite on the exact PR-head SHA before claiming CI success.
+
+**Security boundaries and caveats**
+- Constructor-provided authority and clock are a **mock composition boundary, not a secure identity service**. A process able to construct the class with an always-true verifier can still simulate authorization; do not expose this construction to users, untrusted plugins or a request handler.
+- The clock is injected for deterministic testing and not independently authenticated, monotonic, or guaranteed to represent server time. Token issuance has no user session binding, authenticated identity proof, or verified evidence provenance.
+- `lead_inquiry_reconciliation_preflight.evaluate_reconciliation` still publicly accepts an injected verifier and time for bounded simulation, but it only returns a dry-run verdict; the now-disabled legacy state transition cannot consume such a verdict.
+- No real connector, network send, event completion or production deployment. SQLite is still an isolated prototype; no permanent architecture has been chosen.
+
+**Next smallest slice (proposed):** Audit all remaining state-mutating prototype interfaces and introduce a single trusted orchestration entrypoint backed by explicit mock identity policy, without allowing caller-controlled verifier/clock in a request. Prepare compatibility and multi-process regression evidence before considering real authentication.
