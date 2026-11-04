@@ -27,9 +27,12 @@ jobs:
           # Nonzero status is the EXPECTED diagnostic result, not a job crash.
           $PSNativeCommandUseErrorActionPreference = $false
           $missing = Join-Path $env:RUNNER_TEMP "aas_missing_${{ github.run_id }}"
-          pwsh -NoProfile -File .\scripts\check_windows_local_acl.ps1 -Root $missing
-          if ($LASTEXITCODE -ne 3) {
-            throw "Expected INCOMPLETE exit 3 for nonexistent folder; got $LASTEXITCODE"
+          $result = Start-Process -FilePath "pwsh" -ArgumentList @(
+            "-NoProfile", "-File", ".\scripts\check_windows_local_acl.ps1",
+            "-Root", $missing
+          ) -Wait -PassThru -NoNewWindow
+          if ($result.ExitCode -ne 3) {
+            throw "Expected INCOMPLETE exit 3 for nonexistent folder; got $($result.ExitCode)"
           }
       - name: Broad Everyone permission on test file is detected
         shell: pwsh
@@ -48,9 +51,12 @@ jobs:
           )
           $acl.AddAccessRule($rule)
           Set-Acl -LiteralPath $file -AclObject $acl
-          pwsh -NoProfile -File .\scripts\check_windows_local_acl.ps1 -Root $fixture
-          if ($LASTEXITCODE -ne 2) {
-            throw "Expected RISK exit 2 on synthetic broad ACL; got $LASTEXITCODE"
+          $result = Start-Process -FilePath "pwsh" -ArgumentList @(
+            "-NoProfile", "-File", ".\scripts\check_windows_local_acl.ps1",
+            "-Root", $fixture
+          ) -Wait -PassThru -NoNewWindow
+          if ($result.ExitCode -ne 2) {
+            throw "Expected RISK exit 2 on synthetic broad ACL; got $($result.ExitCode)"
           }
       - name: Scope and cleanup
         shell: pwsh
