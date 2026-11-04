@@ -142,12 +142,14 @@
 <script>
 const $=id=>document.getElementById(id);
 let latest="";let reviewToken=null;let setupValid=false;let templatesLoaded=false;
+// Monotonic revision rejects late setup/run responses after any edit or newer validation.
+let setupRevision=0;
 const resetReview=()=>{reviewToken=null;$("ack").disabled=true;$("reject").disabled=true;};
 const setupPayload=()=>({template_id:"lead-inquiry",setup:{source:$("source").value,destination:$("destination").value,follow_up_policy:$("follow_up_policy").value,timezone:$("timezone").value,ai_mode:"mock",monthly_budget_idr:Number($("monthly_budget_idr").value)}});
-const invalidateSetup=()=>{setupValid=false;$("run").disabled=true;$("setup-status").textContent="Setup changed. Validate again before running.";resetReview();};
+const invalidateSetup=()=>{setupRevision++;setupValid=false;$("run").disabled=true;$("setup-status").textContent="Setup changed. Validate again before running.";resetReview();$("draft").textContent="Previous draft is stale. Validate setup and run a fresh synthetic inquiry.";};
 for(const id of ["source","destination","follow_up_policy","timezone","monthly_budget_idr"]){$(id).addEventListener("change",invalidateSetup);$(id).addEventListener("input",invalidateSetup);}
-$("setup-form").addEventListener("submit",async event=>{event.preventDefault();setupValid=false;$("run").disabled=true;$("setup-status").textContent="Validating synthetic setup…";
-try{const response=await fetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(setupPayload())});const data=await response.json();setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;}});
+$("setup-form").addEventListener("submit",async event=>{event.preventDefault();const revision=++setupRevision;const request=setupPayload();setupValid=false;$("run").disabled=true;$("setup-status").textContent="Validating synthetic setup…";
+try{const response=await fetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(request)});const data=await response.json();if(revision!==setupRevision)return;setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid||!templatesLoaded;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){if(revision!==setupRevision)return;$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;$("run").disabled=true;}});
 const loadGallery=async()=>{try{const [catalogResponse,setupResponse]=await Promise.all([fetch("/api/templates"),fetch("/api/setup-choices")]);if(!catalogResponse.ok||!setupResponse.ok)throw Error("unavailable");const catalog=await catalogResponse.json();const choices=await setupResponse.json();
 if(catalog.executable_count!==5||catalog.preview_count!==0||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
 const gallery=$("gallery");gallery.replaceChildren();for(const template of catalog.templates){const card=document.createElement("article");card.className="template-card";if(template.status==="EXECUTABLE_MOCK")card.setAttribute("aria-current","true");
@@ -156,10 +158,10 @@ const open=document.createElement("button");open.type="button";open.textContent=
 }catch(error){$("gallery").textContent="Template metadata could not be verified. The mock setup cannot be activated.";templatesLoaded=false;$("run").disabled=true;}};
 loadGallery();
 $("demo").addEventListener("submit",async event=>{
- event.preventDefault();if(!setupValid||!templatesLoaded){$("status").textContent="VALIDATE SETUP FIRST";return;}resetReview();$("review-status").textContent="No review action available.";const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
+ event.preventDefault();if(!setupValid||!templatesLoaded){$("status").textContent="VALIDATE SETUP FIRST";return;}const revision=setupRevision;resetReview();$("review-status").textContent="No review action available.";const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
  const payload={event_id:$("event_id").value,service_requested:$("service_requested").value,budget_range:$("budget_range").value,timeline:$("timeline").value,...setupPayload()};
  try{const response=await fetch("/api/mock-run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
- const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");
+ const data=await response.json();if(revision!==setupRevision){$("status").textContent="SETUP CHANGED · STALE RESPONSE IGNORED";return;}if(!response.ok)throw new Error(data.error||"Request failed");
  const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
  $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
  $("dispatch").textContent=String(data.external_dispatch_count);$("status").textContent="MOCK RUN COMPLETED · NO SENDS";
@@ -169,7 +171,7 @@ $("demo").addEventListener("submit",async event=>{
  if(offer?.draft){const title=document.createElement("h3");title.textContent=offer.draft.subject;const body=document.createElement("p");body.textContent=offer.draft.body;const foot=document.createElement("p");foot.textContent="Recipient: NOT_SET · Delivery: NEVER_SENT · No verified operator";draft.append(title,body,foot);if(offer.review_token){reviewToken=offer.review_token;$("ack").disabled=false;$("reject").disabled=false;$("review-status").textContent="Awaiting local review (does not authorize sending).";}else{$("review-status").textContent="Draft-only policy. No local review token was issued."};}
  else {const note=document.createElement("p");note.textContent="No draft for this run. Only a fresh, valid event may create one.";draft.append(note);}
  latest=JSON.stringify(data,null,2);$("trace").textContent=latest;
- }catch(error){resetReview();$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}finally{button.disabled=false;}
+ }catch(error){if(revision===setupRevision){resetReview();$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}}finally{button.disabled=!setupValid||!templatesLoaded;}
 });
 const reviewDecision=async decision=>{if(!reviewToken)return;const token=reviewToken;resetReview();$("review-status").textContent="Recording local review...";
 try{const response=await fetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
