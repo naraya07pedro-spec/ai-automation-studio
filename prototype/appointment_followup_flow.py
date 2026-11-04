@@ -4,7 +4,7 @@ No background scheduler, clock-based trigger, real calendar, delivery channel,
 external messages or customer records. The caller provides an explicit
 reference instant to make decisions reproducible and independently testable.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import re
@@ -77,7 +77,8 @@ class MockAppointmentFollowup:
             window, plan = "UPCOMING_30_DAYS", "DEFERRED_DRAFT_MOCK_ONLY"
         key = payload["event_id"]
         digest = sha256(json.dumps(
-            (reference.isoformat(), appointment.isoformat(), payload["channel"]),
+            (reference.astimezone(timezone.utc).isoformat(),
+             appointment.astimezone(timezone.utc).isoformat(), payload["channel"]),
             separators=(",", ":")).encode("utf-8")).hexdigest()
         if key in self._seen:
             return self._result(
