@@ -1397,3 +1397,18 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **CI failure root causes and verified repairs:** initial Chromium failed one async pause/preview UI race, repaired product sequencing so success status appears only after buttons refresh, without removing original assertion. Initial Windows diagnostics intentionally returned exit code 3, which GitHub Actions treated as a terminating error before expected result inspection; CI now uses `Start-Process -PassThru` and asserts exit 3 and exit 2 distinctly, preserving correct risk detection. Full timeline and run links are in [PR #52](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/52).
 - **Known remaining work:** instance-wide OS locking/crash/restart recovery, actual Windows account ACL inspection, Windows power-loss/storage durability, independent audit tamper resistance, multiuser/remote identity, private GitHub scopes, real customer data compliance and permissioned external writes. No AI model inference or external send has been demonstrated by this slice. The next stage should target a **user-visible useful, permissioned workflow** while retaining this security boundary, not just accumulate mock demos.
 
+
+
+## Slice 47 · 2026-11-05 · First actual local AI agent inference with bounded tools (open-source focus)
+
+**Product direction correction:** AI Automation Studio is intended as an **open-source, locally controlled AI agent platform**, **not SaaS**. Nontechnical users remain the initial UX priority; personal/developer/business workflows remain possible. This slice targets useful real agent execution rather than another synthetic automation or cloud billing feature.
+
+**Implemented in `feat/local-ollama-agent-slice-47` (pending full CI):**
+- `app/local_ollama_agent.py`: opt-in CLI, actual local Ollama `/api/chat` interaction with model-selected tools and a real tool feedback loop; only fixed `127.0.0.1:11434`, no proxy, no API key, and no provider-side business writes.
+- Exact allowlist `calculate` (bounded decimal arithmetic) and `utc_now` (read-only clock). Up to four model turns, two tool calls per round, finite input/output and HTTP timeouts. Unknown tools fail closed, with no shell/files/CRM/email/GitHub write access.
+- `tests/test_local_ollama_agent.py`: nine isolated deterministic test methods for model responses, tool execution/feedback, multiple calls, decimal validation, unknown actions, step caps, malformed payloads and prompt/model validation.
+- `docs/LOCAL_OLLAMA_AGENT_V0.md`: Windows invocation example, install prerequisites, threat model, limitations and future integration gate.
+
+**Not yet verified:** exact-head GitHub Actions Python 3.11/3.12/3.13 and browser/live-source CI. No claim that Ollama/model is installed locally or that live inference passed an end-to-end model smoke test. Browser product is unchanged; existing authenticated server permission boundaries are untouched.
+
+**Outstanding:** CLI is independent from authenticated workbench, rule workflow state, durable memory, user-visible chat, model capability discovery and write-enabled connectors. It is a genuinely model-backed **narrow read-only agent**, not a complete autonomous platform. Next prioritized slice: controlled authenticated local model UI, explicit model enablement and permission evaluation before any external side effect.
