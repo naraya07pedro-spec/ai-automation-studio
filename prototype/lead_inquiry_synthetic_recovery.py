@@ -55,15 +55,33 @@ def _check(db):
     return db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
 
 
-def _new_destination(path):
-    """Reserve output exclusively and do not overwrite an existing object."""
+def _safe_destination(path):
+    """Validate destination without creating anything.
+
+    Only direct files within real, existing parent directories are allowed.
+    This reduces obvious alias and overwrite risks; it is not race-proof.
+    """
     p = Path(path)
-    if not p.parent.is_dir() or p.is_symlink():
-        raise ValueError("destination parent missing or path unsupported")
-    descriptor = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    os.close(descriptor)
+    parent = p.parent
+    if (not parent.is_dir() or parent.is_symlink()
+            or not p.name or p.exists() or p.is_symlink()):
+        raise ValueError("output path not suitable")
+    # Never traverse a symlink in an intermediate parent component.
+    for ancestor in (parent, *parent.parents):
+        if ancestor.is_symlink():
+            raise ValueError("parent symlink unsupported")
     return p
 
+
+def _new_destination(path):
+    """Reserve output exclusively. Never overwrite a pre-existing file."""
+    p = _safe_destination(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(p, flags, 0o600)
+    os.close(descriptor)
+    return p
 
 def rehearse_synthetic_backup_restore(source, backup, restored):
     """Create two new synthetic-only DB files using SQLite backup API.
@@ -73,10 +91,16 @@ def rehearse_synthetic_backup_restore(source, backup, restored):
     """
     try:
         src, dst, out = Path(source), Path(backup), Path(restored)
-        if len({str(p.absolute()) for p in (src, dst, out)}) != 3:
+        # Compare resolved parents to catch alias spellings before creating
+        # outputs. Hard-link aliases of source also count as a collision.
+        if len({str(p.resolve(strict=False)) for p in (src, dst, out)}) != 3:
             return _report("PATH_COLLISION")
         if not _readable_file(src):
             return _report("SOURCE_NOT_FOUND_OR_UNSUPPORTED")
+        if dst.exists() or out.exists() or dst.is_symlink() or out.is_symlink():
+            return _report("DESTINATION_EXISTS")
+        _safe_destination(dst)
+        _safe_destination(out)
         inspection = inventory_mock_sqlite(src)
         if inspection["status"] != "INVENTORY_ONLY":
             return _report("UNSUPPORTED_SOURCE_SCHEMA")
