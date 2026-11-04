@@ -267,7 +267,7 @@ aas:timeline:urgent
 <section class="panel" id="operator-security-audit-panel" style="margin-top:20px" aria-label="Local operator security audit">
 <div class="kicker">LOCAL OPERATOR SECURITY AUDIT · REDACTED</div>
 <h2>Recent security events</h2>
-<p class="muted">Latest local login, logout, password rotation, recovery and public-source permission events. The ledger records only event type, outcome, UTC time, and an optional irreversible source fingerprint. No password, recovery code, session token, issue body or raw repository name is stored here. It is local and not tamper-proof against malware running as your OS account.</p>
+<p class="muted">Latest local login, logout, password rotation, recovery and public-source permission events. The ledger records only event type, outcome, UTC time, and an optional pseudonymous source fingerprint (which can still be matched to known public repositories). No password, recovery code, session token, issue body or raw repository name is stored here. It is local and not tamper-proof against malware running as your OS account.</p>
 <button id="operator-audit-refresh" type="button" class="secondary">Refresh audit records</button>
 <div id="operator-audit-status" role="status" aria-live="polite" class="setup-msg">Log in to see the local operator security history.</div>
 <pre id="operator-audit-list" class="trace">Protected by operator session.</pre>
