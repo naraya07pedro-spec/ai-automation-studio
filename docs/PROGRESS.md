@@ -587,3 +587,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Node.js 20 deprecation warning for older CI actions remains separate maintenance debt.
 
 **Next smallest slice (proposed):** Add negative tests for source/backup hard-link aliasing, mid-operation failures and artifact consistency; consider a disposable-workspace-only API that does not accept arbitrary filesystem paths. Continue to keep originals untouched.
+
+
+**Verified GitHub Actions evidence**
+- PR #22 code-and-docs commit `8ef0ed38b06ef7b960a8b3e508d046ea2edad356`: [Actions run 41784222344](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41784222344), completed **success**.
+- Fixture-contract validation and the full stdlib Python unittest job both passed; job log reported **202 tests run, 0 failures** (previous 195 plus seven recovery-hardening tests).
+- Node.js 20 deprecation warning remains in older GitHub Actions dependency versions; this was non-blocking.
+- The docs-only commit recording this result requires its own successful GitHub Actions run on the new PR HEAD before that final SHA can be marked verified.
