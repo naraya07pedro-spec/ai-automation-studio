@@ -999,3 +999,18 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The mock fixture drift check, historical runtime evidence reporting, fixture contract, and full standard-library test suite succeeded in all three matrix legs.
 - This confirms only the deterministic synthetic metadata-only routing contract and prior four mock workflows under test; **not** real document handling, file ingestion, browser visual QA, live provider behavior or production release.
 - Adding these CI evidence notes creates a new PR HEAD SHA and requires a new successful exact-head CI run before latest-head green is claimed.
+
+
+## Slice 34 · 2026-11-04 · Actual Chromium UI and five-workflow browser acceptance
+
+**Goal:** Test real HTML/JavaScript UI interactions, not only Python HTTP tests, for the five executable local mock workflows.
+
+**Completed**
+- Verified PR #35 final-head [CI 41812351107](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41812351107) green on all three Python matrix legs (402 tests each). Squash merged #35 and created `test/browser-e2e-five-workflows-slice-34`.
+- Added `tests_browser/test_real_browser.py`: **8 Chromium browser journeys** running the real loopback HTTP server and clicking actual controls for five workflows, setup gating, review, duplicate detection, mobile 375px layout, server-derived output and zero provider effects.
+- Added `.github/workflows/browser-e2e.yml`: pinned Playwright 1.56.0 with Chromium in a separate Actions browser CI job; stores synthetic desktop and 375px screenshots for independent visual review.
+- Added `docs/BROWSER_QA_GATE.md` documenting local invocation, evidence bounds and known limitations.
+
+**Validation gate:** Both existing three-job Python CI matrix and new Chromium browser job must pass on the exact PR head. Record actual run URLs, test counts, failures and repairs. No public hosting or production readiness claim.
+
+**Limits:** Chromium automated behavior and screenshots do not replace human visual/accessibility review; no external AI/CRM, real user data, persistence, secure public server or 45-scenario catalog. The existing local server is deliberately loopback-only.
