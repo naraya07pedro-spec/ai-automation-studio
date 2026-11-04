@@ -6,25 +6,36 @@ it requires offline one-time owner provisioning.
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from local_operator_auth import LocalOperatorAuth
+from local_source_policy import LocalPublicSourcePolicy
 from local_workflow_core import LocalWorkflowCore
 from local_server import create_handler
 
 
 def main():
-    owner = LocalOperatorAuth.ephemeral_for_tests("ci_only_fixture_password_1234")
+    home = tempfile.TemporaryDirectory()
+    owner_path = Path(home.name) / "operator.json"
+    LocalOperatorAuth.provision(owner_path, "ci_only_fixture_password_1234")
+    owner = LocalOperatorAuth.load(owner_path)
+    policy = LocalPublicSourcePolicy()
+    # Only the test fixture grants a sample public repository on startup.
+    # Shipping server starts with no grants.
+    policy.grant("Octocat/Hello-World")
     core = LocalWorkflowCore(":memory:")
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
-        create_handler(local_core=core, operator_auth=owner))
+        create_handler(local_core=core, operator_auth=owner,
+                       source_policy=policy))
     try:
         server.serve_forever()
     finally:
         server.server_close()
         core.close()
+        home.cleanup()
 
 
 if __name__ == "__main__":
