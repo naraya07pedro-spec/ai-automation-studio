@@ -19,11 +19,16 @@ class SourcePolicyError(RuntimeError):
     pass
 
 
+class PostReplaceDurabilityError(SourcePolicyError):
+    """Target replaced but directory durability was not confirmed."""
+    pass
+
+
 def secure_replace_json(path, data):
     """Atomically replace owner-owned JSON, preserving restrictive POSIX mode.
 
-    Caller must ensure authorization and serialize writes. No file is ever
-    truncated in place; a failed fsync/rename leaves original data intact.
+    Caller serializes writes. Failures BEFORE os.replace preserve the old
+    file. Errors AFTER replace are uncertain: do not trust old memory state.
     """
     p = Path(path).expanduser()
     if p.is_symlink() or (p.exists() and not p.is_file()):
@@ -49,11 +54,17 @@ def secure_replace_json(path, data):
             raise SourcePolicyError("unsafe_policy_path")
         os.replace(temp, p)
         if os.name == "posix":
-            dirfd = os.open(str(p.parent), os.O_RDONLY)
+            # Rename has already made the new file visible. If syncing its
+            # containing directory fails, the old in-memory state is unsafe.
             try:
-                os.fsync(dirfd)
-            finally:
-                os.close(dirfd)
+                dirfd = os.open(str(p.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dirfd)
+                finally:
+                    os.close(dirfd)
+            except OSError as exc:
+                raise PostReplaceDurabilityError(
+                    "post_replace_directory_sync_failed") from exc
     finally:
         if temp.exists():
             temp.unlink()
@@ -71,6 +82,7 @@ class LocalPublicSourcePolicy:
         self._lock = threading.RLock()
         self._allowed = set()
         self._epoch = 0
+        self._blocked = False
         if self._path is not None and self._path.exists():
             if self._path.is_symlink() or not self._path.is_file():
                 raise SourcePolicyError("unsafe_policy_path")
@@ -99,13 +111,15 @@ class LocalPublicSourcePolicy:
 
     def snapshot(self):
         with self._lock:
-            return {"allowed": sorted(self._allowed), "epoch": self._epoch,
-                    "max_allowed": MAX_ALLOWED_REPOS}
+            return {"allowed": [] if self._blocked else sorted(self._allowed),
+                    "epoch": self._epoch,
+                    "max_allowed": MAX_ALLOWED_REPOS,
+                    "storage_recovery_required": self._blocked}
 
     def is_allowed(self, repo, epoch=None):
         normalized = self.normalize(repo)
         with self._lock:
-            return (normalized is not None
+            return (not self._blocked and normalized is not None
                     and normalized in self._allowed
                     and (epoch is None or epoch == self._epoch))
 
@@ -114,10 +128,17 @@ class LocalPublicSourcePolicy:
             return self._epoch
 
     def _persist(self, updated):
+        if self._blocked:
+            raise SourcePolicyError("source_policy_requires_restart")
         if self._path is not None:
-            secure_replace_json(self._path, {
-                "version": 1, "allowed": sorted(updated),
-                "epoch": self._epoch + 1})
+            try:
+                secure_replace_json(self._path, {
+                    "version": 1, "allowed": sorted(updated),
+                    "epoch": self._epoch + 1})
+            except PostReplaceDurabilityError:
+                # File may already show updated grants/revocations.
+                self._blocked = True
+                raise
         self._allowed = updated
         self._epoch += 1
 
@@ -126,6 +147,8 @@ class LocalPublicSourcePolicy:
         if name is None:
             return 422, {"error": "invalid_public_repo"}
         with self._lock:
+            if self._blocked:
+                return 503, {"error": "source_policy_restart_required"}
             if name in self._allowed:
                 return 200, {"status": "SOURCE_ALREADY_ALLOWED", **self.snapshot()}
             if len(self._allowed) >= MAX_ALLOWED_REPOS:
@@ -135,7 +158,9 @@ class LocalPublicSourcePolicy:
             try:
                 self._persist(updated)
             except (OSError, SourcePolicyError):
-                return 503, {"error": "source_policy_storage_failed"}
+                return 503, {"error": (
+                    "source_policy_restart_required" if self._blocked
+                    else "source_policy_storage_failed")}
             return 200, {"status": "PUBLIC_SOURCE_ALLOWED", **self.snapshot()}
 
     def revoke(self, repo):
@@ -143,6 +168,8 @@ class LocalPublicSourcePolicy:
         if name is None:
             return 422, {"error": "invalid_public_repo"}
         with self._lock:
+            if self._blocked:
+                return 503, {"error": "source_policy_restart_required"}
             if name not in self._allowed:
                 return 404, {"error": "source_not_allowed"}
             updated = set(self._allowed)
@@ -150,5 +177,7 @@ class LocalPublicSourcePolicy:
             try:
                 self._persist(updated)
             except (OSError, SourcePolicyError):
-                return 503, {"error": "source_policy_storage_failed"}
+                return 503, {"error": (
+                    "source_policy_restart_required" if self._blocked
+                    else "source_policy_storage_failed")}
             return 200, {"status": "PUBLIC_SOURCE_REVOKED", **self.snapshot()}
