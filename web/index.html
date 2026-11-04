@@ -208,6 +208,32 @@
 case_001,automation,3,soon
 case_002,integration,1,flexible</pre></div>
 </div></section>
+<section class="panel" id="public-github-panel" style="margin-top:20px" aria-label="Public GitHub issue read-only connector">
+<div class="kicker">FIRST EXTERNAL READ-ONLY SOURCE · PUBLIC GITHUB ISSUES</div>
+<h2>Inspect real GitHub issues, then choose whether to import</h2>
+<p class="muted">Use an existing <strong>public</strong> GitHub repository whose issues have explicit categorization labels. Clicking preview performs one bounded read from GitHub's official public REST API, not a simulated dataset. The initial API response and any issue titles, bodies or user names are not stored. Only mapped categories and numeric issue IDs reach the local workflow ledger after explicit approval.</p>
+<div class="notice core-notice">No login, access token, private repository, webhook or write access is requested. The connector reads only the first 15 open issue/PR items and ignores pull requests and issues lacking exactly one approved label from each category. This server is still unauthenticated localhost software; never expose it publicly or use real customer data.</div>
+<div class="layout" style="margin-top:16px">
+<div><div class="field"><label for="public-github-repo">Public GitHub repository (owner/repo, not URL)</label>
+<input id="public-github-repo" type="text" placeholder="organization/public-repository" autocomplete="off" maxlength="142" pattern="[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}"></div>
+<p class="muted">Target workflow: the <strong>active local workflow selected above</strong>. The source is read only when you explicitly request a preview. No automatic polling.</p>
+<div class="core-actions"><button type="button" class="primary" id="public-github-preview" disabled>Read public issues &amp; preview locally</button>
+<button type="button" class="primary" id="public-github-commit" disabled>Import reviewed issues to local SQLite</button></div>
+<div id="public-github-status" class="setup-msg" role="status" aria-live="polite">Choose an active workflow and a public owner/repo. No external network request has been made by this control.</div></div>
+<div><div class="kicker">REQUIRED EXPLICIT PUBLIC ISSUE LABELS</div>
+<pre class="trace">aas:service:automation
+  OR aas:service:integration
+  OR aas:service:consulting
+
+aas:budget:1 OR aas:budget:2 OR aas:budget:3
+
+aas:timeline:urgent
+  OR aas:timeline:soon
+  OR aas:timeline:flexible</pre>
+<div class="kicker" style="margin-top:16px">SOURCE PREVIEW · NOT YET COMMITTED</div>
+<pre id="public-github-result" class="trace" aria-live="polite">No public issue preview yet.</pre>
+<div class="foot">Preview is frozen for a maximum of five minutes, stored only in server memory. Changing the repository or workflow discards it. A pause, rule publish or other new local event invalidates its commit. No GitHub issue is edited.</div>
+</div></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -403,6 +429,8 @@ const refreshLocalWorkflows=async(preferred)=>{
  $("local-activate").disabled=!draft.options.length;
  $("local-run").disabled=!localRows.some(w=>w.workflow_id===active.value&&w.status==="ACTIVE");
  updateLocalControls(preferred);
+ if(publicGithubSnapshot)invalidatePublicGithub("Workflow state refreshed. Read and preview again.");
+ refreshPublicGithubButton();
  await refreshLocalHistory();
  }catch(error){$("local-workflows").textContent="Local registry unavailable: "+error.message;$("local-activate").disabled=true;$("local-run").disabled=true;}
 };
@@ -494,6 +522,77 @@ $("local-batch-commit").addEventListener("click",async()=>{
  }}finally{
   batchBusy=false;$("local-run-choice").disabled=false;$("local-batch-file").disabled=false;
   refreshBatchButton();
+ }
+});
+// Public issue intake never reads titles/bodies/authors or writes to GitHub.
+// Server holds a five-minute filtered categorical snapshot after user intent.
+let publicGithubRevision=0,publicGithubSnapshot=null,publicGithubBusy=false;
+const refreshPublicGithubButton=()=>{
+ const w=localRows.find(item=>item.workflow_id===$("local-run-choice").value);
+ const repo=$("public-github-repo").value.trim();
+ const format=/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
+ $("public-github-preview").disabled=publicGithubBusy||!w||w.status!=="ACTIVE"||!format.test(repo);
+};
+const invalidatePublicGithub=message=>{
+ publicGithubRevision++;publicGithubSnapshot=null;
+ $("public-github-commit").disabled=true;
+ $("public-github-result").textContent="No current source snapshot. Preview again.";
+ $("public-github-status").textContent=message||"Selection changed. Read and preview again before local import.";
+ refreshPublicGithubButton();
+};
+$("public-github-repo").addEventListener("input",()=>invalidatePublicGithub());
+$("local-run-choice").addEventListener("change",()=>invalidatePublicGithub());
+$("public-github-preview").addEventListener("click",async()=>{
+ const rev=++publicGithubRevision;
+ publicGithubSnapshot=null;$("public-github-commit").disabled=true;
+ const workflow_id=$("local-run-choice").value;
+ const repo=$("public-github-repo").value.trim();
+ publicGithubBusy=true;refreshPublicGithubButton();
+ $("public-github-status").textContent="Reading only public GitHub issue metadata · no database writes...";
+ try{
+  const outcome=await localPost("/api/local-github-preview",{workflow_id,repo});
+  if(rev!==publicGithubRevision)return;
+  $("public-github-result").textContent=JSON.stringify({
+   source:outcome.source,repo:outcome.repo,scanned:outcome.scanned,
+   ignored_count:outcome.ignored_count,new_count:outcome.new_count,
+   replay_count:outcome.replay_count,fetched_at:outcome.fetched_at||null,
+   rows:outcome.rows||[],external_dispatch_count:0},null,2);
+  if(outcome.status==="PUBLIC_GITHUB_PREVIEW_READY"){
+   publicGithubSnapshot={workflow_id,snapshot_id:outcome.snapshot_id};
+   $("public-github-commit").disabled=false;
+   $("public-github-status").textContent="PUBLIC PREVIEW READY · "+outcome.new_count+
+     " new · "+outcome.replay_count+" existing · valid for five minutes. No writes yet.";
+  }else{
+   $("public-github-status").textContent="Read succeeded, but no issues have the required explicit labels. Nothing to import.";
+  }
+ }catch(error){if(rev===publicGithubRevision){
+  $("public-github-status").textContent="PUBLIC READ BLOCKED · "+error.message;
+  $("public-github-result").textContent="No source snapshot available. No local database writes.";
+ }}finally{publicGithubBusy=false;refreshPublicGithubButton();}
+});
+$("public-github-commit").addEventListener("click",async()=>{
+ const snapshot=publicGithubSnapshot,rev=publicGithubRevision;
+ if(!snapshot||snapshot.workflow_id!==$("local-run-choice").value)return;
+ publicGithubBusy=true;$("public-github-commit").disabled=true;
+ $("public-github-repo").disabled=true;
+ $("local-run-choice").disabled=true;refreshPublicGithubButton();
+ $("public-github-status").textContent="Committing approved categorical snapshot to local SQLite only...";
+ try{
+  const outcome=await localPost("/api/local-github-commit",snapshot);
+  if(rev!==publicGithubRevision)return;
+  publicGithubSnapshot=null;
+  $("public-github-result").textContent=JSON.stringify(outcome,null,2);
+  $("public-github-status").textContent=outcome.status+" · "+outcome.new_count+
+    " saved locally · "+outcome.replay_count+" exact replays · no GitHub changes.";
+  await refreshLocalWorkflows(snapshot.workflow_id);
+ }catch(error){if(rev===publicGithubRevision){
+  publicGithubSnapshot=null;
+  $("public-github-status").textContent="IMPORT BLOCKED · "+error.message+
+     ". Read public issues again before retry.";
+  $("public-github-result").textContent="Local commit blocked or snapshot expired. No GitHub changes.";
+ }}finally{
+  publicGithubBusy=false;$("public-github-repo").disabled=false;
+  $("local-run-choice").disabled=false;refreshPublicGithubButton();
  }
 });
 refreshLocalWorkflows();
