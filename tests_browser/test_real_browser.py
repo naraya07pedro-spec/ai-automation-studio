@@ -449,6 +449,34 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#local-resume").click()
         expect(self.page.locator("#local-run")).to_be_enabled()
 
+    def test_public_github_read_ui_requires_active_workflow_and_valid_repo(self):
+        self.assertTrue(self.page.locator("#public-github-preview").is_disabled())
+        self.create_functional_local_workflow()
+        self.assertTrue(self.page.locator("#public-github-preview").is_disabled())
+        self.page.locator("#public-github-repo").fill("Octocat/Hello-World")
+        expect(self.page.locator("#public-github-preview")).to_be_enabled()
+        self.assertTrue(self.page.locator("#public-github-commit").is_disabled())
+        self.page.locator("#public-github-repo").fill("https://evil.example/secret")
+        self.assertTrue(self.page.locator("#public-github-preview").is_disabled())
+        self.assertTrue(self.page.locator("#public-github-commit").is_disabled())
+        self.assertIn("No current source snapshot",
+                      self.page.locator("#public-github-result").inner_text())
+
+    def test_public_github_read_ui_disabled_during_local_pause(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#public-github-repo").fill("Octocat/Hello-World")
+        expect(self.page.locator("#public-github-preview")).to_be_enabled()
+        self.page.locator("#local-pause").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "PAUSED_LOCAL")
+        self.assertTrue(self.page.locator("#public-github-preview").is_disabled())
+        self.assertTrue(self.page.locator("#public-github-commit").is_disabled())
+        self.page.locator("#local-resume").click()
+        expect(self.page.locator("#local-control-status")).to_contain_text(
+            "RESUMED_LOCAL")
+        expect(self.page.locator("#public-github-preview")).to_be_enabled()
+        # No real GitHub request is made by either browser gate test.
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())
