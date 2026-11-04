@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "prototype"))
 from lead_inquiry_flow import MockInquiryFlow
 from support_triage_flow import MockSupportTriage
 from appointment_followup_flow import MockAppointmentFollowup
+from crm_handoff_flow import MockCRMHandoff
 from lead_inquiry_demo_review import LocalMockReview, execution_timeline
 from lead_inquiry_template_catalog import (list_templates, setup_choices,
     validate_guided_setup, default_setup)
@@ -38,6 +39,7 @@ def create_handler(flow=None):
     review = LocalMockReview()
     triage = MockSupportTriage()
     appointments = MockAppointmentFollowup()
+    crm = MockCRMHandoff()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -70,7 +72,7 @@ def create_handler(flow=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -102,6 +104,11 @@ def create_handler(flow=None):
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/mock-crm-handoff":
+                with lock:
+                    result = crm.process(data)
+                self._send(422 if result["status"] == "BLOCKED" else 200, result)
                 return
             if self.path == "/api/mock-appointment":
                 with lock:
