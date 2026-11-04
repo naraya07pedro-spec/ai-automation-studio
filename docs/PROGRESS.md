@@ -809,3 +809,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No change to core storage architecture; prioritizing visible product utility first.
 
 **Next smallest slice:** UI execution-stage timeline, bounded mock follow-up draft and explicit review gate, then template gallery and setup flow.
+
+
+**Verified product-vertical CI evidence**
+- PR #29 revision `fc7a8785bc1d6de6c2e59fc6a295a41c4f688f8f`: [GitHub Actions run 41796205319](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41796205319), completed **success** for all Python 3.11, 3.12, 3.13 jobs.
+- All three jobs ran runtime drift gate, historic evidence reporting, fixture contract, and complete Python standard-library unittest suite. Logs: **296 tests per job, 0 failures**, **888 test executions** across three runtimes; 15 new real HTTP tests.
+- Tests use local `ThreadingHTTPServer` on ephemeral loopback ports and exercise the actual `MockInquiryFlow`. This does not constitute browser visual QA, hosted deployment, integration-provider verification, or production readiness.
+- This evidence update creates a new PR HEAD and must itself pass all matrix jobs before latest-head verification.
