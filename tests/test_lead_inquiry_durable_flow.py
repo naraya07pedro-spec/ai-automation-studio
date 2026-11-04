@@ -38,7 +38,7 @@ class DurableFlowIntegrationTests(unittest.TestCase):
         first = self.new_flow().process(self.config, self.event(service_requested="website"),
                                         ["service_requested"])
         self.assertEqual("READY_FOR_REVIEW", first["workflow_status"])
-        self.assertEqual("MOCK_COMPLETED", self.store.state("mock_inbox", "id-1").replace("COMPLETED", "MOCK_COMPLETED"))
+        self.assertEqual("COMPLETED", self.store.state("mock_inbox", "id-1"))
         second = self.new_flow().process(self.config, self.event(service_requested="website"),
                                          ["service_requested"])
         self.assertEqual("SKIPPED_DUPLICATE", second["workflow_status"])
