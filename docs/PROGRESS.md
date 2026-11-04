@@ -706,3 +706,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Node.js 20 deprecation warnings from older GitHub Actions dependencies remain a separate maintenance issue.
 
 **Next smallest slice:** Add an explicit compatibility matrix and process-isolation failure cases only where reproducible; preserve fixed references and do not silently accept unexpected SQLite dump changes.
+
+
+**Verified GitHub Actions evidence**
+- PR #26 commit `0f8f4bf2ddbd9603583e6a7275c7166cc24fc1b7`: [run 41790429511](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41790429511), completed **success**.
+- GitHub Actions runtime probe output: **Python 3.11.17**, **SQLite 3.45.1**, screening label `BASELINE_ELIGIBLE_NOT_PROVEN`. This is observed runner evidence for the tested commit, not a universal platform guarantee.
+- Synthetic fixture contract, runtime baseline reporting and full Python standard-library unittest suite succeeded. CI job log: **255 tests run, 0 failures** (242 previously plus 13 new subprocess/runtime tests).
+- Existing non-blocking Node.js 20 deprecation warning for older GitHub Actions dependencies remains.
+- This note is a docs-only commit with its own new head SHA; verify CI for that final head before calling it green.
