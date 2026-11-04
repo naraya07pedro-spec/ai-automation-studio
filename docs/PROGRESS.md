@@ -199,3 +199,27 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - PR #8 commit `19b57d6e8e46a39761a187347814f5847fef914c`: [Actions run 41683586998](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41683586998), completed **success**.
 - Both fixture validation and full unit test suite steps reported success; job log reports **55 tests run**.
 - This new progress-only commit needs its own follow-up CI status check before marking the PR head fully verified.
+
+
+## Slice 08 · 2026-11-04 · Durable mock event state and recovery gate
+
+**Goal:** Persist mock inquiry reservation/completion states across process restarts while refusing to blindly replay unknown work.
+
+**Completed**
+- Added `prototype/lead_inquiry_durable_state.py` with a bounded, standard-library-only SQLite proof of concept: atomic event reservations, canonical payload fingerprint, per-source keys, persistent `PENDING` / `COMPLETED` state, capacity limits and explicit connection closure.
+- Added `tests/test_lead_inquiry_durable_state.py` with 15 test methods for restart/reopen, duplicate, conflicting payload, two source namespaces, capacity exhaustion, malformed input, 40 concurrent reservations through distinct instances, and zero external dispatch.
+- All `PENDING` replays report `NEEDS_RECONCILIATION`, never automatically rerun the event or assume an external action succeeded.
+- This proof of concept does **not** replace the earlier in-memory flow or enable a real sender. No product architecture or database selection is implied.
+
+**Verification and evidence gates**
+- Read committed files back from GitHub branch; check test count and progress log.
+- GitHub Actions must finish successfully on the PR HEAD before claiming suite success. CI runs fixture contract and all standard-library tests.
+- Do not interpret a green mock test as crash-consistency proof under power loss, durable backup validation, distributed exactly-once delivery, or production readiness.
+
+**Limitations and risks**
+- Local file persistence requires a writable folder and must be protected by operating-system permissions. This spike has no encryption-at-rest, user identity, secrets, PII retention governance, migrations, backup/restore or corruption-recovery path.
+- SQLite is used **only for a bounded isolated experiment**; runtime/persistence architecture is not decided.
+- `mark_mock_completed` labels local mock processing only; not proof a real provider performed work.
+- The existing AC01–AC04 integrated prototype still uses in-memory deduplication. This durable store is not wired into its processing path yet.
+
+**Next smallest slice (proposed):** Wire the durable event store into the integrated mock workflow behind a safe explicit option, test restart behavior end to end and fail closed on file/lock/corruption errors. No external sends.
