@@ -1442,3 +1442,21 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The optional local agent browser endpoint, login/CSRF checks, concurrency guard, UI and documentation are shipped. It remains **off by default**, enabled only by starting `python app/local_server.py --enable-local-agent`. Ollama and a tool-capable model must be installed separately.
 - **Validation limit:** CI did not use a real Ollama installation or model weights; browser acceptance tested deterministic injected transport. Real model runtime, multi-turn memory, write-capable agent tools and autonomous workflow execution remain outstanding, and no SaaS features are implied.
 - This final progress entry is documentation-only after the verified squash merge.
+
+
+## Slice 49 · 2026-11-05 · Explicit opt-in bounded persistent local agent conversation
+
+**Product objective:** an actually usable open-source, user-controlled AI agent, not a subscription SaaS. Slice 48 provided authenticated single-turn local model chat; Slice 49 implements minimal, bounded conversation continuity rather than another mock business flow.
+
+**Implementation on `feat/opt-in-local-agent-conversation-slice-49`:**
+- New `app/local_agent_conversation.py`: small local-only SQLite conversation store, six most recent successful (model, user prompt, assistant answer) pairs, explicit clear, bounded text and shared write lock. A distinct state store, not workflow runtime, secret storage or autonomous agent memory.
+- `app/local_ollama_agent.py`: validated exact-shape prior user/assistant turns can be replayed as context, but never as additional system/tool authorization. Reject cross-model history and malformed/oversized records.
+- `app/local_server.py`: requires both `--enable-local-agent` and `--enable-agent-history` to open the plaintext history SQLite. Each request also requires an explicit boolean `remember:true`; default is stateless. Authenticated GET history and CSRF-protected POST clear; single-process agent gate shared with inference. No silent model switching; 409 requires clear first.
+- `web/index.html`: per-run save-context checkbox (off by default), refresh and delete controls, browser view rendered strictly as text, and sensitive history hidden on logout.
+- `tests/test_local_agent_conversation.py`: local DB, restart, capacity/clear, context schema rejection, no tool replay, auth, CSRF, stateless default and model pinning tests.
+- Browser fixture and Chromium E2E: isolated in-memory conversation in CI and new test for opt-in save/view/clear.
+- `docs/LOCAL_AGENT_CONVERSATION_V1.md`: commands and threat model, including plaintext and forensic deletion limits.
+
+**Verification gate:** all exact-head Python 3.11/3.12/3.13, Chromium, independent live public GitHub read-only and Windows fixture checks must succeed before merging. No real Ollama installation/model E2E is implied.
+
+**Remaining boundaries:** single owner and shared conversation, limited window rather than semantic long-term memory; local unencrypted SQLite; not for customer PII/secrets; model only has two read-only tools; no external business actions or background autonomous continuation.

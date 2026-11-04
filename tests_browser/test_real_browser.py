@@ -90,6 +90,23 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_agent_history_opt_in_visible_and_deletable(self):
+        expect(self.page.locator("#local-agent-remember")).to_be_enabled()
+        self.page.locator("#local-agent-history-clear").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "No saved turns")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-agent-prompt").fill("Remember this synthetic calculation")
+        self.page.locator("#local-agent-remember").check()
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-status")).to_contain_text("Tools: calculate")
+        self.page.locator("#local-agent-history-refresh").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "Remember this synthetic calculation")
+        self.page.locator("#local-agent-history-clear").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "No saved turns")
+
     def test_authenticated_local_agent_browser_panel(self):
         expect(self.page.locator("#local-agent-panel")).to_be_visible()
         expect(self.page.locator("#local-agent-send")).to_be_enabled()

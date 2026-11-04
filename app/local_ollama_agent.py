@@ -89,7 +89,7 @@ def ollama_transport(payload):
     return result
 
 
-def run_agent(prompt, model, transport=None):
+def run_agent(prompt, model, transport=None, history=None):
     """One user-initiated turn; model-generated calls never expand tool permissions."""
     if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
         raise AgentError("invalid_prompt")
@@ -97,7 +97,28 @@ def run_agent(prompt, model, transport=None):
             not all(c.isascii() and (c.isalnum() or c in "._:-") for c in model)):
         raise AgentError("invalid_model_name")
     transport = transport or ollama_transport
-    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]
+    # History is user-owned context only, never a source of tool permissions.
+    # The stored assistant text is not trusted as policy or tool output.
+    if history is None:
+        history = []
+    if type(history) is not list or len(history) > 6:
+        raise AgentError("invalid_agent_history")
+    messages = [{"role": "system", "content": SYSTEM}]
+    for pair in history:
+        if (type(pair) is not dict or set(pair) != {"model", "prompt", "answer"}
+                or type(pair["model"]) is not str
+                or type(pair["prompt"]) is not str
+                or not 1 <= len(pair["prompt"]) <= MAX_PROMPT
+                or type(pair["answer"]) is not str
+                or not 1 <= len(pair["answer"]) <= 3000):
+            raise AgentError("invalid_agent_history")
+        # Different model may have a different format and should not
+        # silently inherit a previous model's conversation.
+        if pair["model"] != model:
+            raise AgentError("agent_history_model_mismatch")
+        messages.extend([{"role": "user", "content": pair["prompt"]},
+                         {"role": "assistant", "content": pair["answer"]}])
+    messages.append({"role": "user", "content": prompt})
     executed = []
     for turn in range(MAX_TURNS):
         result = transport({"model": model, "messages": messages,

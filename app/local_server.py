@@ -21,6 +21,7 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
+from local_agent_conversation import LocalAgentConversation, ConversationError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -47,7 +48,7 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
                    operator_auth=None, source_policy=None, security_audit=None,
-                   local_agent_runner=None):
+                   local_agent_runner=None, agent_conversation=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -174,7 +175,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path == "/api/local-agent-capabilities" and not route.query:
                 self._send(200, {"enabled": local_agent_runner is not None,
                                  "tools": ["calculate", "utc_now"],
-                                 "local_only": True, "persisted": False})
+                                 "local_only": True,
+                                 "persisted": agent_conversation is not None})
+                return
+            if route.path == "/api/local-agent-history" and not route.query:
+                if local_agent_runner is None or agent_conversation is None:
+                    self._send(403, {"error": "agent_history_disabled"})
+                    return
+                try:
+                    self._send(200, {"turns": agent_conversation.snapshot(),
+                                     "storage": "local_plaintext"})
+                except ConversationError:
+                    self._send(503, {"error": "conversation_storage_unavailable"})
                 return
             if route.path == "/api/operator-audit":
                 params = parse_qs(route.query, keep_blank_values=True)
@@ -239,7 +251,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/operator-rotate", "/api/local-github-source-grant",
                                  "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
-                                 "/api/local-agent-run"):
+                                 "/api/local-agent-run", "/api/local-agent-clear"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -271,24 +283,63 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
                 return
+            if self.path == "/api/local-agent-clear":
+                if local_agent_runner is None or agent_conversation is None:
+                    self._send(403, {"error": "agent_history_disabled"})
+                    return
+                if type(data) is not dict or data:
+                    self._send(422, {"error": "invalid_clear_fields"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    agent_conversation.clear()
+                    self._send(200, {"status": "CLEARED_LOCAL", "turns": []})
+                except ConversationError:
+                    self._send(503, {"error": "conversation_storage_unavailable"})
+                finally:
+                    agent_gate.release()
+                return
             if self.path == "/api/local-agent-run":
                 if local_agent_runner is None:
                     self._send(403, {"error": "local_agent_disabled"})
                     return
-                if (type(data) is not dict or set(data) != {"model", "prompt"}
-                        or type(data["model"]) is not str or type(data["prompt"]) is not str):
+                if (type(data) is not dict
+                        or set(data) not in ({"model", "prompt"}, {"model", "prompt", "remember"})
+                        or type(data["model"]) is not str or type(data["prompt"]) is not str
+                        or ("remember" in data and type(data["remember"]) is not bool)):
+
                     self._send(422, {"error": "invalid_local_agent_request"})
+                    return
+                remember = data.get("remember", False)
+                if remember and agent_conversation is None:
+                    self._send(403, {"error": "agent_history_disabled"})
                     return
                 if not agent_gate.acquire(blocking=False):
                     self._send(429, {"error": "local_agent_busy"})
                     return
                 try:
                     try:
-                        outcome = local_agent_runner(data["prompt"], data["model"])
+                        prior = agent_conversation.snapshot() if remember else None
+                        if remember and prior and any(
+                                pair["model"] != data["model"] for pair in prior):
+                            self._send(409, {"error": "agent_history_model_mismatch"})
+                            return
+                        if remember:
+                            outcome = local_agent_runner(data["prompt"], data["model"],
+                                                         history=prior)
+                        else:
+                            outcome = local_agent_runner(data["prompt"], data["model"])
                         if type(outcome) is not dict or outcome.get("mode") != "LOCAL_MODEL":
                             self._send(502, {"error": "invalid_agent_result"})
                         else:
-                            self._send(200, outcome)
+                            if remember:
+                                agent_conversation.append(
+                                    data["model"], data["prompt"], outcome.get("answer"))
+                            self._send(200, {**outcome, "remembered": remember})
+                    except ConversationError:
+                        self._send(503, {"error": "conversation_storage_unavailable"})
                     except AgentError as exc:
                         self._send(422 if str(exc).startswith("invalid_") else 503,
                                    {"error": str(exc)})
@@ -499,7 +550,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     return Handler
 
 
-def start_local_server(port=8765, enable_local_agent=False):
+def start_local_server(port=8765, enable_local_agent=False,
+                       enable_agent_history=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -510,18 +562,24 @@ def start_local_server(port=8765, enable_local_agent=False):
     except BaseException:
         audit.close()
         raise
+    conversation = None
+    if enable_agent_history and enable_local_agent:
+        conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     try:
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
                            source_policy=source_policy, security_audit=audit,
-                           local_agent_runner=run_agent if enable_local_agent else None))
+                           local_agent_runner=run_agent if enable_local_agent else None,
+                           agent_conversation=conversation))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if conversation is not None:
+            conversation.close()
         core.close()
         audit.close()
 
@@ -554,7 +612,11 @@ def main(argv=None):
                        help="Use a one-time code to reset lost owner password offline.")
     parser.add_argument("--enable-local-agent", action="store_true",
                         help="Explicitly enable authenticated Ollama calls in browser.")
+    parser.add_argument("--enable-agent-history", action="store_true",
+                        help="Explicit opt-in local plaintext transcript storage.")
     args = parser.parse_args(argv)
+    if args.enable_agent_history and not args.enable_local_agent:
+        parser.error("--enable-agent-history also requires --enable-local-agent")
     home = Path.home() / ".ai-automation-studio"
     if args.enable_recovery or args.recover_owner:
         # Hold port ownership until on-disk verifier is fully replaced.
@@ -617,7 +679,8 @@ def main(argv=None):
         print("Local operator provisioned; password is never printed.")
         return
     try:
-        start_local_server(enable_local_agent=args.enable_local_agent)
+        start_local_server(enable_local_agent=args.enable_local_agent,
+                           enable_agent_history=args.enable_agent_history)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
