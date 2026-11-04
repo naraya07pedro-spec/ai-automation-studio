@@ -31,6 +31,8 @@ jobs:
           PYTHONPATH=prototype python -c "from lead_inquiry_runtime_contract import runtime_contract; print(runtime_contract())"
       - name: Reject pinned synthetic fixture drift
         run: python tools/check_runtime_drift.py
+      - name: Report historical runtime evidence versus current fixture
+        run: python tools/report_runtime_evidence.py
       - name: Validate synthetic fixture contract
         run: python tools/validate_fixture_contract.py
       - name: Run all standard-library tests

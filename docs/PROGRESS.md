@@ -748,3 +748,36 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Not a SQLite version matrix:** all three Python builds used SQLite 3.45.1 on Ubuntu runner; no proof for other SQLite versions, platforms or production backups.
 - Node.js 20 deprecation warnings remain non-blocking workflow maintenance debt.
 - The docs-only commit recording these results changes the PR HEAD SHA; verify all three CI jobs again on the new head before the final green claim.
+
+
+## Slice 26 · 2026-11-04 · Observed runtime evidence registry and simulated SQLite dump drift
+
+**Goal:** Separate exactly observed CI-compatible fixed synthetic fixtures from any claim of production runtime support, and ensure consistent-but-altered logical dumps still fail against pinned references.
+
+**Completed**
+- Verified PR #27 final-head three-job CI success and squash-merged into main; branched `feat/runtime-evidence-registry-slice-26`.
+- Added `prototype/lead_inquiry_runtime_evidence.py`: three exact tuples observed on [run 41792558426](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41792558426), Python 3.11.17 / 3.12.16 / 3.13.17 with SQLite 3.45.1 on Ubuntu; 267 tests per CI job. Registry returns detached records and does not infer compatibility for unseen versions. `production_supported` always false.
+- Added `tests/test_lead_inquiry_runtime_evidence.py` with **14 tests**: exact-match and unknown patch handling; unregistered SQLite/OS; detached snapshots; current drift cannot be overridden by historical green evidence; changed logical dump signature of all three copies fails reference checks; pinned references remain unchanged; no secrets/paths in reports.
+- Added `tools/report_runtime_evidence.py` and CI reporting step that distinguishes current fixture verdict from historic registration. Current drift remains blocking.
+- Added `docs/RUNTIME_EVIDENCE_REGISTRY.md` with exact-source records, evidence limitations, drift-injection scope, and procedure for reviewed future registry updates.
+
+**Verification gate**
+- Read files back from branch and check that all 3 Python jobs run fixture drift gate, evidence report, fixture contract and full stdlib unittest suite successfully on exact PR head. Do not claim 281/281 or any final count until the logs confirm.
+
+**Limits**
+- This is a manually maintained CI observation registry, not a signed attestation or production compatibility guarantee. Runtime probe's `UNTESTED_PYTHON` informational label still reflects the older 3.11-only version screen, while the registry captures exact 3.12/3.13 CI successes.
+- Tests simulate dump drift by swapping the fingerprint function; they do not execute different SQLite binary versions.
+- No live connector effects, real customer data, durable backup product, production authorization, or historical migrations.
+
+**Next smallest slice (proposed):** Align the runtime screen with exact observed evidence while preserving unregistered future patch behavior, and test a genuinely separate SQLite version where reproducible before making any expanded SQLite compatibility statement.
+
+
+**Verification evidence, repair and observed runtime drift (2026-11-04)**
+- PR #28 initial GitHub Actions run [41794018269](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41794018269) failed **before any jobs were created** due to a malformed workflow YAML line containing literal `\\n` escape sequences. Corrected the workflow step in commit `f374ccc85ad3359ae9114500ae76de5a9d508dc5`; no test failures were observed on the invalid-workflow run.
+- Corrected-run [41794192981](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41794192981), commit `f374ccc85ad3359ae9114500ae76de5a9d508dc5`: all three matrix jobs **success**, **281 unit tests per job, 0 failures**, 843 total unittest executions, 281 distinct test methods.
+- **Python 3.11.18 + SQLite 3.45.1:** current pinned fixture verification passed; historical registry intentionally returned `CURRENT_FIXTURE_MATCH_RUNTIME_UNREGISTERED` because original evidence was **3.11.17**, not 3.11.18. This is expected non-inheritance, not a failure of the current test.
+- **Python 3.12.16 + SQLite 3.45.1:** current fixture passed; `REGISTERED_AND_CURRENT_FIXTURE_MATCH`.
+- **Python 3.13.17 + SQLite 3.45.1:** current fixture passed; `REGISTERED_AND_CURRENT_FIXTURE_MATCH`.
+- All jobs ran current drift check, historical evidence report, fixture-contract validator, and full unittest suite. Every runtime report explicitly indicated `production_supported: false`.
+- All observed jobs used **SQLite 3.45.1**; this remains **one SQLite version**, not cross-SQLite-version compatibility evidence. The dump-format drift regression is an injected alternate hash, not another SQLite binary.
+- This documentation-only evidence commit changes the final PR HEAD SHA; require another successful three-job CI matrix on that exact commit before making a final latest-head pass claim.
