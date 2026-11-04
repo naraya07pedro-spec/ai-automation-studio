@@ -557,3 +557,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No schema migration, database selection, live integration or production deployment is performed.
 
 **Next smallest slice:** Harden fixture provenance and path-race isolation in the test harness; then create a regression-only consolidation plan across the two historical stores. Do not promote this rehearsal into production recovery tooling.
+
+
+**Verified GitHub Actions evidence**
+- PR #21 revision `9f5f67c8f27648c50edd6b6f67cc28daf0b01e16`: [Actions run 41782468132](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41782468132), completed **success**.
+- Synthetic fixture contract and Python stdlib unittest steps both passed. Job log reports **195 tests, 0 failures**, including 17 new recovery rehearsal tests.
+- Node.js 20 deprecation warnings remain for older GitHub Actions dependencies; they did not cause the test job to fail.
+- This documentation-only evidence commit changes the PR SHA and requires its own green GitHub Actions run before the final PR HEAD is marked verified.
