@@ -14,6 +14,7 @@ from local_operator_auth import LocalOperatorAuth
 from local_source_policy import LocalPublicSourcePolicy
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
+from local_agent_conversation import LocalAgentConversation
 from local_server import create_handler
 
 
@@ -28,7 +29,8 @@ def main():
     policy.grant("Octocat/Hello-World")
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
-    def fixture_local_agent(prompt, model):
+    conversation = LocalAgentConversation(":memory:")
+    def fixture_local_agent(prompt, model, history=None):
         return {"mode": "LOCAL_MODEL", "answer": "Fixture answer: " + str(len(prompt)),
                 "tools_used": ["calculate"], "external_dispatch_count": 0}
 
@@ -36,12 +38,14 @@ def main():
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
                        source_policy=policy, security_audit=audit,
-                       local_agent_runner=fixture_local_agent))
+                       local_agent_runner=fixture_local_agent,
+                       agent_conversation=conversation))
     try:
         server.serve_forever()
     finally:
         server.server_close()
         core.close()
+        conversation.close()
         audit.close()
         home.cleanup()
 
