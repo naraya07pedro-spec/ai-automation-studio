@@ -78,12 +78,14 @@ class PendingReviewTests(unittest.TestCase):
         self.assertEqual("INVALID_REVIEWER_REF",
                          self.review.acknowledge(ref, "", _ACK)["status"])
 
-    def test_completed_event_not_visible(self):
+    def test_direct_completion_does_not_hide_pending_event(self):
         self.pending()
         ref = self.review.list_pending()[0]["event_ref"]
-        self.store.mark_mock_completed("mock_inbox", "event-1")
-        self.assertEqual([], self.review.list_pending())
-        self.assertEqual("NOT_FOUND_OR_NOT_PENDING",
+        self.assertEqual("DIRECT_COMPLETION_DISABLED",
+                         self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
+        self.assertEqual("PENDING", self.store.state("mock_inbox", "event-1"))
+        self.assertEqual(1, len(self.review.list_pending()))
+        self.assertEqual("ACKNOWLEDGED_STILL_PENDING",
                          self.review.acknowledge(ref, "operator_1", _ACK)["status"])
 
     def test_invalid_limits_rejected(self):
