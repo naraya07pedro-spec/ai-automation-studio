@@ -20,6 +20,7 @@ from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
+from local_ollama_agent import run_agent, AgentError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -45,7 +46,8 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
-                   operator_auth=None, source_policy=None, security_audit=None):
+                   operator_auth=None, source_policy=None, security_audit=None,
+                   local_agent_runner=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -59,6 +61,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     knowledge = MockKnowledgeRouting()
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
+    agent_gate = threading.BoundedSemaphore(1)
     public_github = PublicGitHubReadOnlyIntake(core, batch,
                                                fetcher=github_fetcher,
                                                clock=github_clock,
@@ -168,6 +171,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path != "/" and route.path != "/api/health":
                 if not self._operator_authorized():
                     return
+            if route.path == "/api/local-agent-capabilities" and not route.query:
+                self._send(200, {"enabled": local_agent_runner is not None,
+                                 "tools": ["calculate", "utc_now"],
+                                 "local_only": True, "persisted": False})
+                return
             if route.path == "/api/operator-audit":
                 params = parse_qs(route.query, keep_blank_values=True)
                 if not route.query:
@@ -230,7 +238,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if self.path not in ("/api/operator-login", "/api/operator-logout",
                                  "/api/operator-rotate", "/api/local-github-source-grant",
                                  "/api/local-github-source-revoke",
-                                 "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit"):
+                                 "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
+                                 "/api/local-agent-run"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -261,6 +270,32 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/local-agent-run":
+                if local_agent_runner is None:
+                    self._send(403, {"error": "local_agent_disabled"})
+                    return
+                if (type(data) is not dict or set(data) != {"model", "prompt"}
+                        or type(data["model"]) is not str or type(data["prompt"]) is not str):
+                    self._send(422, {"error": "invalid_local_agent_request"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    try:
+                        outcome = local_agent_runner(data["prompt"], data["model"])
+                        if type(outcome) is not dict or outcome.get("mode") != "LOCAL_MODEL":
+                            self._send(502, {"error": "invalid_agent_result"})
+                        else:
+                            self._send(200, outcome)
+                    except AgentError as exc:
+                        self._send(422 if str(exc).startswith("invalid_") else 503,
+                                   {"error": str(exc)})
+                    except Exception:
+                        self._send(503, {"error": "local_agent_unavailable"})
+                finally:
+                    agent_gate.release()
                 return
             if self.path == "/api/operator-login":
                 if operator_auth is None:
@@ -464,7 +499,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     return Handler
 
 
-def start_local_server(port=8765):
+def start_local_server(port=8765, enable_local_agent=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -479,7 +514,8 @@ def start_local_server(port=8765):
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
-                           source_policy=source_policy, security_audit=audit))
+                           source_policy=source_policy, security_audit=audit,
+                           local_agent_runner=run_agent if enable_local_agent else None))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
@@ -516,6 +552,8 @@ def main(argv=None):
                        help="Create/rotate a high-entropy offline recovery code.")
     group.add_argument("--recover-owner", action="store_true",
                        help="Use a one-time code to reset lost owner password offline.")
+    parser.add_argument("--enable-local-agent", action="store_true",
+                        help="Explicitly enable authenticated Ollama calls in browser.")
     args = parser.parse_args(argv)
     home = Path.home() / ".ai-automation-studio"
     if args.enable_recovery or args.recover_owner:
