@@ -405,3 +405,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The three durable/review table experiments have not been consolidated; crash-consistency and independent auth remain unverified.
 
 **Next smallest slice (proposed):** Make grant issuance a server-owned, testable mock authority boundary rather than accepting an untrusted verifier and clock from the request; document trust roots, then audit all state-mutating mock interfaces before considering real integrations.
+
+
+**Verified GitHub Actions evidence**
+- PR #16 revision `f3dceb11fe050567f0d88df0e50150a3f87504f1`: [Actions run 41772289078](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41772289078), completed **success**.
+- Fixture contract validation and the full unittest suite both passed; GitHub job log reported **143 tests, 0 failures**. The legacy review file now has 13 denial/read-only cases and the single-use grant file has 16 cases.
+- An earlier intermediate PR run at commit `33aaaae4fea8f9551b31a8268115dc8c7499c0f0` had **141 passing tests**; two extra no-write/forged-ref regressions were added before this final code revision. Those prior passed tests are not treated as coverage of the new cases.
+- Node.js 20 deprecation warnings for older GitHub Actions dependencies remain. The warnings did not fail this run.
+- This evidence describes the code revision above; the docs-only commit containing this note requires a separate CI run before claiming the final PR HEAD passed.
