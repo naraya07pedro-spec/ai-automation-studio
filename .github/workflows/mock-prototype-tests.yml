@@ -11,7 +11,12 @@ permissions:
 jobs:
   mock-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    name: Python ${{ matrix.python-version }} mock verification
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,10 +25,12 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
       - name: Record mock runtime compatibility baseline
         run: |
           PYTHONPATH=prototype python -c "from lead_inquiry_runtime_contract import runtime_contract; print(runtime_contract())"
+      - name: Reject pinned synthetic fixture drift
+        run: python tools/check_runtime_drift.py
       - name: Validate synthetic fixture contract
         run: python tools/validate_fixture_contract.py
       - name: Run all standard-library tests
