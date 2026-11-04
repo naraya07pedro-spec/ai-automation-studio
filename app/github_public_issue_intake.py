@@ -243,24 +243,32 @@ class PublicGitHubReadOnlyIntake:
         if (type(wid) is not str or not ID_PATTERN.fullmatch(wid)
                 or type(snapshot_id) is not str or len(snapshot_id) != 32):
             return _error("invalid_github_commit_fields")
-        with self._lock:
-            self._prune()
-            record = self._snapshots.get(snapshot_id)
-            if record is None or record["workflow_id"] != wid:
-                return _error("github_snapshot_not_found", 409)
-            # One-time capability: consume even if underlying local rules
-            # or ledger changed. Re-preview is mandatory.
-            del self._snapshots[snapshot_id]
-        code, outcome = self.batch.commit({
-            "workflow_id": wid,
-            "csv_text": record["csv_text"],
-            "expected_version": record["expected_version"],
-            "preview_token": record["preview_token"],
-        })
-        if code != 200:
-            return code, outcome
-        return 200, {
-            **outcome,
-            "status": "PUBLIC_GITHUB_IMPORT_COMMITTED_LOCAL",
-            "source": "PUBLIC_GITHUB_ISSUES_READ_ONLY",
-        }
+        # Lock policy through local database commit: revocation cannot
+        # happen between permission check and local persistence.
+        from contextlib import nullcontext
+        guard = self.policy._lock if self.policy is not None else nullcontext()
+        with guard:
+            with self._lock:
+                self._prune()
+                record = self._snapshots.get(snapshot_id)
+                if record is None or record["workflow_id"] != wid:
+                    return _error("github_snapshot_not_found", 409)
+                if (self.policy is not None
+                        and not self.policy.is_allowed(
+                            record["source_repo"], record["source_policy_epoch"])):
+                    del self._snapshots[snapshot_id]
+                    return _error("public_source_permission_changed", 403)
+                del self._snapshots[snapshot_id]
+            code, outcome = self.batch.commit({
+                "workflow_id": wid,
+                "csv_text": record["csv_text"],
+                "expected_version": record["expected_version"],
+                "preview_token": record["preview_token"],
+            })
+            if code != 200:
+                return code, outcome
+            return 200, {
+                **outcome,
+                "status": "PUBLIC_GITHUB_IMPORT_COMMITTED_LOCAL",
+                "source": "PUBLIC_GITHUB_ISSUES_READ_ONLY",
+            }
