@@ -69,7 +69,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#operator-login-button").click()
         expect(self.page.locator("#operator-gate")).to_be_hidden()
         expect(self.page.locator("#operator-logout")).to_be_visible()
-        self.assertEqual(5, self.page.locator(".template-card").count())
+        expect(self.page.locator(".template-card")).to_have_count(5)
         self.assertEqual(5, self.page.locator(".mode-tag").filter(
             has_text="EXECUTABLE_MOCK").count())
         # The local server runs across test methods. Isolate each synthetic
