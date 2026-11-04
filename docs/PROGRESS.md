@@ -653,3 +653,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract validation and full Python standard-library unittest steps both passed. CI logs report **227 tests, 0 failures** (previous 212 plus 15 disposable-workspace tests).
 - GitHub Actions still emits a non-blocking Node.js 20 deprecation warning for older action dependencies.
 - This docs-only commit changes the PR head; verify its own CI run before reporting latest-head success.
+
+
+## Slice 23 · 2026-11-04 · Independent synthetic manifest reference verification and concurrent workspaces
+
+**Goal:** Detect fixtures that are consistently but incorrectly changed across source/backup/restore, and prove concurrent disposable recovery calls remain isolated in a bounded in-process test.
+
+**Completed**
+- Verified PR #24 exact HEAD CI succeeded and squash-merged it to main; created `feat/independent-recovery-manifest-slice-23`.
+- Added `prototype/lead_inquiry_manifest_verifier.py` with pinned logical SHA-256 reference digests and exact count maps for `EVENT_STATE_V1` and `LEGACY_DECISION_V1`. The verifier performs strict type/shape/status checks, does not import the fixture producer, and returns redacted validity/status only.
+- Updated `prototype/lead_inquiry_disposable_recovery.py` to gate every successful synthetic manifest through the independent verifier; if all three artifacts agree with each other but not with the pinned fixture reference, the API returns `FIXTURE_REFERENCE_MISMATCH` without a manifest.
+- Added `tests/test_lead_inquiry_manifest_verifier.py` with **15 tests** covering both pinned references, coordinated tampering of all three fingerprints or counts, schema mismatches, false success flags, exact integer checks, missing/extra fields, changed source data followed by consistent backup/restore, a 20-run concurrent two-schema batch, mixed valid/unsupported concurrent requests, and malformed or sensitive report redaction.
+- Added `docs/INDEPENDENT_MANIFEST_VERIFICATION.md` documenting the verification contract, concurrency test scope, and trust limitations.
+
+**Verification gate**
+- Read files and progress log back from GitHub branch; confirm 15 new test methods and inspect CI status on exact PR-head commit. Do not claim successful testing until fixture check and full unittest suite pass.
+
+**Limits**
+- Expected hashes are fixed **local** references, not externally signed provenance. A maintainer changing both definitions can evade drift detection. SQL dump format can be SQLite-version-sensitive.
+- Thread-pool tests do not simulate independent OS processes, adversarial locks, disk faults, real filesystem isolation, power loss, or distributed execution.
+- Disposable data only; no real backups retained, customer data used, provider work sent, historical records migrated, or final persistence architecture selected.
+- Existing CI Node.js 20 dependency deprecation warning remains unrelated maintenance debt.
+
+**Next smallest slice (proposed):** Record and enforce the synthetic fixture fingerprint contract against CI runtime versions, then add bounded subprocess and negative corruption tests before treating the fixture verification as portable across environments.
