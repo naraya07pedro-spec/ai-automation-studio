@@ -31,12 +31,14 @@ class DurableMockStoreTests(unittest.TestCase):
         self.assertEqual("PENDING", restarted.state("mock_inbox", "event-1"))
         self.assertEqual("NEEDS_RECONCILIATION", restarted.reserve("mock_inbox", "event-1", {})["status"])
 
-    def test_completed_survives_restart(self):
+    def test_completion_is_disabled_and_pending_survives_restart(self):
         self.reserve()
-        self.assertEqual("MOCK_COMPLETED", self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
+        self.assertEqual("DIRECT_COMPLETION_DISABLED",
+                         self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
         restarted = DurableMockEventStore(self.path)
-        self.assertEqual("COMPLETED", restarted.state("mock_inbox", "event-1"))
-        self.assertEqual("DUPLICATE", restarted.reserve("mock_inbox", "event-1", {})["status"])
+        self.assertEqual("PENDING", restarted.state("mock_inbox", "event-1"))
+        self.assertEqual("NEEDS_RECONCILIATION",
+                         restarted.reserve("mock_inbox", "event-1", {})["status"])
 
     def test_conflicting_payload_is_not_accepted(self):
         self.reserve(payload={"a": 1})
@@ -47,12 +49,13 @@ class DurableMockStoreTests(unittest.TestCase):
         self.assertEqual("RESERVED_PENDING", self.reserve(source="mock_b"))
 
     def test_missing_completion_cannot_create_record(self):
-        self.assertEqual("NOT_FOUND", self.store.mark_mock_completed("mock_inbox", "missing")["status"])
+        self.assertEqual("DIRECT_COMPLETION_DISABLED", self.store.mark_mock_completed("mock_inbox", "missing")["status"])
 
     def test_repeated_completion_is_idempotent(self):
         self.reserve()
         self.store.mark_mock_completed("mock_inbox", "event-1")
-        self.assertEqual("ALREADY_COMPLETED", self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
+        self.assertEqual("DIRECT_COMPLETION_DISABLED", self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
+        self.assertEqual("PENDING", self.store.state("mock_inbox", "event-1"))
 
     def test_capacity_exhaustion_does_not_evict(self):
         limited = DurableMockEventStore(self.path, max_events=1)
@@ -72,7 +75,7 @@ class DurableMockStoreTests(unittest.TestCase):
     def test_reject_live_source_and_invalid_id(self):
         self.assertEqual("MOCK_ONLY", self.reserve(source="gmail"))
         self.assertEqual("INVALID_ID", self.reserve(event_id=" "))
-        self.assertEqual("INVALID_ID", self.store.mark_mock_completed("gmail", "x")["status"])
+        self.assertEqual("DIRECT_COMPLETION_DISABLED", self.store.mark_mock_completed("gmail", "x")["status"])
 
     def test_invalid_payload_and_oversize(self):
         self.assertEqual("INVALID_PAYLOAD", self.store.reserve("mock_inbox", "x", ["not a dict"])["status"])

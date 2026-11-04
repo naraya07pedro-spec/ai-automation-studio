@@ -125,10 +125,12 @@ class MockGrantIssuerTests(unittest.TestCase):
         self.assertEqual(1, statuses.count("ACKNOWLEDGED_HOLD"))
         self.assertEqual(29, statuses.count("GRANT_ALREADY_USED"))
 
-    def test_completed_source_event_denies_token(self):
+    def test_direct_completion_cannot_bypass_pending_grant(self):
         token = self.issue()["token"]
-        self.store.mark_mock_completed("mock_inbox", "event-one")
-        self.assertEqual("NOT_PENDING", self.consume(token)["status"])
+        self.assertEqual("DIRECT_COMPLETION_DISABLED",
+                         self.store.mark_mock_completed("mock_inbox", "event-one")["status"])
+        self.assertEqual("ACKNOWLEDGED_HOLD", self.consume(token)["status"])
+        self.assertEqual("PENDING", self.store.state("mock_inbox", "event-one"))
 
     def test_legacy_preflight_bypass_is_rejected(self):
         token = self.issue()["token"]

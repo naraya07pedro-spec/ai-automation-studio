@@ -473,3 +473,34 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Both synthetic fixture contract check and full Python stdlib unittest step succeeded. Job logs report **162 tests, 0 failures**, including 14 new orchestrator tests.
 - Existing Node.js 20 deprecation warning persists for older GitHub Actions dependencies. This did not fail the run and remains maintenance debt.
 - This docs-only progress update changes the commit SHA; GitHub Actions must be rechecked for the new PR head before its CI status is treated as verified.
+
+
+## Slice 17 · 2026-11-04 · Disable direct mock event completion
+
+**Goal:** Remove the unsafe direct transition from an unresolved `PENDING` inquiry to `COMPLETED`, including the automatic completion inside the mock integrated workflow, without pretending a mock classification proves an external effect.
+
+**Completed**
+- Confirmed PR #18 latest-head CI passed and squash-merged PR #18 to main.
+- Updated `prototype/lead_inquiry_durable_state.py`: `mark_mock_completed` is a deny-only compatibility shim returning `DIRECT_COMPLETION_DISABLED`. No SQLite write or source-event status transition occurs.
+- Updated `prototype/lead_inquiry_flow.py`: durable mode requires only `reserve` and `state`; it no longer calls completion. A new inquiry remains `PENDING` after qualification, while a replay reports `BLOCKED_RECONCILIATION` and conflicts remain blocked.
+- Reworked six existing regression files to check denial/no state mutation, restart reconciliation and unsupported completion. A stale-state race test retains its purpose through a direct database write **only inside the test**, illustrating that SQLite access remains a bypass outside the supported API.
+- Updated `docs/MOCK_MUTATION_AUDIT.md` with the new status and residual bypasses.
+
+**Verification gate**
+- Read all changed files back from GitHub branch. Confirm tests no longer depend on direct completion succeeding.
+- Check fixture contract and full unittest suite on the exact PR HEAD before asserting a passing test count.
+
+**Important limits**
+- Existing records already `COMPLETED` before the change are **not** migrated or rewritten. The database CHECK still includes that historical state for compatibility.
+- The review grant mechanism only records `ACKNOWLEDGED_HOLD`; it still cannot prove external delivery or complete an event.
+- Direct SQLite writes and certain other mock mutators remain possible to code with filesystem access. This change does not enforce process isolation, permissions, real identity or trusted provider evidence.
+- Python/SQLite remain an isolated mock prototype, not an application architecture commitment. There are no real sends.
+
+**Next smallest slice (proposed):** Define migration and retention controls for legacy COMPLETED records, then reduce duplicate durable-store APIs without destroying inspectable historical data. Do not introduce live completion paths until independent evidence and authorization exist.
+
+
+**GitHub Actions verification evidence**
+- PR #19 commit `77f9cb02811667d2b775cd72627bbb4b8d495475`: [run 41776287184](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41776287184), completed **success**.
+- Fixture contract and full Python standard-library unittest steps both succeeded. CI job log: **162 tests run, 0 failures**. Test count stayed constant because this slice revised existing tests to enforce deny-only semantics rather than adding test methods.
+- A Node.js 20 deprecation warning remains for older GitHub Action dependencies; it did not fail this run.
+- This documentation-only commit requires a fresh GitHub Actions result on the new SHA before claiming latest-HEAD success.

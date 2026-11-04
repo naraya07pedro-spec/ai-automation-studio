@@ -34,15 +34,15 @@ class DurableFlowIntegrationTests(unittest.TestCase):
     def event(identity="id-1", **inquiry):
         return {"source_event_id": identity, "inquiry": inquiry}
 
-    def test_complete_inquiry_survives_restart_without_reprocessing(self):
+    def test_reservation_survives_restart_without_claimed_completion(self):
         first = self.new_flow().process(self.config, self.event(service_requested="website"),
                                         ["service_requested"])
         self.assertEqual("READY_FOR_REVIEW", first["workflow_status"])
-        self.assertEqual("COMPLETED", self.store.state("mock_inbox", "id-1"))
+        self.assertEqual("PENDING", self.store.state("mock_inbox", "id-1"))
         second = self.new_flow().process(self.config, self.event(service_requested="website"),
                                          ["service_requested"])
-        self.assertEqual("SKIPPED_DUPLICATE", second["workflow_status"])
-        self.assertEqual("DUPLICATE", second["deduplication"]["status"])
+        self.assertEqual("BLOCKED_RECONCILIATION", second["workflow_status"])
+        self.assertEqual("NEEDS_RECONCILIATION", second["deduplication"]["status"])
         self.assertIsNone(second["qualification"])
 
     def test_missing_fact_persisted_but_not_inferred(self):
@@ -57,7 +57,7 @@ class DurableFlowIntegrationTests(unittest.TestCase):
             self.config, self.event("ac04", **inquiry),
             self.cases["AC04"]["input"]["required_qualification_fields"]
         )
-        self.assertEqual("SKIPPED_DUPLICATE", replay["workflow_status"])
+        self.assertEqual("BLOCKED_RECONCILIATION", replay["workflow_status"])
 
     def test_pending_after_restart_blocks_replay_and_auto_completion(self):
         self.store.reserve("mock_inbox", "pending", {"service_requested": "website"})
@@ -112,25 +112,26 @@ class DurableFlowIntegrationTests(unittest.TestCase):
         class BrokenStore:
             def reserve(self, *_):
                 raise sqlite3.OperationalError("secret/path/database damaged")
-            def mark_mock_completed(self, *_):
-                raise AssertionError("must not reach completion")
+            def state(self, *_):
+                return "NOT_FOUND"
         result = self.new_flow(BrokenStore()).process(
             self.config, self.event(service_requested="web"), ["service_requested"])
         self.assertEqual("BLOCKED", result["workflow_status"])
         self.assertEqual("STORAGE_UNAVAILABLE", result["deduplication"]["status"])
         self.assertNotIn("secret/path", json.dumps(result))
 
-    def test_completion_failure_leaves_uncertain_outcome_blocked(self):
+    def test_flow_never_calls_completion_even_if_store_has_it(self):
         store = self.store
-        class IncompleteStore:
+        class TrapStore:
             def reserve(self, source, identity, payload):
                 return store.reserve(source, identity, payload)
+            def state(self, *_):
+                return "PENDING"
             def mark_mock_completed(self, *_):
-                raise sqlite3.OperationalError("disk inaccessible")
-        result = self.new_flow(IncompleteStore()).process(
+                raise AssertionError("unsafe completion invoked")
+        first = self.new_flow(TrapStore()).process(
             self.config, self.event(service_requested="web"), ["service_requested"])
-        self.assertEqual("BLOCKED", result["workflow_status"])
-        self.assertEqual("STORAGE_UNAVAILABLE", result["deduplication"]["status"])
+        self.assertEqual("READY_FOR_REVIEW", first["workflow_status"])
         self.assertEqual("PENDING", self.store.state("mock_inbox", "id-1"))
         replay = self.new_flow().process(
             self.config, self.event(service_requested="web"), ["service_requested"])

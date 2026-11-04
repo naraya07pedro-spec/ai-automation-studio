@@ -23,9 +23,9 @@ class MockInquiryFlow:
         """
         if durable_store is not None and not (
             callable(getattr(durable_store, "reserve", None))
-            and callable(getattr(durable_store, "mark_mock_completed", None))
+            and callable(getattr(durable_store, "state", None))
         ):
-            raise TypeError("durable_store must implement reserve and mark_mock_completed")
+            raise TypeError("durable_store must implement reserve and state")
         self._durable_store = durable_store
         self._dedup = None if durable_store is not None else InMemoryDeduplicator(max_events=max_events)
 
@@ -80,18 +80,9 @@ class MockInquiryFlow:
             }.get(dedup["status"], "BLOCKED")
             return result
 
-        if durable:
-            # Reserve is committed first; a process crash here leaves PENDING.
-            # A restart must not reclassify it as a fresh action.
-            try:
-                completion = self._durable_store.mark_mock_completed(source, event_id)
-            except (sqlite3.Error, OSError):
-                result["deduplication"] = {"status": "STORAGE_UNAVAILABLE", "external_dispatch_count": 0}
-                return result
-            if completion["status"] != "MOCK_COMPLETED":
-                result["deduplication"] = completion
-                return result
-
+        # A durable reservation remains PENDING. Do not infer a successful
+        # provider action from local qualification or advance completion.
+        # Replay must be reconciled explicitly; no automatic retry or send.
         result["qualification"] = qualification
         result["workflow_status"] = (
             "NEEDS_REVIEW"

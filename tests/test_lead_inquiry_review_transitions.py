@@ -94,9 +94,10 @@ class LegacyReviewDisabledTests(unittest.TestCase):
         self.assertEqual("OPEN", reopened.inspect("mock_inbox", "evt")["status"])
         self.assertEqual(0, reopened.inspect("mock_inbox", "evt")["version"])
 
-    def test_completed_event_is_not_inspectable_as_pending(self):
-        self.store.mark_mock_completed("mock_inbox", "evt")
-        self.assertEqual("NOT_PENDING", self.transitions.inspect("mock_inbox", "evt")["status"])
+    def test_direct_completion_cannot_hide_pending_review(self):
+        self.assertEqual("DIRECT_COMPLETION_DISABLED",
+                         self.store.mark_mock_completed("mock_inbox", "evt")["status"])
+        self.assertEqual("OPEN", self.transitions.inspect("mock_inbox", "evt")["status"])
 
     def test_invalid_mock_source_rejected_for_inspection(self):
         self.assertEqual("INVALID_EVENT", self.transitions.inspect("gmail", "evt")["status"])

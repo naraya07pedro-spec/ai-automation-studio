@@ -98,9 +98,10 @@ class ReconciliationPreflightTests(unittest.TestCase):
         self.assertEqual("INVALID_OPERATOR_REFERENCE", out["preflight_status"])
         self.assertNotIn("secret@example.com", json.dumps(out))
 
-    def test_already_completed_is_not_pending(self):
-        self.store.mark_mock_completed("mock_inbox", "event-1")
-        self.assertEqual("NOT_PENDING", self.check()["preflight_status"])
+    def test_direct_completion_cannot_turn_pending_into_completed(self):
+        self.assertEqual("DIRECT_COMPLETION_DISABLED",
+                         self.store.mark_mock_completed("mock_inbox", "event-1")["status"])
+        self.assertEqual("PRECHECK_PASSED_NO_TRANSITION", self.check()["preflight_status"])
 
     def test_storage_failure_blocks_without_leak(self):
         class Broken:
@@ -113,7 +114,11 @@ class ReconciliationPreflightTests(unittest.TestCase):
 
     def test_state_change_during_verification_is_detected(self):
         def verifier(*_):
-            self.store.mark_mock_completed("mock_inbox", "event-1")
+            # Simulate a state change using a direct SQLite write that is
+            # deliberately outside the supported API trust boundary.
+            with self.store._connect() as db:
+                db.execute("UPDATE mock_events SET state='COMPLETED' "
+                           "WHERE source=? AND event_id=?", ("mock_inbox", "event-1"))
             return True
         self.assertEqual("STALE_STATE", self.check(verifier=verifier)["preflight_status"])
 
