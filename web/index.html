@@ -16,7 +16,7 @@
 <main>
 <header><div class="brand">A<span>•</span> Automation Studio</div><span class="tag">LOCAL SANDBOX / NO EXTERNAL SENDS</span></header>
 <section class="hero"><div class="eyebrow">01 / EXPLORE REAL WORKFLOW BEHAVIOR</div><h1>From inquiry to decision. <span style="color:#86e3cb">Without the guesswork.</span></h1><p>Run a deterministic lead inquiry workflow against synthetic data. Inspect every decision, duplicate check and unresolved field. No account, API key, or live CRM required.</p><div class="steps"><span>01 Intake</span><span>02 Validate</span><span>03 Deduplicate</span><span>04 Qualify</span><span>05 Review gate</span></div></section>
-<section id="template-gallery" aria-label="Workflow template gallery"><div class="gallery-header"><div><div class="eyebrow">TEMPLATE LIBRARY · EXPLICIT AVAILABILITY</div><h2 style="font-size:25px;letter-spacing:-.04em;margin:8px 0 0">Explore workflows</h2></div><span class="tag">1 MOCK EXECUTABLE · 4 PREVIEWS</span></div><div id="gallery" class="gallery" aria-live="polite"><p class="muted">Loading verified template metadata…</p></div></section>
+<section id="template-gallery" aria-label="Workflow template gallery"><div class="gallery-header"><div><div class="eyebrow">TEMPLATE LIBRARY · EXPLICIT AVAILABILITY</div><h2 style="font-size:25px;letter-spacing:-.04em;margin:8px 0 0">Explore workflows</h2></div><span class="tag">2 MOCK EXECUTABLE · 3 PREVIEWS</span></div><div id="gallery" class="gallery" aria-live="polite"><p class="muted">Loading verified template metadata…</p></div></section>
 <div class="layout">
 <section class="panel"><div class="kicker">BUSINESS VIEW · TEMPLATE 01</div><h2>Lead Inquiry Qualification</h2><p class="muted">Choose sample business details. Run twice using the same event ID to see duplicate protection. Try an empty field to see validation respond.</p>
 <section aria-label="Guided mock setup" id="setup-panel"><div class="kicker" style="margin-top:22px">GUIDED SETUP · VALIDATE BEFORE RUN</div><p class="setup-info">Select only synthetic adapters. These controls never connect to a real CRM, AI provider, or email service.</p><form id="setup-form"><div class="setup-grid">
@@ -47,6 +47,25 @@
 <div class="review-actions"><button type="button" class="secondary" id="ack" disabled>Acknowledge review</button><button type="button" class="secondary" id="reject" disabled>Reject draft</button></div><div id="review-status" class="foot" role="status" aria-live="polite">No review action available.</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div class="kicker">REDACTED EXECUTION JSON</div><button class="secondary" type="button" id="copy">Copy trace</button></div><pre id="trace" class="trace" aria-live="polite">No execution yet. Submit the synthetic lead form to inspect the result.</pre><div class="foot">Process-local deduplication resets when the server restarts. No persistent identity or provider receipts.</div>
 </section></div>
+<section class="panel" id="triage-panel" style="margin-top:20px" aria-label="Support triage mock workflow">
+<div class="kicker">BUSINESS VIEW · TEMPLATE 02 · EXECUTABLE MOCK</div><h2>Support Request Triage</h2>
+<p class="muted">Route a synthetic support ticket to a simulated queue. All rules are deterministic, no AI inference or actual ticket creation.</p>
+<div class="layout"><div>
+<form id="triage-form">
+<div class="field"><label for="ticket-id">Synthetic ticket ID</label><input id="ticket-id" value="ticket-demo-001" maxlength="80" pattern="[A-Za-z0-9_-]+" required></div>
+<div class="field"><label for="ticket-category">Issue category</label><select id="ticket-category"><option value="technical">Technical</option><option value="access">Account access</option><option value="billing">Billing</option><option value="general">General</option></select></div>
+<div class="field"><label for="ticket-severity">Severity</label><select id="ticket-severity"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></div>
+<div class="field"><label for="ticket-impact">Customer impacted?</label><select id="ticket-impact"><option value="false">No</option><option value="true">Yes</option></select></div>
+<button class="primary" id="triage-run" type="submit">Run mock support triage →</button>
+</form></div><div>
+<div class="status" id="triage-status" role="status" aria-live="polite">AWAITING RUN</div>
+<div class="result"><div class="line"><span>Workflow state</span><strong id="triage-state">Not started</strong></div>
+<div class="line"><span>Mock queue</span><strong id="triage-queue">Not assigned</strong></div>
+<div class="line"><span>Urgency</span><strong id="triage-urgency">Not assessed</strong></div>
+<div class="line"><span>External dispatches</span><strong id="triage-dispatch">0</strong></div></div>
+<div class="kicker" style="margin-top:20px">SERVER-DERIVED SUPPORT TIMELINE</div>
+<div id="triage-timeline" class="timeline" aria-live="polite">No support workflow execution yet.</div>
+<div class="notice">MOCK ONLY. No ticket is opened, no person is contacted, and no customer data is retained.</div></div></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -58,10 +77,10 @@ for(const id of ["source","destination","follow_up_policy","timezone","monthly_b
 $("setup-form").addEventListener("submit",async event=>{event.preventDefault();setupValid=false;$("run").disabled=true;$("setup-status").textContent="Validating synthetic setup…";
 try{const response=await fetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(setupPayload())});const data=await response.json();setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;}});
 const loadGallery=async()=>{try{const [catalogResponse,setupResponse]=await Promise.all([fetch("/api/templates"),fetch("/api/setup-choices")]);if(!catalogResponse.ok||!setupResponse.ok)throw Error("unavailable");const catalog=await catalogResponse.json();const choices=await setupResponse.json();
-if(catalog.executable_count!==1||catalog.preview_count!==4||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
+if(catalog.executable_count!==2||catalog.preview_count!==3||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
 const gallery=$("gallery");gallery.replaceChildren();for(const template of catalog.templates){const card=document.createElement("article");card.className="template-card";if(template.status==="EXECUTABLE_MOCK")card.setAttribute("aria-current","true");
 const cat=document.createElement("div");cat.className="category";cat.textContent=template.category;const title=document.createElement("h3");title.textContent=template.title;const desc=document.createElement("p");desc.textContent=template.description;const mode=document.createElement("div");mode.className="mode-tag"+(template.status==="EXECUTABLE_MOCK"?"":" preview");mode.textContent=template.status;
-const open=document.createElement("button");open.type="button";open.textContent=template.status==="EXECUTABLE_MOCK"?"Configure mock":"Preview only";open.disabled=template.status!=="EXECUTABLE_MOCK";if(!open.disabled)open.addEventListener("click",()=>$("setup-panel").scrollIntoView({behavior:"smooth"}));card.append(cat,title,desc,mode,open);gallery.append(card);}templatesLoaded=true;
+const open=document.createElement("button");open.type="button";open.textContent=template.status==="EXECUTABLE_MOCK"?"Configure mock":"Preview only";open.disabled=template.status!=="EXECUTABLE_MOCK";if(!open.disabled)open.addEventListener("click",()=>$(template.id==="support-triage"?"triage-panel":"setup-panel").scrollIntoView({behavior:"smooth"}));card.append(cat,title,desc,mode,open);gallery.append(card);}templatesLoaded=true;
 }catch(error){$("gallery").textContent="Template metadata could not be verified. The mock setup cannot be activated.";templatesLoaded=false;$("run").disabled=true;}};
 loadGallery();
 $("demo").addEventListener("submit",async event=>{
@@ -84,6 +103,12 @@ const reviewDecision=async decision=>{if(!reviewToken)return;const token=reviewT
 try{const response=await fetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
 $("ack").addEventListener("click",()=>reviewDecision("ACKNOWLEDGE"));
 $("reject").addEventListener("click",()=>reviewDecision("REJECT"));
+$("triage-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("triage-run");button.disabled=true;$("triage-status").textContent="RUNNING MOCK TRIAGE";
+try{const input={event_id:$("ticket-id").value,category:$("ticket-category").value,severity:$("ticket-severity").value,customer_impact:$("ticket-impact").value==="true"};
+const response=await fetch("/api/mock-triage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});const data=await response.json();if(!response.ok)throw Error("rejected");
+$("triage-state").textContent=data.status;$("triage-queue").textContent=data.queue;$("triage-urgency").textContent=data.urgency;$("triage-dispatch").textContent=String(data.external_dispatch_count);
+$("triage-status").textContent="MOCK ONLY · NO TICKET CREATED";const steps=$("triage-timeline");steps.replaceChildren();for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=stage.stage;const value=document.createElement("strong");value.textContent=stage.status;item.append(label,value);steps.append(item);}
+}catch(error){$("triage-status").textContent="MOCK TRIAGE REJECTED · NO SIDE EFFECTS";$("triage-queue").textContent="Not assigned";$("triage-urgency").textContent="Not assessed";}finally{button.disabled=false;}});
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
 </body></html>

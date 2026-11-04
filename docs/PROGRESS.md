@@ -878,3 +878,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Python **3.11, 3.12 and 3.13** CI matrix jobs each ran **325 unit tests with zero failures** (previous 308 + 17 guided setup/catalog tests); total **975 test executions** across three interpreters, 325 distinct unittest methods per runtime.
 - All three jobs passed pinned fixture runtime drift check, runtime evidence reporting, synthetic fixture contract and full stdlib unittest suite. New HTTP tests verify preview blocking, revalidation before reservation, and draft-only no-token handling.
 - Automatic HTTP and source inspection do not prove pixel-level browser behavior, accessibility completeness or production safety. This documentation commit creates a new PR HEAD; verify its own three-job CI before claiming final-head success.
+
+
+## Slice 30 · 2026-11-04 · Second executable local mock workflow: Support Request Triage
+
+**Goal:** Advance from one to two real sandbox-executable templates while keeping the UI and backend evidence honest, isolated, and regression tested.
+
+**Completed**
+- Confirmed PR #31 exact-head three-version Python CI success and squash-merged into `main`. Created `feat/support-triage-mock-slice-30`.
+- Added `prototype/support_triage_flow.py`: deterministic input validation, category-to-mock-queue routing, urgency rules, process-local bounded dedup (identical repeat vs conflicting reuse), redacted six-stage execution timeline, and zero dispatches. Independent of Lead Inquiry dedup.
+- Updated `prototype/lead_inquiry_template_catalog.py`: `Support Request Triage` now `EXECUTABLE_MOCK`; catalog accurately returns **2 executable mock / 3 preview**.
+- Updated `app/local_server.py`: POST `/api/mock-triage` uses shared local concurrency lock and existing request size, MIME and origin/host checks.
+- Updated `web/index.html`: standalone synthetic support ticket form, real API execution, mock queue/priority and server-derived timeline UI. Gallery navigation scrolls to the appropriate executable workflow; old Lead Inquiry remains available.
+- Updated historical `tests/test_local_template_setup_http.py` catalog expectations to 2/3 without weakening support for existing Lead Inquiry setup.
+- Added `tests/test_support_triage_http.py`: **18 new HTTP and engine tests** for routing, priority, distinct dedup state, repeat/conflict, rejected inputs, capacity, redaction and safe origin.
+- Added `docs/SUPPORT_TRIAGE_SECOND_VERTICAL.md` defining scope and limitations.
+
+**Verification gate**
+- Read branch changes back and require all GitHub Actions Python 3.11/3.12/3.13 matrix jobs pass pinned runtime drift, evidence reporting, fixture contract and complete unittest suite. Record actual tests/run IDs after success; no preliminary green claims.
+
+**Limits**
+- This is a deterministic mock triage, not AI model inference; no real tickets or external queues are created. In-memory state resets on process restart.
+- Still no hosted demo, browser manual visual QA, real provider integration, persistent run history or custom workflow editor. No production-authorization boundary.
+- Next priority is third genuinely executable mock workflow, not a cosmetic preview promotion.
+
+
+**Verified CI evidence**
+- PR #32 revision `4d78633360209a6aca09c2b23ca6343c49eb1f79`: [GitHub Actions run 41804382233](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41804382233), completed **success** across Python 3.11, 3.12, 3.13.
+- Each CI job ran **343 tests, 0 failures** (325 previously plus 18 new support-triage tests); total **1029 test executions**, 343 distinct test methods per runtime.
+- Both supported local mock workflows are now exercised by real HTTP tests. No evidence of hosted browser experience, external support queue, AI inference, or persistent processing.
+- This note is a docs-only revision that changes the PR HEAD SHA; require its three-job Actions run to pass again before claiming latest-head CI green.

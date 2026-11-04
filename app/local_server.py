@@ -13,6 +13,7 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
 from lead_inquiry_flow import MockInquiryFlow
+from support_triage_flow import MockSupportTriage
 from lead_inquiry_demo_review import LocalMockReview, execution_timeline
 from lead_inquiry_template_catalog import (list_templates, setup_choices,
     validate_guided_setup, default_setup)
@@ -34,6 +35,7 @@ def create_handler(flow=None):
     workflow = flow if flow is not None else MockInquiryFlow()
     lock = threading.Lock()
     review = LocalMockReview()
+    triage = MockSupportTriage()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -66,7 +68,7 @@ def create_handler(flow=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -98,6 +100,11 @@ def create_handler(flow=None):
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/mock-triage":
+                with lock:
+                    result = triage.process(data)
+                self._send(200 if result["status"] != "BLOCKED" else 422, result)
                 return
             if self.path == "/api/mock-setup":
                 verdict = validate_guided_setup(data)
