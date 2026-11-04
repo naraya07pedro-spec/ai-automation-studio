@@ -16,7 +16,7 @@
 <main>
 <header><div class="brand">A<span>•</span> Automation Studio</div><span class="tag">LOCAL SANDBOX / NO EXTERNAL SENDS</span></header>
 <section class="hero"><div class="eyebrow">01 / EXPLORE REAL WORKFLOW BEHAVIOR</div><h1>From inquiry to decision. <span style="color:#86e3cb">Without the guesswork.</span></h1><p>Run a deterministic lead inquiry workflow against synthetic data. Inspect every decision, duplicate check and unresolved field. No account, API key, or live CRM required.</p><div class="steps"><span>01 Intake</span><span>02 Validate</span><span>03 Deduplicate</span><span>04 Qualify</span><span>05 Review gate</span></div></section>
-<section id="template-gallery" aria-label="Workflow template gallery"><div class="gallery-header"><div><div class="eyebrow">TEMPLATE LIBRARY · EXPLICIT AVAILABILITY</div><h2 style="font-size:25px;letter-spacing:-.04em;margin:8px 0 0">Explore workflows</h2></div><span class="tag">3 MOCK EXECUTABLE · 2 PREVIEWS</span></div><div id="gallery" class="gallery" aria-live="polite"><p class="muted">Loading verified template metadata…</p></div></section>
+<section id="template-gallery" aria-label="Workflow template gallery"><div class="gallery-header"><div><div class="eyebrow">TEMPLATE LIBRARY · EXPLICIT AVAILABILITY</div><h2 style="font-size:25px;letter-spacing:-.04em;margin:8px 0 0">Explore workflows</h2></div><span class="tag">4 MOCK EXECUTABLE · 1 PREVIEW</span></div><div id="gallery" class="gallery" aria-live="polite"><p class="muted">Loading verified template metadata…</p></div></section>
 <div class="layout">
 <section class="panel"><div class="kicker">BUSINESS VIEW · TEMPLATE 01</div><h2>Lead Inquiry Qualification</h2><p class="muted">Choose sample business details. Run twice using the same event ID to see duplicate protection. Try an empty field to see validation respond.</p>
 <section aria-label="Guided mock setup" id="setup-panel"><div class="kicker" style="margin-top:22px">GUIDED SETUP · VALIDATE BEFORE RUN</div><p class="setup-info">Select only synthetic adapters. These controls never connect to a real CRM, AI provider, or email service.</p><form id="setup-form"><div class="setup-grid">
@@ -90,6 +90,29 @@
 <div class="notice">SIMULATION ONLY. No background scheduling, notifications, calendar changes, or external dispatch.</div>
 </div></div>
 </section>
+<section class="panel" id="crm-panel" style="margin-top:20px" aria-label="CRM Handoff mock workflow">
+<div class="kicker">BUSINESS VIEW · TEMPLATE 04 · EXECUTABLE MOCK</div>
+<h2>CRM Handoff Preview</h2>
+<p class="muted">Prepare an allowlisted synthetic record mapping for a mock CRM. This is not connected to any CRM. The review flag is a demonstration input, not authenticated approval.</p>
+<div class="layout"><div>
+<form id="crm-form">
+<div class="field"><label for="crm-id">Synthetic handoff ID</label><input id="crm-id" value="crm-demo-001" maxlength="80" pattern="[A-Za-z0-9_-]+" required></div>
+<div class="field"><label for="crm-stage">Lifecycle stage</label><select id="crm-stage"><option value="qualified">Qualified</option><option value="new">New</option><option value="needs_review">Needs review</option></select></div>
+<div class="field"><label for="crm-service">Service category</label><select id="crm-service"><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+<div class="field"><label for="crm-owner">Mock owner queue</label><select id="crm-owner"><option value="sales">Sales</option><option value="solutions">Solutions</option><option value="operations">Operations</option></select></div>
+<div class="field"><label for="crm-mapping">Field mapping profile</label><select id="crm-mapping"><option value="standard">Standard</option><option value="compact">Compact</option></select></div>
+<div class="field"><label for="crm-review">Local review demonstration</label><select id="crm-review"><option value="false">Not acknowledged: block preview</option><option value="true">Mock acknowledged: prepare preview only</option></select></div>
+<button id="crm-run" type="submit" class="primary">Prepare mock CRM mapping →</button>
+</form></div><div>
+<div id="crm-status" class="status" role="status" aria-live="polite">AWAITING RUN</div>
+<div class="result"><div class="line"><span>Workflow state</span><strong id="crm-state">Not started</strong></div>
+<div class="line"><span>Deduplication</span><strong id="crm-dedup">Not assessed</strong></div>
+<div class="line"><span>Review gate</span><strong id="crm-review-result">Not verified</strong></div>
+<div class="line"><span>CRM records created</span><strong id="crm-created">0</strong></div></div>
+<div class="kicker" style="margin-top:20px">ALLOWLISTED MAPPED RECORD PREVIEW</div><pre id="crm-record" class="trace" aria-live="polite">No synthetic record prepared.</pre>
+<div class="kicker" style="margin-top:20px">SERVER-DERIVED CRM TIMELINE</div><div id="crm-timeline" class="timeline" aria-live="polite">No execution yet.</div>
+<div class="notice">NEVER WRITES TO CRM. No credentials, verified operator identity, or external effects.</div>
+</div></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -101,10 +124,10 @@ for(const id of ["source","destination","follow_up_policy","timezone","monthly_b
 $("setup-form").addEventListener("submit",async event=>{event.preventDefault();setupValid=false;$("run").disabled=true;$("setup-status").textContent="Validating synthetic setup…";
 try{const response=await fetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(setupPayload())});const data=await response.json();setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;}});
 const loadGallery=async()=>{try{const [catalogResponse,setupResponse]=await Promise.all([fetch("/api/templates"),fetch("/api/setup-choices")]);if(!catalogResponse.ok||!setupResponse.ok)throw Error("unavailable");const catalog=await catalogResponse.json();const choices=await setupResponse.json();
-if(catalog.executable_count!==3||catalog.preview_count!==2||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
+if(catalog.executable_count!==4||catalog.preview_count!==1||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
 const gallery=$("gallery");gallery.replaceChildren();for(const template of catalog.templates){const card=document.createElement("article");card.className="template-card";if(template.status==="EXECUTABLE_MOCK")card.setAttribute("aria-current","true");
 const cat=document.createElement("div");cat.className="category";cat.textContent=template.category;const title=document.createElement("h3");title.textContent=template.title;const desc=document.createElement("p");desc.textContent=template.description;const mode=document.createElement("div");mode.className="mode-tag"+(template.status==="EXECUTABLE_MOCK"?"":" preview");mode.textContent=template.status;
-const open=document.createElement("button");open.type="button";open.textContent=template.status==="EXECUTABLE_MOCK"?"Configure mock":"Preview only";open.disabled=template.status!=="EXECUTABLE_MOCK";if(!open.disabled)open.addEventListener("click",()=>$(template.id==="support-triage"?"triage-panel":template.id==="appointment-followup"?"appointment-panel":"setup-panel").scrollIntoView({behavior:"smooth"}));card.append(cat,title,desc,mode,open);gallery.append(card);}templatesLoaded=true;
+const open=document.createElement("button");open.type="button";open.textContent=template.status==="EXECUTABLE_MOCK"?"Configure mock":"Preview only";open.disabled=template.status!=="EXECUTABLE_MOCK";if(!open.disabled)open.addEventListener("click",()=>$(template.id==="support-triage"?"triage-panel":template.id==="appointment-followup"?"appointment-panel":template.id==="crm-handoff"?"crm-panel":"setup-panel").scrollIntoView({behavior:"smooth"}));card.append(cat,title,desc,mode,open);gallery.append(card);}templatesLoaded=true;
 }catch(error){$("gallery").textContent="Template metadata could not be verified. The mock setup cannot be activated.";templatesLoaded=false;$("run").disabled=true;}};
 loadGallery();
 $("demo").addEventListener("submit",async event=>{
@@ -142,6 +165,16 @@ const timeline=$("appointment-timeline");timeline.replaceChildren();
 for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const title=document.createElement("span");title.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(title,state);timeline.append(item);}
 $("appointment-status").textContent=response.ok?"MOCK PLAN EVALUATED · NOTHING SENT":"INVALID SYNTHETIC INPUT · NO SEND";
 }catch(error){$("appointment-status").textContent="LOCAL APPOINTMENT DEMO UNAVAILABLE · NO SEND";$("appointment-sent").textContent="0";}finally{button.disabled=false;}
+});
+$("crm-form").addEventListener("submit",async event=>{
+event.preventDefault();const button=$("crm-run");button.disabled=true;$("crm-status").textContent="BUILDING SYNTHETIC RECORD PREVIEW";
+try{const payload={event_id:$("crm-id").value,lead_stage:$("crm-stage").value,service_code:$("crm-service").value,owner_queue:$("crm-owner").value,mapping_profile:$("crm-mapping").value,review_acknowledged:$("crm-review").value==="true"};
+const response=await fetch("/api/mock-crm-handoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+const data=await response.json();$("crm-state").textContent=data.status||"BLOCKED";$("crm-dedup").textContent=data.deduplication||"NOT_RUN";$("crm-review-result").textContent=data.review_gate||"NOT_VERIFIED";$("crm-created").textContent=data.crm_record_created?"1":"0";
+$("crm-record").textContent=data.record_preview?JSON.stringify(data.record_preview,null,2):"No record prepared. No CRM write occurred.";
+const timeline=$("crm-timeline");timeline.replaceChildren();for(const step of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=step.stage;const state=document.createElement("strong");state.textContent=step.status;item.append(label,state);timeline.append(item);}
+$("crm-status").textContent=response.ok?"MOCK EVALUATION COMPLETE · ZERO CRM WRITES":"INVALID MOCK INPUT · ZERO CRM WRITES";
+}catch(error){$("crm-status").textContent="LOCAL CRM DEMO UNAVAILABLE · NO WRITE";$("crm-created").textContent="0";}finally{button.disabled=false;}
 });
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
