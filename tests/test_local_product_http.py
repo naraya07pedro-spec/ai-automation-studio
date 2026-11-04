@@ -42,7 +42,8 @@ class LocalProductHTTPTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Lead Inquiry Qualification", body)
-        self.assertIn(b'fetch("/api/mock-run"', body)
+        self.assertIn(b'appFetch("/api/mock-run"', body)
+        self.assertIn(b'"X-AAS-CSRF":operatorCsrf', body)
         self.assertIn(b"INSPECT ENGINEERING", body)
 
     def test_first_valid_event_returns_ready_for_review(self):
