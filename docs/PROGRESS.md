@@ -564,3 +564,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract and Python stdlib unittest steps both passed. Job log reports **195 tests, 0 failures**, including 17 new recovery rehearsal tests.
 - Node.js 20 deprecation warnings remain for older GitHub Actions dependencies; they did not cause the test job to fail.
 - This documentation-only evidence commit changes the PR SHA and requires its own green GitHub Actions run before the final PR HEAD is marked verified.
+
+
+## Slice 20 · 2026-11-04 · Synthetic recovery path hardening and non-destructive storage consolidation plan
+
+**Goal:** Reduce obvious filesystem alias/overwrite failure modes in the synthetic-only SQLite backup rehearsal and decide a safe way to approach two semantically incompatible legacy store experiments.
+
+**Completed**
+- Checked PR #21 latest-head CI was successful, squash-merged it to main, and created `feat/synthetic-recovery-hardening-slice-20`.
+- Updated `prototype/lead_inquiry_synthetic_recovery.py`: preflight checks **both** destination paths before any backup file is created; existing outputs return `DESTINATION_EXISTS`; symlinked destination parent chains and targets are rejected; resolved path aliases return `PATH_COLLISION`; output reservation stays exclusive with `O_NOFOLLOW` where available.
+- Expanded `tests/test_lead_inquiry_synthetic_recovery.py` from **17 to 24 tests** with seven new checks covering destination symlinks, parent symlinks, aliases, pre-existing restore paths and invalid restore parents without creating backup artifacts. Existing tests now assert the specific non-overwrite status.
+- Added `docs/STORAGE_CONSOLIDATION_PLAN.md`: compares legacy decision-only schema against event-state schema, rejects direct semantic conflation, and favors designing a separate explicit canonical data contract later. **No migration or permanent database decision.**
+- All operations remain local to disposable synthetic fixtures; no real customers, provider sends, original database migration or destructive cleanup.
+
+**Verification gate**
+- Read files back from GitHub branch, count tests, and verify fixture contract and full unittest suite on exact PR-head SHA. Do not claim CI passed without the workflow evidence.
+
+**Risks and trade-offs**
+- File checks are preflight guards, **not** a sandbox or race-free filesystem API. Concurrent adversarial symlink swaps, hard-link aliasing, source marker spoofing and direct SQLite writes remain possible. The fixture marker still proves no provenance.
+- Existing successful backups may remain on disk when the restore stage fails. The hardening avoids creating a new backup for *pre-existing* restore targets but cannot guarantee all-or-nothing artifact creation under process death.
+- SQL dump hashing compares logical backup vs restore, not independently signed evidence. No power-loss, production recovery, encryption, identity control, remote backup custody or actual migration is tested.
+- Node.js 20 deprecation warning for older CI actions remains separate maintenance debt.
+
+**Next smallest slice (proposed):** Add negative tests for source/backup hard-link aliasing, mid-operation failures and artifact consistency; consider a disposable-workspace-only API that does not accept arbitrary filesystem paths. Continue to keep originals untouched.
+
+
+**Verified GitHub Actions evidence**
+- PR #22 code-and-docs commit `8ef0ed38b06ef7b960a8b3e508d046ea2edad356`: [Actions run 41784222344](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41784222344), completed **success**.
+- Fixture-contract validation and the full stdlib Python unittest job both passed; job log reported **202 tests run, 0 failures** (previous 195 plus seven recovery-hardening tests).
+- Node.js 20 deprecation warning remains in older GitHub Actions dependency versions; this was non-blocking.
+- The docs-only commit recording this result requires its own successful GitHub Actions run on the new PR HEAD before that final SHA can be marked verified.

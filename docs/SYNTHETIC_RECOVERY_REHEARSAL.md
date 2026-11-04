@@ -25,3 +25,12 @@ Only status, schema name, aggregate count, and match result are returned. The or
 Run `python -m unittest discover -s tests -v` and the synthetic fixture validator in CI. Inspect test failures before claiming success. Before any real migration: use independent secured backups, restoration under an operator-approved procedure, explicit data ownership and retention controls, verified access boundaries, workload quiescence, and a rollback rehearsal.
 
 See `docs/LEGACY_MIGRATION_GATE.md` and `docs/MOCK_MUTATION_AUDIT.md`.
+
+
+## Slice 20 hardening note
+
+The rehearsal now checks both destination paths before creating any output. An existing backup or restore path returns `DESTINATION_EXISTS`; resolved alias collisions return `PATH_COLLISION`. Symlink targets and symlinked parent directories are rejected; exclusive file creation uses `O_NOFOLLOW` where available.
+
+This reduces accidental partial artifacts and obvious path aliases. **It does not eliminate TOCTOU races, hard-link aliases, malicious source-marker injection, external writers or privilege bypass.** Keep the tool inside an isolated test workspace and do not treat it as a secure production backup utility.
+
+See `docs/STORAGE_CONSOLIDATION_PLAN.md` for the non-destructive compatibility strategy.
