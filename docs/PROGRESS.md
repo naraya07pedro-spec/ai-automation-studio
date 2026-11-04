@@ -466,3 +466,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Duplicate durable-store prototypes remain for future consolidation.
 
 **Next smallest slice (proposed):** Quarantine the remaining direct mock-completion path and test that a caller cannot make an unresolved event appear completed through the supported orchestration path. Do not assume the facade alone solves privilege isolation.
+
+
+**Verified GitHub Actions evidence**
+- PR #18 commit `b1cc49c597a656640d231de6d80808440327c296`: [run 41773730741](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41773730741) completed **success**.
+- Both synthetic fixture contract check and full Python stdlib unittest step succeeded. Job logs report **162 tests, 0 failures**, including 14 new orchestrator tests.
+- Existing Node.js 20 deprecation warning persists for older GitHub Actions dependencies. This did not fail the run and remains maintenance debt.
+- This docs-only progress update changes the commit SHA; GitHub Actions must be rechecked for the new PR head before its CI status is treated as verified.
