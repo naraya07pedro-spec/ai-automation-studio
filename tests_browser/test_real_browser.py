@@ -95,7 +95,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertTrue(self.page.locator("#run").is_enabled())
         self.page.locator("#run").click()
         expect(self.page.locator("#workflow")).to_contain_text("READY_FOR_REVIEW")
-        self.assertEqual(7, self.page.locator("#timeline .stage").count())
+        self.assertEqual(7, self.page.locator("#lead-timeline .stage").count())
         self.assertIn("NEVER_SENT", self.page.locator("#draft").inner_text())
         self.page.locator("#ack").click()
         expect(self.page.locator("#review-status")).to_contain_text("ACKNOWLEDGED_LOCAL_ONLY")
