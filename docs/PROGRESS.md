@@ -594,3 +594,25 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Fixture-contract validation and the full stdlib Python unittest job both passed; job log reported **202 tests run, 0 failures** (previous 195 plus seven recovery-hardening tests).
 - Node.js 20 deprecation warning remains in older GitHub Actions dependency versions; this was non-blocking.
 - The docs-only commit recording this result requires its own successful GitHub Actions run on the new PR HEAD before that final SHA can be marked verified.
+
+
+## Slice 21 · 2026-11-04 · Synthetic recovery fault injection and source-alias isolation
+
+**Goal:** Exercise hard-link source aliasing and failures between backup/restore stages on isolated synthetic mock SQLite files. Never claim success on partially completed recovery and never alter the original.
+
+**Completed**
+- Verified PR #22 exact-head GitHub Actions success, squash-merged PR #22 to main, branched `feat/synthetic-recovery-faults-slice-21`.
+- Updated `prototype/lead_inquiry_synthetic_recovery.py` to reject source files with more than one hard link, and sources reached via symlinked parent directories. Added four internal no-op checkpoint seams for controlled, in-process fault injection **in tests only**, not as public request parameters.
+- Added `tests/test_lead_inquiry_recovery_faults.py` with **10** regression tests: failures at `backup_reserved`, `backup_copied`, `restore_reserved`, and `restore_copied`; no false-success result; partial artifact persistence and retry nonoverwrite; hard-linked original/source-alias rejection; symlinked source parent; unchanged successful path; and propagation of programmer AssertionError rather than masking it as an operational error.
+- No live provider connections, actual historical record conversions, database selection or external actions.
+
+**Verification gate**
+- Read source, tests and progress log back from GitHub branch. Require fixture contract and all Python unittest tests to pass on the exact PR HEAD before asserting CI green.
+
+**Residual risks**
+- Hardlink count and parent-path checks reduce obvious alias mistakes, but cannot ensure race-free filesystem isolation against malicious concurrent changes, mount remapping or privileged processes. The fixture marker remains self-asserted rather than cryptographic provenance.
+- Fault injection uses Python exceptions at deterministic checkpoints. It does **not** simulate kill -9, power failure, filesystem corruption under load or true multi-process adversarial races.
+- Partial backup and restore files intentionally remain on disk when operations fail, and retries cannot reuse their paths. The report must not be interpreted as a transactional all-or-nothing recovery guarantee.
+- Existing `COMPLETED` records are preserved as historical unverified state. No actual external delivery evidence is verified.
+
+**Next smallest slice (proposed):** Isolate backup experiments inside a newly created disposable workspace, harden output verification and produce a deterministic artifact manifest for review. Continue deferring real migration and production recovery until operator trust, path isolation and provenance are independently validated.
