@@ -314,3 +314,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Two earlier durable-store prototypes still coexist. This slice makes no new storage backend or final architecture selection.
 
 **Next smallest slice (proposed):** Add a fully mock-only, versioned state-transition test contract with atomic compare-and-set and real verifier integration requirements written explicitly. Avoid enabling completion, live connectors, or outbound effects without independently verified identity and evidence gates.
+
+
+**Verified GitHub Actions evidence**
+- PR #13 commit `73d799b73533abf98f85bbf5b71464bc1b28160b`: [Actions run 41766863355](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41766863355), completed **success**.
+- Fixture validation and the full stdlib unittest job both passed; job log reported **114 tests run, 0 failures**, including the 17 tests newly introduced in slice 11.
+- Node.js 20 deprecation warning remains in the CI action dependencies but did not fail the test job.
+- The docs-only progress-log commit that adds this note requires a fresh CI result on its new SHA before the final PR HEAD can be marked verified.
