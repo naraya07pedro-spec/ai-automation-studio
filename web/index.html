@@ -253,8 +253,10 @@ let operatorCsrf=null;
 const rawFetch=window.fetch.bind(window);
 const appFetch=(url,options={})=>{
  const method=(options.method||"GET").toUpperCase();
- if(method!=="POST")return rawFetch(url,options);
- return rawFetch(url,{...options,headers:{
+ if(method!=="POST")return window.fetch(url,options);
+ // Keep the currently installed fetch implementation, so browser tests
+ // can genuinely delay real HTTP responses and protect async ordering.
+ return window.fetch(url,{...options,headers:{
   ...(options.headers||{}),"X-AAS-CSRF":operatorCsrf||""}});
 };
 let latest="";let reviewToken=null;let setupValid=false;let templatesLoaded=false;
