@@ -110,6 +110,85 @@ class LiveProbeEvidenceTests(unittest.TestCase):
                           "do not log this title", "secret email"):
             self.assertNotIn(forbidden, str(summary))
 
+    def test_explicit_expected_fixture_is_found_on_the_provider_page(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World", fetcher=lambda _: [VALID],
+            expected_issue_number=102, require_eligible=True)
+        self.assertEqual(0, code)
+        self.assertEqual("FOUND_WITH_REQUIRED_LIVE_LABELS",
+                         proof["expected_fixture"])
+        self.assertEqual(102, proof["expected_issue_number"])
+        self.assertEqual("NOT_ATTEMPTED", proof["temporary_import"])
+
+    def test_exact_fixture_is_written_with_decision_parity_in_memory_only(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World", fetcher=lambda _: [VALID],
+            expected_issue_number=102, require_eligible=True,
+            check_ephemeral_import=True)
+        self.assertEqual(0, code)
+        self.assertEqual("COMMITTED_IN_EPHEMERAL_SQLITE",
+                         proof["expected_fixture"])
+        self.assertTrue(proof["historical_decisions_match_preview"])
+        self.assertEqual(1, proof["temporarily_written_event_count"])
+        self.assertEqual(0, proof["external_dispatch_count"])
+
+    def test_other_matching_issue_cannot_substitute_for_expected_fixture(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World", fetcher=lambda _: [VALID],
+            expected_issue_number=103, require_eligible=True,
+            check_ephemeral_import=True)
+        self.assertEqual(5, code)
+        self.assertEqual("EXPECTED_FIXTURE_NOT_VERIFIED", proof["status"])
+        self.assertEqual("EXPECTED_FIXTURE_NOT_ON_FIRST_PAGE",
+                         proof["label_mapping"])
+        self.assertEqual("NOT_ATTEMPTED", proof["temporary_import"])
+        self.assertNotIn("historical_decisions_match_preview", proof)
+
+    def test_missing_expected_fixture_and_no_eligible_issue_is_a_failure(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World", fetcher=lambda _: [],
+            expected_issue_number=102)
+        self.assertEqual(5, code)
+        self.assertEqual("EXPECTED_FIXTURE_NOT_VERIFIED", proof["status"])
+        self.assertEqual("NOT_ATTEMPTED", proof["temporary_import"])
+
+    def test_invalid_fixture_number_does_not_call_remote_provider(self):
+        for invalid in (0, -1, 1000000000, True, "102", 0.5):
+            called=[]
+            code, proof = live_probe.probe_public_github(
+                "octocat/Hello-World",
+                expected_issue_number=invalid,
+                fetcher=lambda r: called.append(r))
+            self.assertEqual(2, code, invalid)
+            self.assertEqual("NOT_CHECKED", proof["live_transport"])
+            self.assertEqual([], called)
+
+    def test_expected_fixture_is_not_allowed_to_be_pull_request(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World",
+            fetcher=lambda _: [{**VALID, "pull_request": {}}],
+            expected_issue_number=102, check_ephemeral_import=True)
+        self.assertEqual(5, code)
+        self.assertEqual("EXPECTED_FIXTURE_NOT_VERIFIED", proof["status"])
+
+    def test_fixture_with_missing_required_label_is_not_accepted(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World",
+            fetcher=lambda _: [{**VALID, "labels": LABELS[:2]}],
+            expected_issue_number=102, check_ephemeral_import=True)
+        self.assertEqual(5, code)
+        self.assertEqual(0, proof["eligible_first_page"])
+
+    def test_fixture_decision_proof_cannot_contain_source_free_text(self):
+        code, proof = live_probe.probe_public_github(
+            "octocat/Hello-World",
+            fetcher=lambda _: [VALID],
+            expected_issue_number=102, check_ephemeral_import=True)
+        self.assertEqual(0, code)
+        self.assertNotIn("someone@example.com", str(proof))
+        self.assertNotIn("never-log-identity", str(proof))
+        self.assertNotIn("do not log this title", str(proof))
+
     def test_pull_request_is_not_eligible_even_with_matching_labels(self):
         code, result = live_probe.probe_public_github(
             "octocat/Hello-World", fetcher=lambda _: [

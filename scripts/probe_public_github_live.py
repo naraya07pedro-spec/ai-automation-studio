@@ -10,6 +10,7 @@ A temporary in-memory local import can be checked *only* with an explicit
 CLI switch and only if genuinely eligible labeled issues are returned.
 """
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -25,11 +26,17 @@ PROBE_ID = "public_probe_flow"
 
 
 def probe_public_github(repo, *, require_eligible=False,
-                        check_ephemeral_import=False, fetcher=None):
+                        check_ephemeral_import=False, expected_issue_number=None,
+                        fetcher=None):
     """Return (exit_code, redacted proof). No provider payload escapes."""
     safe_repo = PublicGitHubReadOnlyIntake._check_repo(repo)
     if safe_repo is None:
         return 2, {"status": "INVALID_PUBLIC_REPOSITORY",
+                   "live_transport": "NOT_CHECKED"}
+    if expected_issue_number is not None and (
+            type(expected_issue_number) is not int
+            or not 0 < expected_issue_number <= 999999999):
+        return 2, {"status": "INVALID_EXPECTED_FIXTURE_NUMBER",
                    "live_transport": "NOT_CHECKED"}
     core = LocalWorkflowCore(":memory:")
     try:
@@ -72,10 +79,29 @@ def probe_public_github(repo, *, require_eligible=False,
         if result["status"] == "NO_MATCHING_PUBLIC_ISSUES":
             summary["label_mapping"] = "NO_ELIGIBLE_ISSUES_ON_FIRST_PAGE"
             summary["temporary_import"] = "NOT_ATTEMPTED"
+            if expected_issue_number is not None:
+                summary["status"] = "EXPECTED_FIXTURE_NOT_VERIFIED"
+                summary["expected_issue_number"] = expected_issue_number
+                return 5, summary
             if require_eligible or check_ephemeral_import:
                 summary["status"] = "LIVE_MAPPING_NOT_VERIFIED"
                 return 3, summary
             return 0, summary
+        # Require the SPECIFIC, known, synthetic GitHub issue in the actual
+        # provider preview; another conveniently labeled issue is not proof.
+        expected_id = None
+        if expected_issue_number is not None:
+            repo_hash = hashlib.sha256(
+                safe_repo.lower().encode("ascii")).hexdigest()[:12]
+            expected_id = f"gh_{repo_hash}_{expected_issue_number}"
+            if not any(row["event_id"] == expected_id for row in result["rows"]):
+                summary["status"] = "EXPECTED_FIXTURE_NOT_VERIFIED"
+                summary["label_mapping"] = "EXPECTED_FIXTURE_NOT_ON_FIRST_PAGE"
+                summary["expected_issue_number"] = expected_issue_number
+                summary["temporary_import"] = "NOT_ATTEMPTED"
+                return 5, summary
+            summary["expected_issue_number"] = expected_issue_number
+            summary["expected_fixture"] = "FOUND_WITH_REQUIRED_LIVE_LABELS"
         summary["label_mapping"] = "VERIFIED_WITH_LIVE_LABELS"
         summary["temporary_import"] = "NOT_ATTEMPTED"
         if check_ephemeral_import:
@@ -87,14 +113,33 @@ def probe_public_github(repo, *, require_eligible=False,
                 summary["temporary_import"] = "FAILED"
                 return 4, summary
             history_code, history = core.history(PROBE_ID)
-            if (history_code != 200
-                    or history["total"] != committed["new_count"]
-                    or committed["external_dispatch_count"] != 0):
+            # Prove exact event identities, decisions, reasons and pinned
+            # version survive the real preview -> local batch commit path.
+            preview_by_id = {row["event_id"]: row for row in result["rows"]
+                             if row["disposition"] == "NEW_LOCAL"}
+            history_by_id = {row["event_id"]: row for row in history.get("runs", [])}
+            exact_history = (
+                history_code == 200
+                and history["total"] == committed["new_count"]
+                and committed["replay_count"] == 0
+                and committed["external_dispatch_count"] == 0
+                and len(preview_by_id) == len(history_by_id)
+                and set(preview_by_id) == set(history_by_id)
+                and all(
+                    history_by_id[key]["decision"] == event["decision"]
+                    and history_by_id[key]["reason"] == event["reason"]
+                    and history_by_id[key]["workflow_version"] == 1
+                    for key, event in preview_by_id.items())
+                and (expected_id is None or expected_id in history_by_id))
+            if not exact_history:
                 summary["status"] = "TEMPORARY_HISTORY_MISMATCH"
                 summary["temporary_import"] = "FAILED"
                 return 4, summary
             summary["temporary_import"] = "VERIFIED_IN_MEMORY_ONLY"
             summary["temporarily_written_event_count"] = history["total"]
+            summary["historical_decisions_match_preview"] = True
+            if expected_id is not None:
+                summary["expected_fixture"] = "COMMITTED_IN_EPHEMERAL_SQLITE"
         return 0, summary
     finally:
         core.close()
@@ -110,11 +155,15 @@ def main(argv=None):
     parser.add_argument("--check-ephemeral-import", action="store_true",
                         help="After real preview, verify local commit in an "
                              "in-memory DB only (requires matching issues).")
+    parser.add_argument("--expect-issue-number", type=int,
+                        help="Require this exact real public issue to have the "
+                             "strict label triple on the API's first page.")
     args = parser.parse_args(argv)
     code, summary = probe_public_github(
         args.repo,
         require_eligible=args.require_eligible,
-        check_ephemeral_import=args.check_ephemeral_import)
+        check_ephemeral_import=args.check_ephemeral_import,
+        expected_issue_number=args.expect_issue_number)
     print(json.dumps(summary, sort_keys=True))
     return code
 

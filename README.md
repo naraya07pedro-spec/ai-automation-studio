@@ -18,6 +18,24 @@ Scroll to **Build and run your first local rule workflow**. Create a private rul
 
 **Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server is unauthenticated and SQLite is not encrypted by the app. Local rules and history stay on localhost; only the optional read-only GitHub source makes a user-initiated outbound HTTPS GET. There are no external writes, sends or CRM changes. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
 
+## Complete public GitHub issue → local SQLite acceptance (Slice 42)
+
+A reproducible, **owned synthetic public issue fixture** exists at [issue #47](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/47). It is open, has the three explicit `aas:*` category labels, and contains no real customer data. One-time issue fixture setup was performed through the project owner's GitHub connection; **neither the product connector nor its acceptance workflow creates or edits GitHub issues**.
+
+Run the exact numbered issue through the shipped public adapter and verify the original preview outcome is recorded with the same event ID, decision, reason and pinned rule version in a **temporary in-memory SQLite database**:
+
+```bash
+python scripts/probe_public_github_live.py \
+  --repo naraya07pedro-spec/ai-automation-studio \
+  --expect-issue-number 47 \
+  --require-eligible \
+  --check-ephemeral-import
+```
+
+The separate **Real labeled public issue to ephemeral SQLite** GitHub Actions job runs this exact contract as a **strict live-network gate**. Other labeled issues cannot substitute for the expected fixture. The probe fails if #47 is closed, loses labels, falls off page one, or GitHub is unavailable. It is read-only toward GitHub and has no persistent SQLite writes. The ordinary local browser workbench can also preview the labeled source when the user selects an active workflow, but its manual explicit commit **does persist** the chosen categorical event result on the user's own machine.
+
+**CI proof must be inspected before calling this full E2E verified.** See [exact issue fixture and E2E audit contract](docs/PUBLIC_GITHUB_LABELED_E2E_V1.md) and [chronological CI evidence](docs/PROGRESS.md). These checks are not proof of authenticated private integrations, customer data security, AI execution, or external business-action writes.
+
 ## Real provider verification, not just mock CI (Slice 41)
 
 The separate `Public GitHub live read-only verification` GitHub Actions job runs the **shipped public Issues adapter against GitHub's real REST API**. Its default safe probe reads `octocat/Hello-World` without credentials and reports a minimal, redacted JSON proof. This is distinct from the existing fully isolated Python tests and Chromium UI tests.
