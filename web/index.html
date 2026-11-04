@@ -7,6 +7,7 @@
 <title>AI Automation Studio | Local Lead Inquiry Lab</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:#090e17;color:#eef2fb}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% -10%,#153e4a 0%,transparent 42%),#090e17;min-height:100vh}main{width:min(1120px,calc(100% - 36px));margin:0 auto;padding:32px 0 80px}header{display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:1px solid #26313e;padding-bottom:24px}.brand{font-weight:800;letter-spacing:-.035em}.brand span{color:#77e2c4}.tag{font-size:11px;letter-spacing:.12em;color:#75dec1;border:1px solid #2d7967;padding:8px 12px;border-radius:100px}.hero{padding:58px 0 32px;max-width:760px}.eyebrow{color:#70d9be;font-size:12px;letter-spacing:.14em;font-weight:700}.hero h1{font-size:clamp(36px,6.3vw,68px);line-height:1.03;margin:12px 0 20px;letter-spacing:-.06em}.hero p{color:#a9b4c8;font-size:16px;line-height:1.7}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.94fr);gap:18px}.panel{border:1px solid #253244;background:#101927ec;border-radius:20px;padding:26px;box-shadow:0 12px 44px #0003}.kicker{font-size:11px;font-weight:700;color:#79d8c2;letter-spacing:.14em}.panel h2{font-size:21px;margin:10px 0 8px;letter-spacing:-.03em}.muted{color:#9caabe;font-size:13px;line-height:1.65}.field{margin-top:18px}label{display:block;font-size:12px;font-weight:650;color:#cbd7e5;margin-bottom:8px}input,select{background:#0b131f;border:1px solid #344357;color:#f2f6fd;width:100%;border-radius:10px;padding:12px 13px;outline:none;font:inherit;font-size:14px}input:focus,select:focus{border-color:#6ad9b8;box-shadow:0 0 0 3px #6ad9b826}button{font:inherit;cursor:pointer}.primary{border:0;background:#84e8ca;color:#061e21;font-weight:750;border-radius:12px;padding:14px 18px;margin-top:22px;width:100%;transition:transform .15s,background .15s}.primary:hover{background:#a2f3dc;transform:translateY(-1px)}.primary:disabled{opacity:.6;cursor:wait}.secondary{border:1px solid #334458;background:transparent;color:#cbdae9;border-radius:9px;padding:9px 12px;font-size:12px}.status{display:inline-flex;padding:7px 10px;border-radius:9px;background:#233842;color:#9de7d6;font-size:12px;font-weight:700}.result{display:grid;gap:12px;margin-top:20px}.line{display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #253344;padding-bottom:12px;font-size:13px}.line span{color:#9aaabc}.line strong{text-align:right}.trace{margin-top:19px;padding:16px;background:#09111b;border-radius:12px;border:1px solid #273343;max-height:330px;overflow:auto;color:#b3e3cf;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.notice{margin-top:18px;background:#1a2835;border-left:3px solid #83dac4;border-radius:8px;padding:14px;font-size:12px;color:#b4c7d6;line-height:1.65}.foot{margin-top:25px;color:#7e90a5;font-size:12px}.steps{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}.steps span{font-size:11px;padding:8px 12px;background:#152331;border:1px solid #2a3b4a;border-radius:100px;color:#abc7c4}@media(max-width:780px){.layout{grid-template-columns:1fr}.panel{padding:20px}.hero{padding:36px 0 20px}header{flex-wrap:wrap}}
+.timeline{display:grid;gap:8px;margin:16px 0}.stage{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#0a1621;border:1px solid #263847;border-radius:10px;padding:10px 12px;font-size:12px}.stage strong{color:#8ce2c9;font-size:11px}.draft{padding:16px;border:1px solid #34545a;border-radius:12px;background:#11232b;margin:14px 0}.draft h3{font-size:14px}.draft p{font-size:12px;color:#c2d5e1;line-height:1.6}.review-actions{display:flex;gap:10px;flex-wrap:wrap}.review-actions button{flex:1}.review-actions button:disabled{opacity:.5;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -30,23 +31,36 @@
 <div class="line"><span>Qualification</span><strong id="qualification">Not started</strong></div>
 <div class="line"><span>External dispatches</span><strong id="dispatch">0</strong></div>
 </div>
+<div class="kicker" style="margin-top:22px">EXECUTION TIMELINE · SERVER-DERIVED</div><div id="timeline" class="timeline" aria-live="polite"><span class="muted">No run yet.</span></div>
+<div class="kicker" style="margin-top:20px">LOCAL FOLLOW-UP DRAFT · NEVER SENT</div><div id="draft" class="draft"><p>Run a fresh synthetic inquiry to prepare a fixed mock draft.</p></div>
+<div class="review-actions"><button type="button" class="secondary" id="ack" disabled>Acknowledge review</button><button type="button" class="secondary" id="reject" disabled>Reject draft</button></div><div id="review-status" class="foot" role="status" aria-live="polite">No review action available.</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div class="kicker">REDACTED EXECUTION JSON</div><button class="secondary" type="button" id="copy">Copy trace</button></div><pre id="trace" class="trace" aria-live="polite">No execution yet. Submit the synthetic lead form to inspect the result.</pre><div class="foot">Process-local deduplication resets when the server restarts. No persistent identity or provider receipts.</div>
 </section></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let latest="";
+let latest="";let reviewToken=null;
+const resetReview=()=>{reviewToken=null;$("ack").disabled=true;$("reject").disabled=true;};
 $("demo").addEventListener("submit",async event=>{
- event.preventDefault();const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
+ event.preventDefault();resetReview();$("review-status").textContent="No review action available.";const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
  const payload={event_id:$("event_id").value,service_requested:$("service_requested").value,budget_range:$("budget_range").value,timeline:$("timeline").value};
  try{const response=await fetch("/api/mock-run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
  const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");
  const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
  $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
  $("dispatch").textContent=String(data.external_dispatch_count);$("status").textContent="MOCK RUN COMPLETED · NO SENDS";
+ const timeline=$("timeline");timeline.replaceChildren();
+ for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const name=document.createElement("span");name.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(name,state);timeline.append(item);}
+ const offer=data.review_offer;const draft=$("draft");draft.replaceChildren();
+ if(offer?.draft){const title=document.createElement("h3");title.textContent=offer.draft.subject;const body=document.createElement("p");body.textContent=offer.draft.body;const foot=document.createElement("p");foot.textContent="Recipient: NOT_SET · Delivery: NEVER_SENT · No verified operator";draft.append(title,body,foot);reviewToken=offer.review_token;$("ack").disabled=false;$("reject").disabled=false;$("review-status").textContent="Awaiting local review (does not authorize sending).";}
+ else {const note=document.createElement("p");note.textContent="No draft for this run. Only a fresh, valid event may create one.";draft.append(note);}
  latest=JSON.stringify(data,null,2);$("trace").textContent=latest;
- }catch(error){$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}finally{button.disabled=false;}
+ }catch(error){resetReview();$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}finally{button.disabled=false;}
 });
+const reviewDecision=async decision=>{if(!reviewToken)return;const token=reviewToken;resetReview();$("review-status").textContent="Recording local review...";
+try{const response=await fetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
+$("ack").addEventListener("click",()=>reviewDecision("ACKNOWLEDGE"));
+$("reject").addEventListener("click",()=>reviewDecision("REJECT"));
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
 </body></html>
