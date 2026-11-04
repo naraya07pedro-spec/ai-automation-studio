@@ -762,7 +762,7 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Added `docs/RUNTIME_EVIDENCE_REGISTRY.md` with exact-source records, evidence limitations, drift-injection scope, and procedure for reviewed future registry updates.
 
 **Verification gate**
-- Read files back from branch and check that all 3 Python jobs run fixture drift gate, evidence report, fixture contract and full stdlib unittest suite successfully on exact PR head. Do not claim 269/269 or any final count until the logs confirm.
+- Read files back from branch and check that all 3 Python jobs run fixture drift gate, evidence report, fixture contract and full stdlib unittest suite successfully on exact PR head. Do not claim 281/281 or any final count until the logs confirm.
 
 **Limits**
 - This is a manually maintained CI observation registry, not a signed attestation or production compatibility guarantee. Runtime probe's `UNTESTED_PYTHON` informational label still reflects the older 3.11-only version screen, while the registry captures exact 3.12/3.13 CI successes.
