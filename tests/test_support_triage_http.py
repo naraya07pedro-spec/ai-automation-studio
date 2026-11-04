@@ -150,8 +150,8 @@ class SupportTriageHTTPTests(unittest.TestCase):
         response = conn.getresponse()
         catalog = json.loads(response.read())
         conn.close()
-        self.assertEqual(4, catalog["executable_count"])
-        self.assertEqual(1, catalog["preview_count"])
+        self.assertEqual(5, catalog["executable_count"])
+        self.assertEqual(0, catalog["preview_count"])
         second = next(x for x in catalog["templates"] if x["id"] == "support-triage")
         self.assertEqual("EXECUTABLE_MOCK", second["status"])
 
