@@ -15,6 +15,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
+from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 
@@ -42,7 +43,7 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
-                   operator_auth=None):
+                   operator_auth=None, source_policy=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -58,7 +59,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     batch = LocalCSVBatchIntake(core)
     public_github = PublicGitHubReadOnlyIntake(core, batch,
                                                fetcher=github_fetcher,
-                                               clock=github_clock)
+                                               clock=github_clock,
+                                               policy=source_policy)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -155,6 +157,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path != "/" and route.path != "/api/health":
                 if not self._operator_authorized():
                     return
+            if route.path == "/api/local-github-sources" and not route.query:
+                if source_policy is None:
+                    self._send(200, {"allowed": [], "epoch": 0, "test_only": True})
+                else:
+                    self._send(200, source_policy.snapshot())
+                return
             if route.path in ("/api/local-workflows", "/api/local-history", "/api/local-revisions"):
                 if route.path == "/api/local-workflows" and not route.query:
                     self._send(200, core.list_workflows())
@@ -183,6 +191,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def do_POST(self):
             if self.path not in ("/api/operator-login", "/api/operator-logout",
+                                 "/api/operator-rotate", "/api/local-github-source-grant",
+                                 "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit"):
                 self._send(404, {"error": "not_found"})
                 return
@@ -228,6 +238,40 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "csrf_token": session["csrf_token"],
                                  "expires_in": session["expires_in"]},
                            cookie_header=self._login_cookie(session["cookie_token"]))
+                return
+            if self.path == "/api/operator-rotate":
+                if type(data) is not dict or set(data) != {
+                        "current_password", "new_password"}:
+                    self._send(422, {"error": "invalid_rotation_fields"})
+                    return
+                if operator_auth is None:
+                    self._send(403, {"error": "auth_fixture_only"})
+                    return
+                code, outcome = operator_auth.rotate_password(
+                    data["current_password"], data["new_password"])
+                self._send(code, outcome,
+                           cookie_header=self._no_cookie() if code == 200 else None)
+                return
+            if self.path in ("/api/local-github-source-grant",
+                             "/api/local-github-source-revoke"):
+                if type(data) is not dict or set(data) != {
+                        "repo", "current_password"}:
+                    self._send(422, {"error": "invalid_source_permission_fields"})
+                    return
+                if source_policy is None or operator_auth is None:
+                    self._send(403, {"error": "source_policy_unavailable"})
+                    return
+                approved = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if approved != 200:
+                    self._send(approved, {"error": (
+                        "operator_login_locked" if approved == 429
+                        else "invalid_operator_credentials")})
+                    return
+                operation = (source_policy.grant if self.path.endswith("grant")
+                             else source_policy.revoke)
+                code, outcome = operation(data["repo"])
+                self._send(code, outcome)
                 return
             if self.path == "/api/operator-logout":
                 if type(data) is not dict or data:
@@ -345,11 +389,13 @@ def start_local_server(port=8765):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
+    source_policy = LocalPublicSourcePolicy(home / "public-github-sources.json")
     core = LocalWorkflowCore(home / "local-workflows.sqlite3")
     try:
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
-            create_handler(local_core=core, operator_auth=operator))
+            create_handler(local_core=core, operator_auth=operator,
+                           source_policy=source_policy))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
@@ -381,7 +427,7 @@ def main(argv=None):
         return
     try:
         start_local_server()
-    except OperatorConfigurationError as exc:
+    except (OperatorConfigurationError, SourcePolicyError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
