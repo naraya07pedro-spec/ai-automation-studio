@@ -534,3 +534,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract validation and the full Python standard-library unittest suite both passed. Job logs report **178 tests run, 0 failures**, including 16 new read-only inventory tests.
 - Node.js 20 deprecation warning for older GitHub Actions dependency versions remains; it did not fail this workflow.
 - The documentation-only commit recording this evidence requires a separate green GitHub Actions result before the latest PR head is marked verified.
+
+
+## Slice 19 · 2026-11-04 · Offline synthetic SQLite backup/restore rehearsal
+
+**Goal:** Verify backup-and-restore behavior on disposable, explicitly marked synthetic databases before any historical migration. No real production data or provider effects.
+
+**Completed**
+- Verified PR #20 last-head CI success and squash-merged PR #20 into main.
+- Added `prototype/lead_inquiry_synthetic_recovery.py`: fixture-marker gate, read-only source, exclusive new destination files, SQLite backup API, `integrity_check`, logical backup/restore fingerprint and schema/count comparison. Never overwrites prior output or migrates source rows.
+- Added `tests/test_lead_inquiry_synthetic_recovery.py` with **17** tests for both legacy schemas, historical status preservation, missing/invalid marker or schema, symlink/path rejection, corruption, existing-output protection, logical comparison, unchanged original bytes and zero dispatch.
+- Added `docs/SYNTHETIC_RECOVERY_REHEARSAL.md` with reproduction steps and limitations.
+
+**Verification gate**
+- Read branch files back and count tests. Verify GitHub Actions fixture validation and all Python standard-library tests on the exact PR HEAD before claiming success.
+
+**Caveats**
+- The fixture marker is self-attested and does **not** prove authentic synthetic provenance. File access must remain restricted to an isolated test directory.
+- This is not production backup/restore, encryption, remote custody, power-loss durability, crash recovery, or a guarantee against concurrent hostile writers.
+- Backup/restore targets stay on disk even on failure; failed runs may leave partial files for inspection, and a retry must select new target paths.
+- SQLite `integrity_check` and a matching copy hash do not validate business semantics or external delivery.
+- No schema migration, database selection, live integration or production deployment is performed.
+
+**Next smallest slice:** Harden fixture provenance and path-race isolation in the test harness; then create a regression-only consolidation plan across the two historical stores. Do not promote this rehearsal into production recovery tooling.
