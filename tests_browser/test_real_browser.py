@@ -269,6 +269,52 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertIn("No routing preview",
                       self.page.locator("#knowledge-preview").inner_text())
 
+    def create_functional_local_workflow(self):
+        wid = "wf_" + hashlib.sha256(
+            self._testMethodName.encode("ascii")).hexdigest()[:12]
+        self.page.locator("#local-id").fill(wid)
+        self.page.locator("#local-create").click()
+        expect(self.page.locator("#local-create-status")).to_contain_text(
+            "CREATED_DRAFT")
+        expect(self.page.locator("#local-activate")).to_be_enabled()
+        self.page.locator("#local-activate").click()
+        expect(self.page.locator("#local-activation-status")).to_contain_text(
+            "ACTIVE_LOCAL")
+        expect(self.page.locator("#local-run")).to_be_enabled()
+        return wid
+
+    def test_functional_local_workflow_create_activate_run_and_browser_reload(self):
+        wid = self.create_functional_local_workflow()
+        self.page.locator("#local-event").fill("local_event_001")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "NEEDS_REVIEW_LOCAL")
+        expect(self.page.locator("#local-history")).to_contain_text(
+            "1 saved events")
+        self.assertIn('"external_dispatch_count": 0',
+                      self.page.locator("#local-result").inner_text())
+        self.page.reload(wait_until="networkidle")
+        expect(self.page.locator("#local-workflows")).to_contain_text(wid)
+        expect(self.page.locator("#local-history")).to_contain_text(
+            "local_event_001")
+        expect(self.page.locator("#local-run")).to_be_enabled()
+
+    def test_functional_local_workflow_idempotency_and_payload_conflict(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#local-event").fill("local_event_002")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "RECORDED_LOCAL")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "REPLAYED_LOCAL")
+        self.page.locator("#local-budget").select_option("1")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "event_id_payload_conflict")
+        expect(self.page.locator("#local-history")).to_contain_text(
+            "1 saved events")
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())

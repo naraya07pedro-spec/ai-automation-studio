@@ -1,14 +1,16 @@
-"""Loopback-only, standard-library local product demo for synthetic inquiries.
+"""Loopback-only local demo and a minimal persistent, non-PII rule core.
 
-Not a production HTTP server. In-memory deduplication resets on process restart.
-No authentication, live provider integrations, externally reachable host,
-credentials, outbound sends, or customer data persistence.
+Not a production HTTP server. No authentication, live providers or sends.
+The separate local workbench stores pseudonymous event IDs and rule
+categories in SQLite; mock workflow state still resets on restart.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json
 import sys
 import threading
+from urllib.parse import parse_qs, urlsplit
+from local_workflow_core import LocalWorkflowCore
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -33,7 +35,7 @@ _CONFIGURATION = {
 _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
-def create_handler(flow=None):
+def create_handler(flow=None, local_core=None):
     """Return an isolated handler class for tests or local app instantiation."""
     workflow = flow if flow is not None else MockInquiryFlow()
     lock = threading.Lock()
@@ -42,6 +44,7 @@ def create_handler(flow=None):
     appointments = MockAppointmentFollowup()
     crm = MockCRMHandoff()
     knowledge = MockKnowledgeRouting()
+    core = local_core if local_core is not None else LocalWorkflowCore()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -60,7 +63,37 @@ def create_handler(flow=None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _local_allowed(self):
+            host = self.headers.get("Host", "")
+            if host not in ("127.0.0.1", "localhost",
+                            f"127.0.0.1:{self.server.server_port}",
+                            f"localhost:{self.server.server_port}"):
+                return "local_host_required"
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in (
+                    f"http://127.0.0.1:{self.server.server_port}",
+                    f"http://localhost:{self.server.server_port}"):
+                return "same_origin_required"
+            return None
+
         def do_GET(self):
+            route = urlsplit(self.path)
+            if route.path in ("/api/local-workflows", "/api/local-history"):
+                denied = self._local_allowed()
+                if denied:
+                    self._send(403, {"error": denied})
+                    return
+                if route.path == "/api/local-workflows" and not route.query:
+                    self._send(200, core.list_workflows())
+                    return
+                if route.path == "/api/local-history":
+                    params = parse_qs(route.query, keep_blank_values=True)
+                    if set(params) == {"workflow_id"} and len(params["workflow_id"]) == 1:
+                        code, out = core.history(params["workflow_id"][0])
+                        self._send(code, out)
+                        return
+                self._send(422, {"error": "invalid_local_query"})
+                return
             if self.path == "/":
                 self._send(200, WEB.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
@@ -74,22 +107,14 @@ def create_handler(flow=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
             # development demo, not an authentication or public CSRF solution.
-            host = self.headers.get("Host", "")
-            if host not in ("127.0.0.1", "localhost",
-                            f"127.0.0.1:{self.server.server_port}",
-                            f"localhost:{self.server.server_port}"):
-                self._send(403, {"error": "local_host_required"})
-                return
-            origin = self.headers.get("Origin")
-            if origin is not None and origin not in (
-                    f"http://127.0.0.1:{self.server.server_port}",
-                    f"http://localhost:{self.server.server_port}"):
-                self._send(403, {"error": "same_origin_required"})
+            denied = self._local_allowed()
+            if denied:
+                self._send(403, {"error": denied})
                 return
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                 self._send(415, {"error": "json_required"})
@@ -106,6 +131,17 @@ def create_handler(flow=None):
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/local-create", "/api/local-activate", "/api/local-run"):
+                # SQLite workbench methods serialize their own writes. Nothing
+                # in these endpoints invokes a mock or external provider.
+                method = {
+                    "/api/local-create": core.create,
+                    "/api/local-activate": core.activate,
+                    "/api/local-run": core.run,
+                }[self.path]
+                code, result = method(data)
+                self._send(code, result)
                 return
             if self.path == "/api/mock-knowledge-routing":
                 with lock:
@@ -178,12 +214,16 @@ def create_handler(flow=None):
 
 def start_local_server(port=8765):
     """Bind only IPv4 loopback; never expose this unauthenticated demo to LAN."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), create_handler())
-    print(f"Mock-only AI Automation Studio: http://127.0.0.1:{server.server_port}")
+    # The interactive local workbench persists only explicit non-PII
+    # workflow IDs/rule categories. Other five demo workflows stay mock-only.
+    core = LocalWorkflowCore(Path.home() / ".ai-automation-studio" / "local-workflows.sqlite3")
+    server = ThreadingHTTPServer(("127.0.0.1", port), create_handler(local_core=core))
+    print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
     try:
         server.serve_forever()
     finally:
         server.server_close()
+        core.close()
 
 
 if __name__ == "__main__":
