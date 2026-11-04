@@ -424,9 +424,11 @@ $("local-control-choice").addEventListener("change",()=>updateLocalControls($("l
 const applyLocalControl=async(path,request,success)=>{
  try{
   const result=await localPost(path,request);
-  $("local-control-status").textContent=success+" · "+result.status+" · external dispatch 0";
   invalidateBatch();
   await refreshLocalWorkflows(request.workflow_id);
+  // Do not announce completion while controls still reflect stale
+  // workflow state. The backend already enforces ACTIVE before GitHub GET.
+  $("local-control-status").textContent=success+" · "+result.status+" · external dispatch 0";
  }catch(error){$("local-control-status").textContent="Action rejected · "+error.message;
   await refreshLocalWorkflows(request.workflow_id);}
 };
