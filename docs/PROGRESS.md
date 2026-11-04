@@ -283,3 +283,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The prototype can acknowledge uncertainty, **not resolve uncertain external effects**. No automatic replay or state mutation beyond the acknowledgement record.
 
 **Next small slice (proposed):** Define a secure explicit state-transition contract for mock reconciliation, with independent identity/approval gates. Then audit storage prototypes, error paths and compatibility before any production connector.
+
+
+**Verified CI evidence**
+- [GitHub Actions run 41761085954](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41761085954) completed **success** on commit `f3a396e374723a7e933fcb3a027de90fa933cbeb`.
+- Both synthetic fixture validation and the full stdlib unittest step passed. Job log reports **97 tests run, 0 failures**; 13 are newly added in slice 10.
+- Existing GitHub Action dependencies still emit the Node.js 20 deprecation warning. Maintenance remains pending, separate from the mock tests.
+- A documentation-only follow-up commit recording this result must have its own CI verification; do not reuse the prior successful run as proof for a different commit.
