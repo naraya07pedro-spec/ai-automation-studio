@@ -871,3 +871,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No public deployment, auth, real workflow builder or customer data.
 
 **Next product slice:** add a second independently executable local mock workflow, or strengthen active guided setup UI against stale async responses after browser edits. Prioritize visible utility over additional isolated infra tests.
+
+
+**Verified GitHub Actions evidence**
+- PR #31 code/docs head `d016144a58f63eba5f6dbe13ecfcb362d2947bc6`: [Actions run 41800033394](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41800033394) completed **success**.
+- Python **3.11, 3.12 and 3.13** CI matrix jobs each ran **325 unit tests with zero failures** (previous 308 + 17 guided setup/catalog tests); total **975 test executions** across three interpreters, 325 distinct unittest methods per runtime.
+- All three jobs passed pinned fixture runtime drift check, runtime evidence reporting, synthetic fixture contract and full stdlib unittest suite. New HTTP tests verify preview blocking, revalidation before reservation, and draft-only no-token handling.
+- Automatic HTTP and source inspection do not prove pixel-level browser behavior, accessibility completeness or production safety. This documentation commit creates a new PR HEAD; verify its own three-job CI before claiming final-head success.
