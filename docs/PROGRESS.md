@@ -676,3 +676,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Existing CI Node.js 20 dependency deprecation warning remains unrelated maintenance debt.
 
 **Next smallest slice (proposed):** Record and enforce the synthetic fixture fingerprint contract against CI runtime versions, then add bounded subprocess and negative corruption tests before treating the fixture verification as portable across environments.
+
+
+**Verified GitHub Actions evidence**
+- PR #25 code revision `9cc012d72d86659d2e770fa39aa99c215f7b418c`: [GitHub Actions run 41787819540](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41787819540), completed **success**.
+- Synthetic fixture contract validator and complete stdlib unittest suite both passed. CI job log reports **242 tests, 0 failures** (227 prior + 15 independent manifest and concurrency regressions).
+- GitHub Actions still reports an unrelated, non-blocking Node.js 20 deprecation warning for older Actions dependencies.
+- This documentation-only commit creates a new PR head SHA; confirm a separate green GitHub Actions run on that exact commit before declaring final-head CI verified.
