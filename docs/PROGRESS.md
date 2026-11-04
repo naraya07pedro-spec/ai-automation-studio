@@ -839,3 +839,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Loopback-only HTTP controls reduce accidental exposure but are not a full authentication or browser security boundary. No public deployment or manual visual QA yet.
 
 **Next slice proposed:** Add visible template gallery with explicitly marked executable vs preview items and a guided configuration state, retaining the real mock workflow path.
+
+
+**Verified GitHub Actions evidence**
+- PR #30 code/docs commit `dd203eff734055d35f8fdde63300fb5ac21ec6f4`: [Actions run 41798698017](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41798698017) completed **success**.
+- Python 3.11, 3.12 and 3.13 matrix jobs all passed: **308 unit tests per job, 0 failures** (296 previous + 12 new local review HTTP tests), **924 total test executions**.
+- All three jobs passed current pinned runtime drift gate, historical runtime evidence report, fixture contract and complete unittest suite.
+- CI tests verify backend and HTTP functionality, not an interactive human browser visual audit or real provider behavior. This evidence note changes the PR HEAD and requires another successful full matrix on that final commit.
