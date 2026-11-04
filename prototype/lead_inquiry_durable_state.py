@@ -91,31 +91,12 @@ class DurableMockEventStore:
         return self._out(status)
 
     def mark_mock_completed(self, source, event_id):
-        """Mark a locally completed mock step. Never confirms a provider effect."""
-        if not self._ids(source, event_id) or not source.startswith("mock_"):
-            return self._out("INVALID_ID")
-        with self._connect() as conn:
-            try:
-                conn.execute("BEGIN IMMEDIATE")
-                record = conn.execute(
-                    "SELECT state FROM mock_events WHERE source=? AND event_id=?",
-                    (source, event_id),
-                ).fetchone()
-                if record is None:
-                    status = "NOT_FOUND"
-                elif record[0] == "COMPLETED":
-                    status = "ALREADY_COMPLETED"
-                else:
-                    conn.execute(
-                        "UPDATE mock_events SET state='COMPLETED' WHERE source=? AND event_id=?",
-                        (source, event_id),
-                    )
-                    status = "MOCK_COMPLETED"
-                conn.execute("COMMIT")
-            except BaseException:
-                conn.execute("ROLLBACK")
-                raise
-        return self._out(status)
+        """Deprecated completion API: irrevocably disabled in the mock prototype.
+
+        A review acknowledgement or a valid grant cannot establish that an
+        external effect occurred. Never mutate event state through this path.
+        """
+        return self._out("DIRECT_COMPLETION_DISABLED")
 
     def state(self, source, event_id):
         if not self._ids(source, event_id):
