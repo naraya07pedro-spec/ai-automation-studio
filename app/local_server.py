@@ -80,7 +80,7 @@ def create_handler(flow=None, local_core=None):
 
         def do_GET(self):
             route = urlsplit(self.path)
-            if route.path in ("/api/local-workflows", "/api/local-history"):
+            if route.path in ("/api/local-workflows", "/api/local-history", "/api/local-revisions"):
                 denied = self._local_allowed()
                 if denied:
                     self._send(403, {"error": denied})
@@ -88,10 +88,12 @@ def create_handler(flow=None, local_core=None):
                 if route.path == "/api/local-workflows" and not route.query:
                     self._send(200, core.list_workflows())
                     return
-                if route.path == "/api/local-history":
+                if route.path in ("/api/local-history", "/api/local-revisions"):
                     params = parse_qs(route.query, keep_blank_values=True)
                     if set(params) == {"workflow_id"} and len(params["workflow_id"]) == 1:
-                        code, out = core.history(params["workflow_id"][0])
+                        method = (core.history if route.path == "/api/local-history"
+                                  else core.revisions)
+                        code, out = method(params["workflow_id"][0])
                         self._send(code, out)
                         return
                 self._send(422, {"error": "invalid_local_query"})
@@ -109,7 +111,7 @@ def create_handler(flow=None, local_core=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -137,6 +139,17 @@ def create_handler(flow=None, local_core=None):
             if self.path in ("/api/local-batch-preview", "/api/local-batch-commit"):
                 method = (batch.preview if self.path == "/api/local-batch-preview"
                           else batch.commit)
+                code, result = method(data)
+                self._send(code, result)
+                return
+            if self.path in ("/api/local-stage", "/api/local-publish",
+                             "/api/local-pause", "/api/local-resume"):
+                method = {
+                    "/api/local-stage": core.stage_revision,
+                    "/api/local-publish": core.publish_revision,
+                    "/api/local-pause": lambda req: core.set_paused(req, True),
+                    "/api/local-resume": lambda req: core.set_paused(req, False),
+                }[self.path]
                 code, result = method(data)
                 self._send(code, result)
                 return
