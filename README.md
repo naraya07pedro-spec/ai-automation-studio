@@ -18,6 +18,25 @@ Scroll to **Build and run your first local rule workflow**. Create a private rul
 
 **Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server is unauthenticated and SQLite is not encrypted by the app. Local rules and history stay on localhost; only the optional read-only GitHub source makes a user-initiated outbound HTTPS GET. There are no external writes, sends or CRM changes. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
 
+## Real provider verification, not just mock CI (Slice 41)
+
+The separate `Public GitHub live read-only verification` GitHub Actions job runs the **shipped public Issues adapter against GitHub's real REST API**. Its default safe probe reads `octocat/Hello-World` without credentials and reports a minimal, redacted JSON proof. This is distinct from the existing fully isolated Python tests and Chromium UI tests.
+
+To reproduce the real-network check locally (internet required):
+
+```bash
+python scripts/probe_public_github_live.py --repo octocat/Hello-World
+```
+
+The statuses are intentionally precise: **verified transport** means an actual GitHub public GET succeeded; **verified live labels** requires a real open issue bearing all three `aas:*` labels; **verified ephemeral import** additionally requires an explicitly requested, temporary in-memory SQLite commit. Do not infer the latter two from the first. Only with an appropriate labeled *public* repo:
+
+```bash
+python scripts/probe_public_github_live.py --repo OWNER/REPO --require-eligible
+python scripts/probe_public_github_live.py --repo OWNER/REPO --check-ephemeral-import
+```
+
+These commands do not create issues, use GitHub credentials, write to GitHub or modify the persistent local database. **Exact verification status and CI run evidence belong in [Progress](docs/PROGRESS.md)**. See [live verification instructions](docs/LIVE_PUBLIC_GITHUB_VERIFICATION.md).
+
 ## Read-only public GitHub Issues integration (Slice 40)
 
 The **Inspect real GitHub issues, then choose whether to import** panel accepts a public GitHub repository as `owner/repo` (not a URL). With an active local workflow selected, click **Read public issues & preview locally** to request one page of up to 15 open issue/PR items from the official `api.github.com` REST API. Pull requests, issues with missing category labels and ambiguous mappings are ignored, and the UI shows only numeric-derived pseudonymous event IDs, three allowed rule categories, and local qualification decisions.

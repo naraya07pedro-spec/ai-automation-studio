@@ -1,0 +1,42 @@
+name: Public GitHub live read-only verification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/public-github-live-smoke.yml"
+      - "scripts/probe_public_github_live.py"
+      - "tests/test_github_public_live_probe.py"
+      - "app/github_public_issue_intake.py"
+      - "app/local_csv_batch.py"
+      - "app/local_workflow_core.py"
+      - "docs/PROGRESS.md"
+      - "docs/PUBLIC_GITHUB_READONLY_INTAKE_V1.md"
+      - "docs/LIVE_PUBLIC_GITHUB_VERIFICATION.md"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-github-live-probe:
+    name: Real public REST API GET without credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify production adapter against one real public GitHub source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/probe_public_github_live.py --repo octocat/Hello-World
+      - name: Evidence boundary
+        run: |
+          echo "Only public transport and open-issue parsing were live checked."
+          echo "Explicit aas:* labels and a real eligible issue are NOT guaranteed."
+          echo "No GitHub writes, tokens, real customer data or persistent local DB."
