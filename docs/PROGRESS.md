@@ -991,3 +991,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Five workflows are **local, deterministic mock-only** demos. No persistent user sessions, real connectors/AI, trusted human approval, public deployment, full 45-scenario catalog or production behavior.
 - No file bytes or content are ingested, extracted or transferred. Caller review is **not** verified identity.
 - Next work: browser interaction audit, public portfolio demo approach, UI refinement and realistic end-to-end product flows.
+
+
+**Verified CI evidence (initial code + feature documentation head)**
+- PR #35 head `415c4e5490a19b8f553dfa15a6de53e7b8b4e26a`: [Actions run 41812119015](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41812119015) completed **success**.
+- Python **3.11, 3.12 and 3.13** each executed **402 unittest methods, zero failures**, total **1206 unittest executions** across all three jobs (382 previous + 20 new Knowledge Routing tests).
+- The mock fixture drift check, historical runtime evidence reporting, fixture contract, and full standard-library test suite succeeded in all three matrix legs.
+- This confirms only the deterministic synthetic metadata-only routing contract and prior four mock workflows under test; **not** real document handling, file ingestion, browser visual QA, live provider behavior or production release.
+- Adding these CI evidence notes creates a new PR HEAD SHA and requires a new successful exact-head CI run before latest-head green is claimed.
