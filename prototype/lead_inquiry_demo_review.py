@@ -10,7 +10,7 @@ _STATUSES = {"ACKNOWLEDGE": "ACKNOWLEDGED_LOCAL_ONLY",
 _MAX_PENDING = 100
 
 
-def execution_timeline(flow_result):
+def execution_timeline(flow_result, *, policy="approval_required"):
     """Deterministic, redacted stage evidence derived from existing flow."""
     validation = flow_result.get("validation") or {}
     dedup = flow_result.get("deduplication") or {}
@@ -25,7 +25,8 @@ def execution_timeline(flow_result):
         {"stage": "DEDUP", "status": dedup.get("status", "NOT_RUN")},
         {"stage": "QUALIFICATION", "status": qual.get("qualification_status", "NOT_RUN")},
         {"stage": "DRAFT", "status": "PREPARED_MOCK_ONLY" if qualified and dedup_ok else "NOT_CREATED"},
-        {"stage": "REVIEW", "status": "AWAITING_LOCAL_REVIEW" if state == "READY_FOR_REVIEW" and dedup_ok else "NOT_AVAILABLE"},
+        {"stage": "REVIEW", "status": ("DRAFT_ONLY_NO_REVIEW" if policy == "draft_only"
+                                else "AWAITING_LOCAL_REVIEW") if state == "READY_FOR_REVIEW" and dedup_ok else "NOT_AVAILABLE"},
         {"stage": "EXTERNAL_DISPATCH", "status": "DISABLED"},
     ]
 
