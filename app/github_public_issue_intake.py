@@ -135,8 +135,9 @@ def _sanitize_issues(repo, issues):
 class PublicGitHubReadOnlyIntake:
     """Ephemeral 5-minute approved-source snapshots; SQLite is only local."""
 
-    def __init__(self, core, batch, fetcher=None, clock=None):
+    def __init__(self, core, batch, fetcher=None, clock=None, policy=None):
         self.core, self.batch = core, batch
+        self.policy = policy
         self.fetcher = fetcher if fetcher is not None else _public_issues_http
         self.clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
