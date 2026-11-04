@@ -781,3 +781,38 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - All jobs ran current drift check, historical evidence report, fixture-contract validator, and full unittest suite. Every runtime report explicitly indicated `production_supported: false`.
 - All observed jobs used **SQLite 3.45.1**; this remains **one SQLite version**, not cross-SQLite-version compatibility evidence. The dump-format drift regression is an injected alternate hash, not another SQLite binary.
 - This documentation-only evidence commit changes the final PR HEAD SHA; require another successful three-job CI matrix on that exact commit before making a final latest-head pass claim.
+
+
+## Slice 27 · 2026-11-04 · Product pivot: first usable local Lead Inquiry UI and HTTP vertical
+
+**Goal:** Stop accumulating isolated recovery tests and deliver an interactive user-facing workflow slice connected to existing Python mock engine.
+
+**Audit result**
+- Repository tree on main before slice 27 had `prototype/`, `tests/`, `docs/` and `tools/`, but no `web/` frontend or `app/` HTTP entrypoint. `README.md` had only the repository tagline.
+- `docs/PRODUCT_BASELINE.md` explicitly describes 35 decisions as product intentions, not implementations; `docs/LEAD_INQUIRY_ACCEPTANCE.md` is a planned mock vertical acceptance contract.
+- Existing `prototype/lead_inquiry_flow.py` already handles mock validation, deterministic qualification and deduplication but had no user-facing invocation path.
+
+**Completed**
+- Verified PR #28 exact-head CI green and squash-merged PR #28 to main.
+- Added `app/local_server.py`: loopback-bound, standard-library local HTTP server, explicit `/api/health`, POST `/api/mock-run`, allowlisted input and body-size limits, redacted outputs, no access logging, 404 for unknown routes, in-process lock for shared memory deduplication. No external actions or credentials.
+- Added `web/index.html`: responsive template-first Lead Inquiry form, real POST request to mock engine, business status, technical trace, duplicate/conflict demonstration and explicit no-send disclosure.
+- Added `tests/test_local_product_http.py` with **15** real HTTP smoke/regression tests: UI served, first event, duplicate, conflict, missing/blank/unknown input, body limit, MIME type, invalid JSON redaction, health, forbidden route, headers and no external send.
+- Added `docs/FIRST_LOCAL_PRODUCT_VERTICAL.md` with local run instructions and explicit safety limitations.
+
+**Verification gate**
+- Read branch artifacts back and run entire GitHub Actions Python matrix (3.11/3.12/3.13), including fixture drift check, evidence registry, fixture contract and full unit tests, on the exact PR head. Do not report green until observed.
+
+**Risks and constraints**
+- Local mock only: not a hosted site, production API, authenticated platform or live connector. Dedup resets when process restarts. No AI inference, message sending or CRM writes.
+- A successful UI request proves only a deterministic local qualification and response. It is not evidence that any external action succeeded.
+- Existing automated tests do not substitute for a human visual/browser review; no public deployment is established.
+- No change to core storage architecture; prioritizing visible product utility first.
+
+**Next smallest slice:** UI execution-stage timeline, bounded mock follow-up draft and explicit review gate, then template gallery and setup flow.
+
+
+**Verified product-vertical CI evidence**
+- PR #29 revision `fc7a8785bc1d6de6c2e59fc6a295a41c4f688f8f`: [GitHub Actions run 41796205319](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41796205319), completed **success** for all Python 3.11, 3.12, 3.13 jobs.
+- All three jobs ran runtime drift gate, historic evidence reporting, fixture contract, and complete Python standard-library unittest suite. Logs: **296 tests per job, 0 failures**, **888 test executions** across three runtimes; 15 new real HTTP tests.
+- Tests use local `ThreadingHTTPServer` on ephemeral loopback ports and exercise the actual `MockInquiryFlow`. This does not constitute browser visual QA, hosted deployment, integration-provider verification, or production readiness.
+- This evidence update creates a new PR HEAD and must itself pass all matrix jobs before latest-head verification.
