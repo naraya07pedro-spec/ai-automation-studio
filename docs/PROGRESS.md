@@ -1052,3 +1052,23 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - [Chromium Actions run 41817559222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559222): completed **success**, **10/10 real browser tests passed**, including both delayed-response race regressions.
 - [Python Actions run 41817559225](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559225): completed **success**, Python **3.11/3.12/3.13 each ran 402 tests, zero failures**; total **1206 Python test executions** across three interpreters. No existing backend tests were reduced.
 - This evidence note is a separate documentation commit, requiring **its own final-head CI** before claiming the newest PR HEAD is green. PR #36 is still the unmerged prerequisite at the time of writing; no live provider or public deployment attempted.
+
+
+## Slice 37 · 2026-11-04 · First functional local workflow engine with durable SQLite history
+
+**Product priority:** Go beyond repeatedly testing five synthetic mock workflows. Deliver a usable local account-free rule-workflow lifecycle that a user can configure, activate, run, and inspect across an application restart without relying on AI or external provider credentials.
+
+**Implemented (feature branch `feat/local-workflow-core-slice-37`, based on merged `main` through Slice 35)**
+- Added `app/local_workflow_core.py`: isolated SQLite-backed local rule definitions and persisted run ledger. A user creates a private DRAFT with a service filter, budget threshold and draft/review policy; activates immutable v1 with an expected-version gate; executes allowlisted non-PII categorical events; retrieves the last 25 runs and count. Per-workflow idempotency, payload-conflict detection, exact policy reason codes, and explicit limits (50 workflows, 500 runs per workflow) prevent silent uncontrolled growth.
+- Updated `app/local_server.py`: isolated new core endpoints `/api/local-create`, `/api/local-activate`, `/api/local-run`, `/api/local-workflows` and `/api/local-history`, retaining loopback-only exposure and local Host/Origin restrictions. `create_handler()` defaults to an isolated in-memory core for existing tests; application startup uses `~/.ai-automation-studio/local-workflows.sqlite3` for persistent local, explicitly entered categorical metadata. Five original mock workflows remain unchanged and process-local.
+- Updated `web/index.html`: new **functional local core** panel for creating private rule drafts, activating them, running pseudonymous events and viewing persisted results/history. Clear safety notice prohibits customer PII, secrets, live sends or exposing the unauthenticated server.
+- Added `tests/test_local_workflow_core_http.py`: HTTP/SQLite acceptance for draft activation, restart persistence, rule qualification branches, duplicate vs payload conflict, invalid fields, local host/origin protection and concurrent same-ID requests.
+- Extended `tests_browser/test_real_browser.py` with two real-browser journeys: create → activate → run → history → reload and duplicate/conflict protection, without stubbing server responses.
+- Updated `README.md` and added `docs/LOCAL_WORKFLOW_CORE_V1.md` to distinguish **functional local rules** from the five **mock-only** demonstrations and document the actual security/data-processing boundary.
+
+**Strict boundaries:** This is deterministic *local execution*, **not** a full AI agent, auto-triggered workflow, connected CRM, public SaaS, background worker, persistent human approval or verified external success. It accepts only manually entered categorical events, uses no PII fields, makes zero external dispatches, and has no encrypted datastore or user authentication. Global architecture choices remain deferred; this is a scoped prototype engine, not a global platform decision.
+
+**Verification gate:** Open a PR based on `main`, inspect actual file diff and both GitHub Actions browser and Python matrix CI against the **exact current code-and-docs PR head**. Record success/failures and repairs. Do not merge before verified checks. This slice is independent of still-open PR #40 (Slice 36) and must not claim its unrelated code is merged.
+
+**Next product stage:** Controlled intake of real, non-sensitive events (e.g. explicit local import), versioned policy edits, and safe read-only provider adapters. Gate each live capability on real connector evidence, identity controls and data scope; do not substitute synthetic green tests for production validation.
+
