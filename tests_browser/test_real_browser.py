@@ -5,6 +5,7 @@ Unlike source/HTTP tests these click real controls and execute browser JS.
 Synthetic data only; no third-party hosts or provider connectors.
 """
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -66,6 +67,13 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertEqual(5, self.page.locator(".template-card").count())
         self.assertEqual(5, self.page.locator(".mode-tag").filter(
             has_text="EXECUTABLE_MOCK").count())
+        # The local server runs across test methods. Isolate each synthetic
+        # event ID by test identity, while preserving same-ID replay *within*
+        # each test to verify deduplication.
+        suffix = hashlib.sha256(self._testMethodName.encode("ascii")).hexdigest()[:12]
+        for selector in ("#event_id", "#ticket-id", "#appointment-id",
+                         "#crm-id", "#knowledge-id"):
+            self.page.locator(selector).fill("e2e_" + suffix)
 
     def test_gallery_navigation_and_no_external_links(self):
         (ROOT / "browser-artifacts").mkdir(exist_ok=True)
@@ -97,8 +105,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
 
     def test_setup_change_invalidates_run(self):
         self.page.locator("#validate-setup").click()
-        self.page.locator("#run").wait_for(state="visible")
-        self.assertTrue(self.page.locator("#run").is_enabled())
+        expect(self.page.locator("#run")).to_be_enabled()
         self.page.locator("#source").select_option("mock_web_form")
         self.assertTrue(self.page.locator("#run").is_disabled())
         self.assertIn("Validate again", self.page.locator("#setup-status").inner_text())
