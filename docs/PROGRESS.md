@@ -390,7 +390,7 @@ Each slice must report: goal, exact files changed, checks run and their results,
 **Completed**
 - Verified PR #15 CI succeeded on its exact head SHA, merged PR #15 to main, and branched `feat/quarantine-legacy-review-slice-14`.
 - Changed `prototype/lead_inquiry_review_transitions.py` so deprecated `MockReviewTransitions.acknowledge_hold(...)` **always** returns `LEGACY_PATH_DISABLED`; it performs no reads/writes and cannot change event/review state. The existing `inspect(...)` remains read-only and available to the grant coordinator.
-- Replaced the 14 tests previously exercising the unsafe method with **11 explicit denial and read-only regression cases** in `tests/test_lead_inquiry_review_transitions.py`, including fabricated preflight strings, stale versions, 40 concurrent bypass attempts, reopening, unchanged `PENDING` and zero dispatch.
+- Replaced the 14 tests previously exercising the unsafe method with **13 explicit denial and read-only regression cases** in `tests/test_lead_inquiry_review_transitions.py`, including fabricated preflight strings, stale versions, 40 concurrent bypass attempts, no review-row insertion, forged refs, reopening, unchanged `PENDING` and zero dispatch.
 - Updated `tests/test_lead_inquiry_single_use_grants.py` to demonstrate the stale-version race *through two independently issued grants*, then added a regression check showing a forged legacy preflight cannot consume or bypass a legitimate grant. The new test count for this file is **16** (previously 15).
 - No new grant issuer, live connector, authenticated identity service, actual provider action or final persistence architecture is introduced.
 
