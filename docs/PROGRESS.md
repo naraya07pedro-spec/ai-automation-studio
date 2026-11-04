@@ -931,3 +931,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - This is not background scheduling or an actual delivered appointment reminder. No real recipients, SMS/email providers, calendars, model inference, customer data storage, durable approval or externally hosted app.
 - Existing browser UI still needs real-browser visual QA. Event history is process-local and non-durable.
 - Next product slice: fourth executable mock template (CRM Handoff), then fifth (Knowledge & Document Routing), with truthful simulated vs live status throughout.
+
+
+**Verified GitHub Actions evidence and timezone regression repair**
+- PR #33 initial [Actions run 41806482177](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41806482177) **failed** across Python 3.11, 3.12 and 3.13: 363 tests each, exactly **one test failure** per job, `test_same_instant_different_offset_is_duplicate`. Root cause: appointment dedup fingerprint used `datetime.isoformat()` preserving UTC-offset representation, treating equivalent instants with different offsets as conflicting logical events.
+- Repaired `prototype/appointment_followup_flow.py` to canonicalize both aware timestamps using `.astimezone(timezone.utc).isoformat()` before hashing. This preserves legitimate conflict detection while recognizing equal instants across offset representations. The original failing regression test was **not changed or weakened**.
+- Fixed code commit `e9aed642c471f46f8fe284e5b1377bf1f79dc047`: [Actions run 41806747222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41806747222) completed **success**, all three matrix jobs green, **363 unittest methods per Python interpreter, 0 failures** (343 previous plus 20 new appointment tests), total **1089 test executions**.
+- All jobs passed pinned fixture drift gate, runtime evidence report, synthetic fixture validator and complete unittest suite. No evidence of external notification, scheduler, provider receipt, production calendar integration, or manual browser visual QA.
+- This documentation-only commit changes PR HEAD and must pass the three-job CI matrix again before declaring final-head green.
