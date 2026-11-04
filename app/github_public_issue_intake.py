@@ -189,6 +189,8 @@ class PublicGitHubReadOnlyIntake:
         except Exception:
             # Do not surface provider content, URLs, secrets or raw stack.
             return _error("github_connection_unavailable", 502)
+        if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+            return _error("public_source_permission_changed", 409)
         if not rows:
             return 200, {
                 "status": "NO_MATCHING_PUBLIC_ISSUES", "workflow_id": wid,
