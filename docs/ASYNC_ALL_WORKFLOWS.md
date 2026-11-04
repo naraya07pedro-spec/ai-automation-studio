@@ -26,3 +26,7 @@ These four tests supplement the ten existing browser journeys. Backend coverage 
 - Follow-on work should cover the Lead Inquiry's event-input and in-flight local review race as a separate acceptance target, then conduct actual visual review and safe public-demo design.
 
 Verification: inspect GitHub Actions exact-head browser and Python CI before merge. Record actual results in `docs/PROGRESS.md`; do not infer success from code review alone.
+
+## Recorded automated verification
+
+PR #39's implementation head `7f51e5580057c5fc78848cad4cd4f95aca45c0df` passed [Chromium 14/14](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41820163455) and [Python 3.11, 3.12 and 3.13 at 402/402 each](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41820163434). Since its subsequent two commits changed only the documentation files, PR #40 keeps the identical implementation and opens an independent exact-head verification. The final CI outcome is not presumed from prior runs.
