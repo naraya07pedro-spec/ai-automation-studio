@@ -344,3 +344,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - SQLite is still a bounded prototype rather than an architecture commitment; review/storage prototypes should be consolidated after independent regression checks.
 
 **Next smallest slice:** Bind the mock review transition to an internally created, short-lived, single-use authorization artifact instead of accepting a bare preflight status string. Continue to prohibit any live connector or event completion.
+
+
+**Verified GitHub Actions evidence**
+- PR #14 code commit `50985fcbb4aa87bf519dc9c3c1f6fd1f4618f365`: [Actions run 41769924007](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41769924007) completed **success**.
+- The synthetic fixture contract check and all Python stdlib unittest tests passed. Job log reports **128 tests run, 0 failures**, including the 14 new slice-12 tests.
+- A Node.js 20 deprecation warning remains for older GitHub Actions dependencies. This does not indicate a test failure but needs separate maintenance.
+- This evidence covers that commit; recheck CI on the docs-only commit adding this evidence before asserting the latest PR head is verified.
