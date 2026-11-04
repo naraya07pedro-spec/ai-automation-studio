@@ -210,14 +210,27 @@ class GitHubReadOnlyLocalHTTPTests(unittest.TestCase):
     def test_conflicting_labels_or_partial_labels_skipped(self):
         self.ready()
         self.issues = [
-            {"number": 1, "labels": FIRST_LABELS + [
+            {"number": 1, "state": "open", "labels": FIRST_LABELS + [
                 {"name": "aas:budget:2"}]},
-            {"number": 2, "labels": FIRST_LABELS[:2]},
-            {"number": 3, "labels": FIRST_LABELS},
+            {"number": 2, "state": "open", "labels": FIRST_LABELS[:2]},
+            {"number": 3, "state": "open", "labels": FIRST_LABELS},
         ]
         result = self.preview()[1]
         self.assertEqual(1, result["new_count"])
         self.assertEqual(2, result["ignored_count"])
+
+    def test_closed_issue_is_ignored_even_with_valid_label_set(self):
+        self.ready()
+        self.issues = [
+            {"number": 11, "state": "closed", "labels": FIRST_LABELS},
+            {"number": 12, "state": "open", "labels": FIRST_LABELS},
+        ]
+        code, data = self.preview()
+        self.assertEqual(200, code)
+        self.assertEqual(1, data["ignored_count"])
+        self.assertEqual(1, data["new_count"])
+        self.commit(data)
+        self.assertEqual(1, self.count())
 
     def test_pull_requests_are_excluded_not_misrepresented_as_issues(self):
         self.ready()
@@ -230,12 +243,12 @@ class GitHubReadOnlyLocalHTTPTests(unittest.TestCase):
     def test_invalid_number_labels_and_duplicate_issue_numbers_skipped(self):
         self.ready()
         self.issues = [
-            {"number": True, "labels": FIRST_LABELS},
-            {"number": 0, "labels": FIRST_LABELS},
-            {"number": 101, "labels": FIRST_LABELS},
-            {"number": 101, "labels": FIRST_LABELS},
-            {"number": 102, "labels": "not-list"},
-            {"number": 103, "labels": FIRST_LABELS},
+            {"number": True, "state": "open", "labels": FIRST_LABELS},
+            {"number": 0, "state": "open", "labels": FIRST_LABELS},
+            {"number": 101, "state": "open", "labels": FIRST_LABELS},
+            {"number": 101, "state": "open", "labels": FIRST_LABELS},
+            {"number": 102, "state": "open", "labels": "not-list"},
+            {"number": 103, "state": "open", "labels": FIRST_LABELS},
         ]
         result = self.preview()[1]
         self.assertEqual(2, result["new_count"])
@@ -360,7 +373,7 @@ class GitHubReadOnlyLocalHTTPTests(unittest.TestCase):
         self.ready()
         first = self.preview()[1]
         self.commit(first)
-        self.issues = [{"number": 101, "labels": SECOND_LABELS}]
+        self.issues = [{"number": 101, "state": "open", "labels": SECOND_LABELS}]
         code, result = self.preview()
         self.assertEqual(409, code)
         self.assertEqual("event_id_payload_conflict", result["error"])
