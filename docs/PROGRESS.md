@@ -1052,3 +1052,22 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - [Chromium Actions run 41817559222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559222): completed **success**, **10/10 real browser tests passed**, including both delayed-response race regressions.
 - [Python Actions run 41817559225](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559225): completed **success**, Python **3.11/3.12/3.13 each ran 402 tests, zero failures**; total **1206 Python test executions** across three interpreters. No existing backend tests were reduced.
 - This evidence note is a separate documentation commit, requiring **its own final-head CI** before claiming the newest PR HEAD is green. PR #36 is still the unmerged prerequisite at the time of writing; no live provider or public deployment attempted.
+
+
+## Slice 36 · 2026-11-04 · Stale async response protection for four secondary mock workflows
+
+**Goal:** Prevent outdated Support Triage, Appointment Follow-up, CRM Handoff and Knowledge & Document Routing HTTP responses from overwriting newer browser state after form edits or a newer run. Preserve the existing five synthetic mock workflows, no-send guarantees and prior browser/backend acceptance.
+
+**Implemented**
+- Starting point: PR #38 for Slice 35 is confirmed **merged** into `main` (merge commit `55dfba8e87b2beea74754440901ad24df68d4ddd`). New branch: `fix/four-workflow-stale-responses-slice-36` based directly on current `main`, no stacked PR.
+- Updated `web/index.html`: reusable per-form monotonically increasing revision guard; input changes and new submissions invalidate old displayed results, timeline and record previews, and keep mock effect counters at zero. Only the most recent revision may render success, error, or finalize the button state. No backend/protocol changes or removal of validation.
+- Updated `tests_browser/test_real_browser.py`: four new **real Chromium browser tests** intentionally delay delivery of the first actual localhost HTTP response, edit the form, submit a second synthetic event ID, and verify the late first response cannot replace newer output in each of the four workflows. Expected browser suite: **14 tests**, up from 10.
+- Added `docs/ASYNC_ALL_WORKFLOWS.md` with the reproduction, control boundary, verification method and explicit mock-only limitations.
+
+**Verification gate:** Open a PR, review the exact diff and inspect **both** the real-browser CI job and all Python 3.11/3.12/3.13 matrix jobs on the final PR HEAD before merging. Evidence, exact test counts and any failures/repairs must be recorded without claiming success prematurely.
+
+**Known limits**
+- Old requests can still run inside the process-local Python mock engine; the browser merely ignores obsolete deliveries. Reusing the same event ID with modified content intentionally invokes backend dedup/conflict behavior.
+- No external sends, authenticated approval, persistence, model usage, cloud hosting or production capability.
+- Follow-on: inspect Lead Inquiry event input/review async races, real screenshot visual review, then design a safe public demo that does not publish the loopback-only server.
+
