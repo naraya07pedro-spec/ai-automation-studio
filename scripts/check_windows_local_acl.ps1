@@ -28,6 +28,9 @@ $incomplete = $false
 foreach ($path in $paths) {
     if (-not (Test-Path -LiteralPath $path)) {
         Write-Output ("NOT_PRESENT: " + (Split-Path -Leaf $path))
+        if ($path -eq $folder -or $path -eq (Join-Path $folder 'operator.json')) {
+            $incomplete = $true
+        }
         continue
     }
     $name = Split-Path -Leaf $path
