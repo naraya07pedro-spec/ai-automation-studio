@@ -351,3 +351,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The synthetic fixture contract check and all Python stdlib unittest tests passed. Job log reports **128 tests run, 0 failures**, including the 14 new slice-12 tests.
 - A Node.js 20 deprecation warning remains for older GitHub Actions dependencies. This does not indicate a test failure but needs separate maintenance.
 - This evidence covers that commit; recheck CI on the docs-only commit adding this evidence before asserting the latest PR head is verified.
+
+
+## Slice 13 · 2026-11-04 · Single-use mock review grants with atomic consumption
+
+**Goal:** Stop the *new* mock review path from accepting a naked, caller-supplied `PRECHECK_PASSED_NO_TRANSITION` string as proof of an authorized state change. Bind an opaque short-lived grant to the exact mock event and review version and consume it atomically.
+
+**Completed**
+- PR #14 successfully merged to `main` after its verified green CI.
+- Added `prototype/lead_inquiry_single_use_grants.py`, an explicitly mock-only `MockSingleUseReviewGrants` coordinator using the existing durable mock event and review-state tables.
+- `issue` executes the existing preflight with an *injected* verifier, checks that the event is `PENDING` and review version is `OPEN/0`, creates a 32-byte random URL-safe token, and stores only the SHA-256 token hash, event binding, expected version and expiry in SQLite. The token itself is returned only at issuance.
+- `consume_hold` atomically validates grant hash, event binding, expiry, single-use flag, current event state and review version, then burns the grant and inserts `ACKNOWLEDGED_HOLD/1` **in one SQLite transaction**. It never marks the source event `COMPLETED`, sends messages, or performs external work.
+- Added `tests/test_lead_inquiry_single_use_grants.py` with 15 test methods including restart replay denial, expiry, denied verifier, fabricated tokens, cross-event use, stale version, completed event, 30 concurrent same-token contenders, two grants for one event, persisted hash-only token data, zero side effect and redacted output.
+
+**Evidence gate**
+- Read source, tests and progress log back from GitHub branch. Verify exact count and await successful GitHub Actions on the PR head before claiming test pass.
+
+**Important limitations**
+- The verifier remains *injected and simulated*. A caller controlling that verifier can issue grants. There is still NO real authentication, server-side authority boundary, token issuer trust, independently verified evidence or deployed API. This prototype is NOT production authorization.
+- The pre-existing `MockReviewTransitions.acknowledge_hold` method still accepts a bare preflight status for backward compatibility with previous tests; it is **an unsafe legacy mock path** and must be removed/restricted before production exposure. The new grant-coordinated path does not use it.
+- Expiry uses an explicitly supplied `now` to permit deterministic tests; only a trusted server clock can enforce a real expiry. The token is a bearer credential during its lifetime. Hash-at-rest alone does not secure the host filesystem.
+- SQLite remains a bounded experiment, not a final architecture choice. Only the review hold changes; original event stays `PENDING`.
+
+**Next smallest slice (proposed):** Remove or quarantine the legacy bare-preflight transition path without losing regression coverage, then define actual issuer/identity and evidence trust boundaries before considering any real connector or event completion.
+
+
+**Verified GitHub Actions evidence**
+- PR #15 code revision `0b067a440e5e21b480d5493a0bcee7fbdfe41165`: [Actions run 41770506984](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41770506984) completed **success**.
+- Both synthetic fixture contract and Python standard-library unittest steps passed; CI job log reports **143 tests, 0 failures**, including 15 new slice-13 tests.
+- Existing Node.js 20 deprecation warning from GitHub Actions dependencies remains a separate maintenance task.
+- This documentation-only commit needs its own green CI check before asserting the latest PR HEAD passed.
