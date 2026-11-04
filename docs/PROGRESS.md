@@ -646,3 +646,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Existing path-based low-level synthetic recovery API remains available as a documented test-only helper. The new pathless API is recommended for future test harnesses but not an enforced security boundary.
 
 **Next smallest slice (proposed):** Validate independent manifest verification against expected fixed synthetic fixtures, test concurrent disposable workspace runs, and review test-suite coverage of artifact mutations without presenting local checks as production recovery guarantees.
+
+
+**Verified GitHub Actions evidence**
+- PR #24 revision `c55794b5427f5bbf25a24c9174388dc1b5d5d9fc`: [run 41786419485](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41786419485), completed **success**.
+- Synthetic fixture contract validation and full Python standard-library unittest steps both passed. CI logs report **227 tests, 0 failures** (previous 212 plus 15 disposable-workspace tests).
+- GitHub Actions still emits a non-blocking Node.js 20 deprecation warning for older action dependencies.
+- This docs-only commit changes the PR head; verify its own CI run before reporting latest-head success.
