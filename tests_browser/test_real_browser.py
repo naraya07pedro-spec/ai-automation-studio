@@ -204,6 +204,71 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertIn("mock_knowledge_base", self.page.locator("#knowledge-preview").inner_text())
         self.assertEqual("0", self.page.locator("#knowledge-transferred").inner_text())
 
+    def assert_old_response_does_not_overwrite_new_run(
+            self, endpoint, button, select, choice, event_id, state, expected):
+        """Delay a REAL HTTP response, edit inputs, then run a new event.
+
+        The old completion must not overwrite either the revised inputs
+        or the newer result, even when the old request completed first.
+        """
+        self.page.evaluate("""(endpoint) => {
+            const nativeFetch = window.fetch.bind(window);
+            let holdFirst = true;
+            window.fetch = async (url, options) => {
+                const response = await nativeFetch(url, options);
+                if (url === endpoint && holdFirst) {
+                    holdFirst = false;
+                    await new Promise(resolve => { window.__releaseOther = resolve; });
+                }
+                return response;
+            };
+        }""", endpoint)
+        self.page.locator(button).click()
+        self.wait_for_gate("__releaseOther")
+        self.page.locator(select).select_option(choice)
+        self.assertTrue(self.page.locator(button).is_enabled())
+        self.assertIn("STALE", self.page.locator(state).inner_text())
+        self.page.locator(event_id).fill(
+            "revised_" + hashlib.sha256(
+                self._testMethodName.encode("ascii")).hexdigest()[:12])
+        self.page.locator(button).click()
+        expect(self.page.locator(state)).to_contain_text(expected)
+        self.page.evaluate("window.__releaseOther()")
+        self.page.wait_for_timeout(200)
+        self.assertIn(expected, self.page.locator(state).inner_text())
+        self.assertTrue(self.page.locator(button).is_enabled())
+
+    def test_triage_delayed_previous_response_cannot_override_new_run(self):
+        self.assert_old_response_does_not_overwrite_new_run(
+            "/api/mock-triage", "#triage-run", "#ticket-category",
+            "billing", "#ticket-id", "#triage-state", "ROUTED_MOCK_ONLY")
+        self.assertEqual("0", self.page.locator("#triage-dispatch").inner_text())
+
+    def test_appointment_delayed_previous_response_cannot_override_new_run(self):
+        self.assert_old_response_does_not_overwrite_new_run(
+            "/api/mock-appointment", "#appointment-run",
+            "#appointment-channel", "mock_sms", "#appointment-id",
+            "#appointment-state", "PLANNED_MOCK_ONLY")
+        self.assertEqual("0", self.page.locator("#appointment-sent").inner_text())
+
+    def test_crm_delayed_previous_response_cannot_override_new_run(self):
+        self.assert_old_response_does_not_overwrite_new_run(
+            "/api/mock-crm-handoff", "#crm-run", "#crm-review",
+            "true", "#crm-id", "#crm-state", "SIMULATED_HANDOFF_PREPARED")
+        self.assertEqual("0", self.page.locator("#crm-created").inner_text())
+        self.assertIn("crm_lifecycle_stage",
+                      self.page.locator("#crm-record").inner_text())
+
+    def test_knowledge_delayed_previous_response_cannot_override_new_run(self):
+        self.assert_old_response_does_not_overwrite_new_run(
+            "/api/mock-knowledge-routing", "#knowledge-run",
+            "#knowledge-classification", "restricted",
+            "#knowledge-id", "#knowledge-state", "RESTRICTED_NO_ROUTE")
+        self.assertEqual("0",
+                         self.page.locator("#knowledge-transferred").inner_text())
+        self.assertIn("No routing preview",
+                      self.page.locator("#knowledge-preview").inner_text())
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())
