@@ -24,7 +24,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = subprocess.Popen(
-            [sys.executable, "-u", "app/local_server.py"],
+            [sys.executable, "-u", "tests_browser/serve_auth_fixture.py"],
             cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env={**os.environ, "PYTHONUNBUFFERED": "1"})
         try:
@@ -64,6 +64,11 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page = self.context.new_page()
         self.page.goto(URL, wait_until="networkidle")
         self.addCleanup(self.context.close)
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        self.page.locator("#operator-password").fill("ci_only_fixture_password_1234")
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_hidden()
+        expect(self.page.locator("#operator-logout")).to_be_visible()
         self.assertEqual(5, self.page.locator(".template-card").count())
         self.assertEqual(5, self.page.locator(".mode-tag").filter(
             has_text="EXECUTABLE_MOCK").count())
@@ -476,6 +481,43 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "RESUMED_LOCAL")
         expect(self.page.locator("#public-github-preview")).to_be_enabled()
         # No real GitHub request is made by either browser gate test.
+
+    def test_operator_session_restored_on_reload_without_local_storage(self):
+        self.page.reload(wait_until="networkidle")
+        expect(self.page.locator("#operator-gate")).to_be_hidden()
+        expect(self.page.locator("#operator-logout")).to_be_visible()
+        # Browser cannot read the HttpOnly credential; only cookie transport.
+        self.assertEqual([],self.page.evaluate("""() => [...document.cookie.split(';')]
+            .filter(x => x.includes('aas_session'))"""))
+        self.assertTrue(self.page.evaluate("""() => {
+            return !sessionStorage.getItem('aas_session')
+                && !localStorage.getItem('aas_session'); }"""))
+
+    def test_operator_logout_blocks_api_until_fresh_login(self):
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        denied=self.page.evaluate("""async () => {
+            const r=await fetch('/api/local-workflows');return r.status;}""")
+        self.assertEqual(401,denied)
+        self.page.locator("#operator-password").fill("wrong_ci_password")
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-login-status")).to_contain_text("Login rejected")
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        self.page.locator("#operator-password").fill("ci_only_fixture_password_1234")
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_hidden()
+
+    def test_missing_csrf_rejected_even_with_valid_session(self):
+        result=self.page.evaluate("""async () => {
+          const r=await fetch('/api/local-create',{
+           method:'POST',headers:{'Content-Type':'application/json'},
+           body:JSON.stringify({workflow_id:'csrf_browser',
+            display_name:'CSRF Browser Test',service_filter:'any',
+            min_budget_tier:1,followup_policy:'draft_only'})});
+          return {status:r.status,body:await r.json()};}""")
+        self.assertEqual(403,result["status"])
+        self.assertEqual("operator_csrf_required",result["body"]["error"])
+        self.assertFalse(self.page.locator("#operator-gate").is_visible())
 
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
