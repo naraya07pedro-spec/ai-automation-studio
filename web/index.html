@@ -10,6 +10,13 @@
 .timeline{display:grid;gap:8px;margin:16px 0}.stage{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#0a1621;border:1px solid #263847;border-radius:10px;padding:10px 12px;font-size:12px}.stage strong{color:#8ce2c9;font-size:11px}.draft{padding:16px;border:1px solid #34545a;border-radius:12px;background:#11232b;margin:14px 0}.draft h3{font-size:14px}.draft p{font-size:12px;color:#c2d5e1;line-height:1.6}.review-actions{display:flex;gap:10px;flex-wrap:wrap}.review-actions button{flex:1}.review-actions button:disabled{opacity:.5;cursor:not-allowed}
 
 .gallery-header{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:20px 0 14px}.gallery{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;margin-bottom:22px}.template-card{background:#101b29;border:1px solid #2c394a;border-radius:14px;padding:17px;display:flex;flex-direction:column;gap:9px;min-height:207px}.template-card h3{font-size:14px;margin:0;line-height:1.3;letter-spacing:-.02em}.template-card p{font-size:11px;color:#9aabc0;line-height:1.5;margin:0;flex:1}.template-card .category{font-size:10px;color:#86b6be;text-transform:uppercase;letter-spacing:.1em}.template-card button{width:100%;border-radius:8px;padding:9px;background:#243344;color:#bad0df;border:1px solid #3b5266;font-size:11px}.template-card button:not(:disabled){background:#81e8c8;border:0;color:#09201d;font-weight:750}.template-card button:disabled{cursor:not-allowed;opacity:.6}.template-card[aria-current="true"]{border-color:#6fdcbf}.mode-tag{font-size:10px;font-weight:750;color:#83e6c7}.mode-tag.preview{color:#e6bd80}.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.setup-info{color:#9cafbe;font-size:12px;line-height:1.5}.setup-msg{margin-top:12px;font-size:12px;color:#a9ced8;min-height:20px}.setup-actions{display:flex;align-items:center;gap:12px}.setup-actions button{margin-top:12px;flex:1}.setup-actions .secondary{padding:12px}@media(max-width:950px){.gallery{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:600px){.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}.template-card{min-height:190px;padding:12px}.setup-grid{grid-template-columns:1fr}}
+.line > *, .stage > * {min-width:0}
+.line strong, .stage strong {overflow-wrap:anywhere;word-break:break-word}
+@media(max-width:600px) {
+ .gallery-header{flex-wrap:wrap}
+ .layout > *, .panel, .template-card{min-width:0}
+ .tag{overflow-wrap:anywhere}
+}
 </style>
 </head>
 <body>
@@ -42,7 +49,7 @@
 <div class="line"><span>Qualification</span><strong id="qualification">Not started</strong></div>
 <div class="line"><span>External dispatches</span><strong id="dispatch">0</strong></div>
 </div>
-<div class="kicker" style="margin-top:22px">EXECUTION TIMELINE · SERVER-DERIVED</div><div id="timeline" class="timeline" aria-live="polite"><span class="muted">No run yet.</span></div>
+<div class="kicker" style="margin-top:22px">EXECUTION TIMELINE · SERVER-DERIVED</div><div id="lead-timeline" class="timeline" aria-live="polite"><span class="muted">No run yet.</span></div>
 <div class="kicker" style="margin-top:20px">LOCAL FOLLOW-UP DRAFT · NEVER SENT</div><div id="draft" class="draft"><p>Run a fresh synthetic inquiry to prepare a fixed mock draft.</p></div>
 <div class="review-actions"><button type="button" class="secondary" id="ack" disabled>Acknowledge review</button><button type="button" class="secondary" id="reject" disabled>Reject draft</button></div><div id="review-status" class="foot" role="status" aria-live="polite">No review action available.</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div class="kicker">REDACTED EXECUTION JSON</div><button class="secondary" type="button" id="copy">Copy trace</button></div><pre id="trace" class="trace" aria-live="polite">No execution yet. Submit the synthetic lead form to inspect the result.</pre><div class="foot">Process-local deduplication resets when the server restarts. No persistent identity or provider receipts.</div>
@@ -156,7 +163,7 @@ $("demo").addEventListener("submit",async event=>{
  const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
  $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
  $("dispatch").textContent=String(data.external_dispatch_count);$("status").textContent="MOCK RUN COMPLETED · NO SENDS";
- const timeline=$("timeline");timeline.replaceChildren();
+ const timeline=$("lead-timeline");timeline.replaceChildren();
  for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const name=document.createElement("span");name.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(name,state);timeline.append(item);}
  const offer=data.review_offer;const draft=$("draft");draft.replaceChildren();
  if(offer?.draft){const title=document.createElement("h3");title.textContent=offer.draft.subject;const body=document.createElement("p");body.textContent=offer.draft.body;const foot=document.createElement("p");foot.textContent="Recipient: NOT_SET · Delivery: NEVER_SENT · No verified operator";draft.append(title,body,foot);if(offer.review_token){reviewToken=offer.review_token;$("ack").disabled=false;$("reject").disabled=false;$("review-status").textContent="Awaiting local review (does not authorize sending).";}else{$("review-status").textContent="Draft-only policy. No local review token was issued."};}
