@@ -90,6 +90,21 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_authenticated_local_agent_browser_panel(self):
+        expect(self.page.locator("#local-agent-panel")).to_be_visible()
+        expect(self.page.locator("#local-agent-send")).to_be_enabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-agent-prompt").fill("calculate 4+5")
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-output")).to_contain_text(
+            "Fixture answer: 13")
+        expect(self.page.locator("#local-agent-status")).to_contain_text(
+            "Tools: calculate")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        expect(self.page.locator("#local-agent-output")).to_contain_text(
+            "previous answer cleared")
+
     def test_gallery_navigation_and_no_external_links(self):
         (ROOT / "browser-artifacts").mkdir(exist_ok=True)
         self.page.screenshot(path=str(ROOT / "browser-artifacts" / "desktop-gallery.png"),
