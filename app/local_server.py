@@ -1,16 +1,20 @@
-"""Loopback-only local demo and a minimal persistent, non-PII rule core.
+"""Loopback-only local prototype and SQLite rule core.
 
-Not a production HTTP server. No authentication, live providers or sends.
+Production local entry requires a provisioned single-operator login; it is
+still NOT a public production server, provider writer or AI agent.
 The separate local workbench stores pseudonymous event IDs and rule
 categories in SQLite; mock workflow state still resets on restart.
 """
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import argparse
+import getpass
 import json
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
+from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 
@@ -37,8 +41,12 @@ _CONFIGURATION = {
 _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
-def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None):
-    """Return an isolated handler class for tests or local app instantiation."""
+def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
+                   operator_auth=None):
+    """Return isolated handler; operator_auth=None ONLY in controlled old tests.
+
+    start_local_server() never runs with None; missing owner config is fatal.
+    """
     workflow = flow if flow is not None else MockInquiryFlow()
     lock = threading.Lock()
     review = LocalMockReview()
@@ -57,13 +65,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             # Refuse logging request paths, free text, identities and payloads.
             return
 
-        def _send(self, code, payload, content_type="application/json; charset=utf-8"):
+        def _send(self, code, payload, content_type="application/json; charset=utf-8",
+                  cookie_header=None):
             body = (payload.encode("utf-8") if isinstance(payload, str)
                     else json.dumps(payload, sort_keys=True).encode("utf-8"))
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Frame-Options", "DENY")
+            if cookie_header is not None:
+                self.send_header("Set-Cookie", cookie_header)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
             self.end_headers()
@@ -82,13 +95,67 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 return "same_origin_required"
             return None
 
+        @staticmethod
+        def _no_cookie():
+            return "aas_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"
+
+        @staticmethod
+        def _login_cookie(token):
+            # Secure cannot be set on plain http://127.0.0.1. Never expose
+            # this loopback-only HTTP server to LAN/port forwarding.
+            return ("aas_session=" + token +
+                    "; Max-Age=3600; Path=/; HttpOnly; SameSite=Strict")
+
+        def _operator_token(self):
+            # Reject multiple session cookies instead of guessing one.
+            from http.cookies import SimpleCookie, CookieError
+            raw = self.headers.get("Cookie", "")
+            if not raw or len(raw) > 2048 or raw.count("aas_session=") != 1:
+                return None
+            try:
+                parsed = SimpleCookie()
+                parsed.load(raw)
+                return parsed["aas_session"].value if "aas_session" in parsed else None
+            except (CookieError, ValueError):
+                return None
+
+        def _operator_authorized(self, mutation=False):
+            if operator_auth is None:
+                # Deliberately restricted to injected test handlers. Main
+                # server always loads a real configured operator verifier.
+                return True
+            token = self._operator_token()
+            inspected = operator_auth.inspect(token)
+            if inspected is None:
+                self._send(401, {"error": "operator_session_required"})
+                return False
+            if mutation and not operator_auth.authorize(
+                    token, self.headers.get("X-AAS-CSRF")):
+                self._send(403, {"error": "operator_csrf_required"})
+                return False
+            return True
+
         def do_GET(self):
             route = urlsplit(self.path)
-            if route.path in ("/api/local-workflows", "/api/local-history", "/api/local-revisions"):
-                denied = self._local_allowed()
-                if denied:
-                    self._send(403, {"error": denied})
+            denied = self._local_allowed()
+            if denied:
+                self._send(403, {"error": denied})
+                return
+            if route.path == "/api/operator-session" and not route.query:
+                if operator_auth is None:
+                    self._send(200, {"authenticated": True,
+                                     "test_only_legacy_handler": True})
+                else:
+                    session = operator_auth.inspect(self._operator_token())
+                    if session is None:
+                        self._send(200, {"authenticated": False})
+                    else:
+                        self._send(200, {"authenticated": True, **session})
+                return
+            if route.path != "/" and route.path != "/api/health":
+                if not self._operator_authorized():
                     return
+            if route.path in ("/api/local-workflows", "/api/local-history", "/api/local-revisions"):
                 if route.path == "/api/local-workflows" and not route.query:
                     self._send(200, core.list_workflows())
                     return
@@ -115,15 +182,19 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit"):
+            if self.path not in ("/api/operator-login", "/api/operator-logout",
+                                 "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit"):
                 self._send(404, {"error": "not_found"})
                 return
-            # Reject cross-origin mutation attempts. This is still a local
-            # development demo, not an authentication or public CSRF solution.
+            # Reject cross-origin mutation attempts before reading the body.
+            # Operator session+CSRF is checked on every non-login mutation.
             denied = self._local_allowed()
             if denied:
                 self._send(403, {"error": denied})
                 return
+            if self.path != "/api/operator-login":
+                if not self._operator_authorized(mutation=True):
+                    return
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                 self._send(415, {"error": "json_required"})
                 return
@@ -139,6 +210,33 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/operator-login":
+                if operator_auth is None:
+                    self._send(403, {"error": "auth_fixture_only"})
+                    return
+                if type(data) is not dict or set(data) != {"password"}:
+                    self._send(422, {"error": "invalid_login_fields"})
+                    return
+                status, session = operator_auth.login(data["password"])
+                if status != 200:
+                    self._send(status, {"error": (
+                        "operator_login_locked" if status == 429
+                        else "invalid_operator_credentials")})
+                    return
+                self._send(200, {"authenticated": True,
+                                 "csrf_token": session["csrf_token"],
+                                 "expires_in": session["expires_in"]},
+                           cookie_header=self._login_cookie(session["cookie_token"]))
+                return
+            if self.path == "/api/operator-logout":
+                if type(data) is not dict or data:
+                    self._send(422, {"error": "invalid_logout_fields"})
+                    return
+                if operator_auth is not None:
+                    operator_auth.logout(self._operator_token())
+                self._send(200, {"authenticated": False},
+                           cookie_header=self._no_cookie())
                 return
             if self.path in ("/api/local-github-preview", "/api/local-github-commit"):
                 method = (public_github.preview if self.path == "/api/local-github-preview"
@@ -244,18 +342,49 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
 
 def start_local_server(port=8765):
-    """Bind only IPv4 loopback; never expose this unauthenticated demo to LAN."""
-    # The interactive local workbench persists only explicit non-PII
-    # workflow IDs/rule categories. Other five demo workflows stay mock-only.
-    core = LocalWorkflowCore(Path.home() / ".ai-automation-studio" / "local-workflows.sqlite3")
-    server = ThreadingHTTPServer(("127.0.0.1", port), create_handler(local_core=core))
-    print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
+    """Refuse to bind until one offline owner verifier is provisioned."""
+    home = Path.home() / ".ai-automation-studio"
+    operator = LocalOperatorAuth.load(home / "operator.json")
+    core = LocalWorkflowCore(home / "local-workflows.sqlite3")
     try:
-        server.serve_forever()
+        server = ThreadingHTTPServer(
+            ("127.0.0.1", port),
+            create_handler(local_core=core, operator_auth=operator))
+        print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
     finally:
-        server.server_close()
         core.close()
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Local-only workflow server with offline owner provisioning.")
+    parser.add_argument("--init-owner", action="store_true",
+                        help="Provision a single operator password offline.")
+    args = parser.parse_args(argv)
+    if args.init_owner:
+        password = getpass.getpass("New local operator password (12+ characters): ")
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            raise SystemExit("Owner setup rejected: passwords did not match.")
+        try:
+            LocalOperatorAuth.provision(
+                Path.home() / ".ai-automation-studio" / "operator.json", password)
+        except FileExistsError:
+            raise SystemExit("Owner exists; refusing to overwrite it.")
+        except ValueError:
+            raise SystemExit("Owner setup rejected: 12-128 characters required.")
+        print("Local operator provisioned; password is never printed.")
+        return
+    try:
+        start_local_server()
+    except OperatorConfigurationError as exc:
+        raise SystemExit(
+            str(exc) + ": run python app/local_server.py --init-owner first.")
+
+
 if __name__ == "__main__":
-    start_local_server()
+    main()
