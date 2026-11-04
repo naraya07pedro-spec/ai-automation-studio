@@ -68,6 +68,9 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             has_text="EXECUTABLE_MOCK").count())
 
     def test_gallery_navigation_and_no_external_links(self):
+        (ROOT / "browser-artifacts").mkdir(exist_ok=True)
+        self.page.screenshot(path=str(ROOT / "browser-artifacts" / "desktop-gallery.png"),
+                             full_page=True)
         cards = self.page.locator(".template-card")
         self.assertEqual(5, cards.count())
         for index, target in enumerate((
@@ -145,6 +148,9 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertTrue(self.page.locator("#knowledge-form").is_visible())
         self.page.locator("#knowledge-run").click()
         expect(self.page.locator("#knowledge-state")).to_contain_text("ROUTING_PREVIEW_PREPARED")
+        (ROOT / "browser-artifacts").mkdir(exist_ok=True)
+        self.page.screenshot(path=str(ROOT / "browser-artifacts" / "mobile-375px.png"),
+                             full_page=True)
         # Outer page should not require horizontal scrolling at phone width.
         overflow = self.page.evaluate(
             "() => document.documentElement.scrollWidth > window.innerWidth + 1")
