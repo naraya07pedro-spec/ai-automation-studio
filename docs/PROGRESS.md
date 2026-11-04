@@ -1222,3 +1222,19 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Unfinished safeguards:** authenticated local operator identity, private data processing consent, no-authority-on-preview security, live provenance confirmation, durable external queue/reconciliation, real AI inference and any provider write integration. None are claimed by this slice. The local development server remains loopback-only and must never be internet-exposed.
 - This final progress line was added **after** the verified PR was squash-merged and is **documentation-only**; it does not change the exact-head tested implementation.
 
+
+
+## Slice 41 · 2026-11-04 · Reproducible real-network verification for public GitHub read-only source
+
+**Primary gap from Slice 40:** The first public GitHub Issues adapter had 502 Python tests/interpreter and 24 browser tests green, but its GitHub data was still simulated in all CI runs. A live-capable network implementation is not the same as **actual provider transport verification**. Avoid synthetic evidence laundering. Build an explicit real-GET check while preserving no-token, no-write, local-only scope.
+
+**Implemented in `feat/public-github-live-probe-slice-41`:**
+- `scripts/probe_public_github_live.py`: a standalone, reproducible on-demand smoke that builds one temporary in-memory local workflow and runs the **shipped** `PublicGitHubReadOnlyIntake.preview` against `api.github.com` unless a synthetic fetcher is deliberately injected by unit tests. The default probe targets the known public `octocat/Hello-World` repository, returning **redacted** counts and status only, never raw titles, user handles, bodies, tokens or provider response. No writes to GitHub or persistent local SQLite are possible. Optional `--require-eligible` requires actual live category-label matches; `--check-ephemeral-import` explicitly exercises local atomic commit only into temporary SQLite `:memory:` when eligible live labels exist.
+- `.github/workflows/public-github-live-smoke.yml`: separate GitHub-hosted Python 3.12 job with `permissions: contents: read`, no checkout credentials, one real public GitHub API call through the product adapter and no permissioned mutation. Pull-request and manual dispatch support. Provider outage/rate limit must fail and be reported as such.
+- `tests/test_github_public_live_probe.py`: **11 new offline tests** for correct evidence semantics (transport vs live label mapping vs ephemeral commit), failure/invalid-repo redaction, PR/empty source non-eligibility and no raw provider data leakage. These isolated tests do NOT count as live verification.
+- `docs/LIVE_PUBLIC_GITHUB_VERIFICATION.md`, `README.md`: exact commands, three proof levels, official GitHub API version `2026-03-10`, limited one-page source contract, and reproducible smoke guidance.
+
+**Acceptance gates (not yet observed):** 513 existing-plus-new Python unittest methods **per interpreter** 3.11/3.12/3.13, 24 existing real Chromium cases, and a **separate real-network** GitHub Actions job executing the production adapter, all on the exact PR HEAD. The live job MUST be distinguished from offline tests; even successful transport from an unlabeled repo cannot justify calling real label-to-SQLite E2E `LIVE_MAPPING_VERIFIED`.
+
+**Scope and risk:** No new source-writing API, no private repository, no provider token, no creation of public test issues or labels, no scheduled checks, and no user-identity inference. The project remains an unauthenticated localhost prototype. This stage verifies the operational read boundary, and keeps genuinely labeled live-source mapping pending unless the actual provider result proves otherwise. After final PR merge, record exact run links/SHA and any blockers here.
+
