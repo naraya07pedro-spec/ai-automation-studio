@@ -75,6 +75,16 @@ class RealBrowserWorkflowTests(unittest.TestCase):
                          "#crm-id", "#knowledge-id"):
             self.page.locator(selector).fill("e2e_" + suffix)
 
+    def wait_for_gate(self, name):
+        # Playwright.wait_for_function internally evaluates a string, which
+        # this app's intentionally strict CSP rejects (no 'unsafe-eval').
+        # DevTools evaluation here does not weaken the served CSP.
+        for _ in range(100):
+            if self.page.evaluate("(key) => typeof window[key] === 'function'", name):
+                return
+            time.sleep(0.05)
+        self.fail("timed out waiting for actual network response gate")
+
     def test_gallery_navigation_and_no_external_links(self):
         (ROOT / "browser-artifacts").mkdir(exist_ok=True)
         self.page.screenshot(path=str(ROOT / "browser-artifacts" / "desktop-gallery.png"),
@@ -123,7 +133,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             };
         }""")
         self.page.locator("#validate-setup").click()
-        self.page.wait_for_function("typeof window.__releaseSetup === 'function'")
+        self.wait_for_gate("__releaseSetup")
         self.page.locator("#source").select_option("mock_web_form")
         self.assertTrue(self.page.locator("#run").is_disabled())
         self.page.evaluate("window.__releaseSetup()")
@@ -148,7 +158,7 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             };
         }""")
         self.page.locator("#run").click()
-        self.page.wait_for_function("typeof window.__releaseRun === 'function'")
+        self.wait_for_gate("__releaseRun")
         self.page.locator("#destination").select_option("mock_sheet")
         self.assertTrue(self.page.locator("#run").is_disabled())
         self.page.evaluate("window.__releaseRun()")
