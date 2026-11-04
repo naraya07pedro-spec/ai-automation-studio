@@ -5,7 +5,6 @@ evidence of an external effect. The underlying PENDING state never changes.
 No operator authentication exists in this prototype: the reviewer reference
 is caller-supplied and must not be presented as verified identity.
 """
-from contextlib import closing
 from hashlib import sha256
 import sqlite3
 
