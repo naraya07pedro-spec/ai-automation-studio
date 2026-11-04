@@ -18,6 +18,22 @@ Scroll to **Build and run your first local rule workflow**. Create a private rul
 
 **Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server is unauthenticated, SQLite is not encrypted by the app, no connector is present, and everything runs on localhost. No outbound message or external CRM change occurs. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
 
+## Local CSV event intake (Slice 38)
+
+Use the **Import events from a local CSV** panel below the functional local workflow workbench to import up to **25 small categorical events** at once, with an explicit no-write **Preview** before **Commit**. Both stages validate the exact file contents against the active workflow and its SQLite event ledger; stale previews, conflicting event IDs and invalid columns are rejected. Records share the existing durable local run history, and manual/batch duplicates use the same event fingerprint and decision rules.
+
+Supported file layout (invented IDs only):
+
+```csv
+event_id,service_code,budget_tier,timeline
+sample_001,automation,3,soon
+sample_002,integration,1,flexible
+```
+
+Maximum CSV body size is 4 KiB. Only the explicitly allowed service, budget tier and timeline categories are accepted. **Do not import customer data, contacts, identities, messages or secrets.** Raw CSV contents are processed in memory and never stored in the SQLite ledger. This is *local manual import*, not an external integration, unattended trigger or AI automation.
+
+See [CSV intake specification](docs/LOCAL_CSV_BATCH_INTAKE_V1.md) for data-flow, rejection cases, preview tokens, and remaining boundaries.
+
 ## Five executable *mock* workflows
 
 | Workflow | Browser interaction | Actual side effects |
@@ -52,6 +68,7 @@ PRs run the Python 3.11/3.12/3.13 matrix and a separate Chromium UI job. Chromiu
 
 - `web/index.html`: responsive browser client for five mock demos and the separate functional rule workbench.
 - `app/local_workflow_core.py`: standard-library SQLite rule lifecycle, immutable v1 activation and durable event history.
+- `app/local_csv_batch.py`: bounded in-memory CSV parsing, no-write preview and transactional local event import.
 - `app/local_server.py`: stdlib HTTP server; loopback only and intentionally unauthenticated.
 - `prototype/`: deterministic isolated mock workflow engines, state/recovery reference implementation and runtime evidence checks.
 - `tests/` and `tests_browser/`: backend HTTP/runtime and real-browser acceptance.

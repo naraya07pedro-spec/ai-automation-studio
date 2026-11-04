@@ -35,6 +35,25 @@ def _error(code, status=422):
                     "external_dispatch_count": 0}
 
 
+def _evaluate_rule(service_filter, min_budget, policy, service, budget, timeline):
+    """One deterministic decision function shared by manual and CSV intake."""
+    if service_filter != "any" and service_filter != service:
+        return "NOT_QUALIFIED_LOCAL", "SERVICE_MISMATCH"
+    if budget < min_budget:
+        return "NOT_QUALIFIED_LOCAL", "BUDGET_BELOW_THRESHOLD"
+    if timeline == "flexible":
+        return "NEEDS_REVIEW_LOCAL", "TIMELINE_UNSPECIFIED"
+    if policy == "review_required":
+        return "NEEDS_REVIEW_LOCAL", "POLICY_REQUIRES_REVIEW"
+    return "QUALIFIED_DRAFT_ONLY", "MATCHED_LOCAL_RULES"
+
+
+def _event_fingerprint(request):
+    """Stable fingerprint matches old v1 manual-event semantics."""
+    return hashlib.sha256(json.dumps(request, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 class LocalWorkflowCore:
     """Operator-controlled, single-machine SQLite rules and evidence ledger."""
 
@@ -144,8 +163,7 @@ class LocalWorkflowCore:
             return _error("invalid_budget_tier")
         if type(timeline) is not str or timeline not in TIMELINES:
             return _error("invalid_timeline")
-        fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True,
-                    separators=(",", ":")).encode("utf-8")).hexdigest()
+        fingerprint = _event_fingerprint(request)
         with self._lock, self.db:
             workflow = self.db.execute("""SELECT service_filter,min_budget_tier,
                 followup_policy,version,status FROM local_workflows WHERE workflow_id=?""",
@@ -168,16 +186,8 @@ class LocalWorkflowCore:
                                (wid,)).fetchone()[0] >= MAX_RUNS_PER_WORKFLOW:
                 return _error("run_capacity_reached", 409)
             service_filter, min_budget, policy, version, _ = workflow
-            if service_filter != "any" and service_filter != service:
-                decision, reason = "NOT_QUALIFIED_LOCAL", "SERVICE_MISMATCH"
-            elif budget < min_budget:
-                decision, reason = "NOT_QUALIFIED_LOCAL", "BUDGET_BELOW_THRESHOLD"
-            elif timeline == "flexible":
-                decision, reason = "NEEDS_REVIEW_LOCAL", "TIMELINE_UNSPECIFIED"
-            elif policy == "review_required":
-                decision, reason = "NEEDS_REVIEW_LOCAL", "POLICY_REQUIRES_REVIEW"
-            else:
-                decision, reason = "QUALIFIED_DRAFT_ONLY", "MATCHED_LOCAL_RULES"
+            decision, reason = _evaluate_rule(
+                service_filter, min_budget, policy, service, budget, timeline)
             created_at = _utc()
             self.db.execute("""INSERT INTO local_runs
                 (workflow_id,event_id,fingerprint,workflow_version,

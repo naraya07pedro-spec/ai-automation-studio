@@ -1120,3 +1120,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The local SQLite engine persists user-created *categorical* rule configurations and pseudonymous event outcomes across restarts. No public deployment, actual AI reasoning, authenticated operator identity, live intake connector, external send, or secure PII processing was completed. These remain meaningful product gaps, not just documentation checkboxes.
 - This final post-merge progress note is **documentation-only**, added after the reviewed code merge. The substantive implementation remains the exact-head tested, merged PR #42.
 
+
+
+## Slice 38 · 2026-11-04 · Local CSV intake with no-write preview and transactional import
+
+**Product objective:** Convert the functional rule workflow introduced in Slice 37 from manual single-event entry to **bounded real local file intake**. Users choose a local categorical CSV, inspect every deterministic decision without writing, then explicitly commit a complete batch to the **same durable SQLite ledger**. No live connector or external provider is claimed.
+
+**Implemented on branch `feat/local-csv-batch-intake-slice-38` from verified merged `main`:**
+- `app/local_workflow_core.py`: factored existing deterministic v1 rule evaluation and canonical event fingerprint into shared helpers, preserving manual-run semantics.
+- `app/local_csv_batch.py`: strict stdlib parser (exact four columns, 1–25 rows, ≤4 KiB, ASCII categorical allowlists), refusal of malformed/personal-data-looking structures and duplicate IDs inside a batch; no-write preview, existing-event dedup and conflict checks, capacity preflight. A preview token binds CSV SHA256, active workflow version and current SQLite run count, **not** an authenticated approval.
+- `POST /api/local-batch-preview` and `POST /api/local-batch-commit` in `app/local_server.py`: loopback-only, JSON, Host and Origin checks, request-size limit; commit rechecks all events and snapshot and writes all new records under the same local lock in one SQLite transaction. Any stale preview or payload conflict fails before new writes. No external operations.
+- `web/index.html`: separate local file chooser and explicit preview/commit buttons, sample CSV, data boundary warning, stale-on-change invalidation and saved-history refresh.
+- `tests/test_local_csv_batch_http.py`: **25 new HTTP/SQLite acceptance methods**, covering no-write preview, atomic and durable commit, replay vs changed-content conflict, manual/CSV shared identity, unsafe CSV refusal, capacity, stale snapshot, concurrency, Host/Origin checks and zero external dispatch.
+- `tests_browser/test_real_browser.py`: **3 new Chromium journeys** covering a genuine browser File input, preview-then-commit and reload; stale preview rejected after another local event; and invalid extra personal-data column blocked.
+- Updated `README.md` and added `docs/LOCAL_CSV_BATCH_INTAKE_V1.md` with schema, user instructions, limitations, and a local-only security model.
+
+**Verification pending:** Open PR and run **both** existing Python CI matrix 3.11/3.12/3.13 plus actual Chromium UI test CI on the exact final source+documentation commit. Expected suite sizes before execution: **449 Python methods per interpreter** (424 existing + 25 new) and **19 browser journeys** (16 existing + 3 new). These are expected counts, **not results**. Fix failures and record actual evidence. Do not merge on assumptions.
+
+**Boundaries:** An actual CSV file is read and processed locally but this is **manually initiated file ingestion**, not a live inbox/webhook, AI agent, external read-only connector, unattended worker or SaaS. No identity/authentication, raw customer data support, network exposure, real email/CRM sends, cross-tab authorization or production privacy/security assurance. Source raw CSV is not persisted but sanitized categorical event IDs are, and a seemingly valid identifier can still encode sensitive information; user must not enter real customer identifiers.
+
+**Next after tests:** Versioned workflow changes/pausing and first constrained live read-only integration, with independent capability and permission verification. Protect both the operator's data and prior immutable run outcomes.
+
+
+**Slice 38 first CI and browser regression repair**
+- PR [#43](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/43) initially tested code+documentation head `86f7ffa2346b80b09c10b1bb13b219a9152fa546`.
+- [Python matrix run 41829283875](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829283875) completed **success**: Python 3.11, 3.12 and 3.13 each ran **449 tests with zero failures** (424 existing + 25 new; 1,347 executions total). Existing suites were not reduced.
+- [Real Chromium browser run 41829283870](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829283870) reported **one failure out of 19**. The new CSV test verified successful preview/commit and a persisted two-event history *before reload*, but after reload the UI selected a different previously saved active workflow, showing that workflow's one event. The CSV records had not disappeared; the **active-workflow selection was not preserved across page reload**. The other two new browser CSV tests and all 16 existing browser tests passed.
+- Fixed `web/index.html` to remember the current nonpersonal workflow ID in **tab-scoped `sessionStorage` only**, restore it among active options after reload, and prefer the most recently activated workflow when refreshed. No CSV bytes, preview token, event records or credentials are saved to browser storage. Code fix head `ab59435be7882335d1ad667ab5cfcc0cf3823d9f`.
+- Updated `docs/LOCAL_CSV_BATCH_INTAKE_V1.md` to state this UI selection behavior and its limited scope.
+- **Verification pending:** a newly documented PR head must independently pass **19 real-browser tests and 449 Python tests on each of 3.11/3.12/3.13** before merge. The initial green Python CI does not certify subsequent file edits; the original browser failure must not be described as passing.
+

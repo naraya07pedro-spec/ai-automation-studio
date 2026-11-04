@@ -315,6 +315,62 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#local-history")).to_contain_text(
             "1 saved events")
 
+    def test_local_csv_file_preview_commit_and_replay_in_real_browser(self):
+        wid = self.create_functional_local_workflow()
+        csv_bytes = (b"event_id,service_code,budget_tier,timeline\\n"
+                     b"browser_101,automation,3,soon\\n"
+                     b"browser_102,integration,1,flexible\\n").replace(b"\\n", b"\n")
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "synthetic-events.csv", "mimeType": "text/csv", "buffer": csv_bytes})
+        expect(self.page.locator("#local-batch-preview")).to_be_enabled()
+        self.assertTrue(self.page.locator("#local-batch-commit").is_disabled())
+        self.page.locator("#local-batch-preview").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text("PREVIEW READY")
+        expect(self.page.locator("#local-batch-commit")).to_be_enabled()
+        self.assertIn("browser_101", self.page.locator("#local-batch-result").inner_text())
+        self.assertIn("0 saved events", self.page.locator("#local-history").inner_text())
+        self.page.locator("#local-batch-commit").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text(
+            "BATCH_COMMITTED_LOCAL")
+        expect(self.page.locator("#local-history")).to_contain_text("2 saved events")
+        self.page.reload(wait_until="networkidle")
+        expect(self.page.locator("#local-workflows")).to_contain_text(wid)
+        expect(self.page.locator("#local-history")).to_contain_text("browser_101")
+
+    def test_local_csv_stale_preview_rejects_commit_after_manual_event(self):
+        self.create_functional_local_workflow()
+        csv_bytes = (b"event_id,service_code,budget_tier,timeline\\n"
+                     b"stale_101,automation,3,soon\\n").replace(b"\\n", b"\n")
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "stale.csv", "mimeType": "text/csv", "buffer": csv_bytes})
+        self.page.locator("#local-batch-preview").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text("PREVIEW READY")
+        self.page.locator("#local-event").fill("manual_after_preview")
+        self.page.locator("#local-run").click()
+        expect(self.page.locator("#local-run-status")).to_contain_text(
+            "RECORDED_LOCAL")
+        self.page.locator("#local-batch-commit").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text(
+            "stale_batch_preview")
+        self.page.locator("#local-refresh-history").click()
+        expect(self.page.locator("#local-history")).to_contain_text("1 saved events")
+        self.assertTrue(self.page.locator("#local-batch-commit").is_disabled())
+
+    def test_local_csv_bad_columns_rejected_without_saving(self):
+        self.create_functional_local_workflow()
+        csv_bytes = (b"event_id,email,service_code,budget_tier,timeline\\n"
+                     b"invalid_01,someone@example.com,automation,3,soon\\n").replace(
+                         b"\\n", b"\n")
+        self.page.locator("#local-batch-file").set_input_files({
+            "name": "unsafe.csv", "mimeType": "text/csv", "buffer": csv_bytes})
+        self.page.locator("#local-batch-preview").click()
+        expect(self.page.locator("#local-batch-status")).to_contain_text(
+            "invalid_csv_content")
+        self.assertTrue(self.page.locator("#local-batch-commit").is_disabled())
+        expect(self.page.locator("#local-history")).to_contain_text("0 saved events")
+        self.assertNotIn("someone@example.com",
+                         self.page.locator("#local-batch-result").inner_text())
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())
