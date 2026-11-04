@@ -140,7 +140,7 @@ def create_handler(flow=None):
                 result = workflow.process(configuration, event, _REQUIRED)
                 offer = review.offer(result, policy=configuration["follow_up_policy"])
             self._send(200, {"mode": "MOCK_ONLY", "result": result,
-                             "timeline": execution_timeline(result),
+                             "timeline": execution_timeline(result, policy=configuration["follow_up_policy"]),
                              "setup_status": setup_verdict["status"],
                              "review_offer": offer,
                              "external_dispatch_count": 0})
