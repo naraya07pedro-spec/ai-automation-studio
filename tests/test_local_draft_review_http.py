@@ -130,7 +130,7 @@ class LocalDraftReviewHTTPTests(unittest.TestCase):
         reply = c.getresponse()
         html = reply.read().decode()
         c.close()
-        self.assertIn('id="timeline"', html)
+        self.assertIn('id="lead-timeline"', html)
         self.assertIn('id="draft"', html)
         self.assertIn('id="ack"', html)
         self.assertIn('id="reject"', html)
