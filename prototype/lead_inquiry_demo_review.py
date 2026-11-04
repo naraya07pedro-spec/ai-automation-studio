@@ -34,13 +34,13 @@ class LocalMockReview:
     def __init__(self):
         self._pending = {}
 
-    def offer(self, flow_result):
+    def offer(self, flow_result, *, policy="approval_required"):
         """Only a fresh, fully present synthetic lead receives a canned draft."""
-        if (flow_result.get("workflow_status") != "READY_FOR_REVIEW"
+        if (policy not in ("approval_required", "draft_only")
+                or flow_result.get("workflow_status") != "READY_FOR_REVIEW"
                 or (flow_result.get("deduplication") or {}).get("status") != "FIRST_SEEN"
-                or len(self._pending) >= _MAX_PENDING):
+                or (policy == "approval_required" and len(self._pending) >= _MAX_PENDING)):
             return {"status": "NOT_AVAILABLE", "draft": None, "review_token": None}
-        token = secrets.token_urlsafe(24)
         # Fixed text cannot accidentally reflect inbound customer content.
         draft = {
             "subject": "Thanks for your inquiry (mock draft)",
@@ -49,6 +49,9 @@ class LocalMockReview:
             "delivery": "NEVER_SENT",
             "requires_verified_identity": True,
         }
+        if policy == "draft_only":
+            return {"status": "DRAFT_ONLY_NO_REVIEW", "draft": draft, "review_token": None}
+        token = secrets.token_urlsafe(24)
         self._pending[token] = "AWAITING_LOCAL_REVIEW"
         return {"status": "AWAITING_LOCAL_REVIEW", "draft": draft, "review_token": token}
 
