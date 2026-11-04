@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AI Automation Studio | Local Lead Inquiry Lab</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:#090e17;color:#eef2fb}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 80% -10%,#153e4a 0%,transparent 42%),#090e17;min-height:100vh}main{width:min(1120px,calc(100% - 36px));margin:0 auto;padding:32px 0 80px}header{display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:1px solid #26313e;padding-bottom:24px}.brand{font-weight:800;letter-spacing:-.035em}.brand span{color:#77e2c4}.tag{font-size:11px;letter-spacing:.12em;color:#75dec1;border:1px solid #2d7967;padding:8px 12px;border-radius:100px}.hero{padding:58px 0 32px;max-width:760px}.eyebrow{color:#70d9be;font-size:12px;letter-spacing:.14em;font-weight:700}.hero h1{font-size:clamp(36px,6.3vw,68px);line-height:1.03;margin:12px 0 20px;letter-spacing:-.06em}.hero p{color:#a9b4c8;font-size:16px;line-height:1.7}.layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.94fr);gap:18px}.panel{border:1px solid #253244;background:#101927ec;border-radius:20px;padding:26px;box-shadow:0 12px 44px #0003}.kicker{font-size:11px;font-weight:700;color:#79d8c2;letter-spacing:.14em}.panel h2{font-size:21px;margin:10px 0 8px;letter-spacing:-.03em}.muted{color:#9caabe;font-size:13px;line-height:1.65}.field{margin-top:18px}label{display:block;font-size:12px;font-weight:650;color:#cbd7e5;margin-bottom:8px}input,select{background:#0b131f;border:1px solid #344357;color:#f2f6fd;width:100%;border-radius:10px;padding:12px 13px;outline:none;font:inherit;font-size:14px}input:focus,select:focus{border-color:#6ad9b8;box-shadow:0 0 0 3px #6ad9b826}button{font:inherit;cursor:pointer}.primary{border:0;background:#84e8ca;color:#061e21;font-weight:750;border-radius:12px;padding:14px 18px;margin-top:22px;width:100%;transition:transform .15s,background .15s}.primary:hover{background:#a2f3dc;transform:translateY(-1px)}.primary:disabled{opacity:.6;cursor:wait}.secondary{border:1px solid #334458;background:transparent;color:#cbdae9;border-radius:9px;padding:9px 12px;font-size:12px}.status{display:inline-flex;padding:7px 10px;border-radius:9px;background:#233842;color:#9de7d6;font-size:12px;font-weight:700}.result{display:grid;gap:12px;margin-top:20px}.line{display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #253344;padding-bottom:12px;font-size:13px}.line span{color:#9aaabc}.line strong{text-align:right}.trace{margin-top:19px;padding:16px;background:#09111b;border-radius:12px;border:1px solid #273343;max-height:330px;overflow:auto;color:#b3e3cf;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.notice{margin-top:18px;background:#1a2835;border-left:3px solid #83dac4;border-radius:8px;padding:14px;font-size:12px;color:#b4c7d6;line-height:1.65}.foot{margin-top:25px;color:#7e90a5;font-size:12px}.steps{display:flex;gap:8px;flex-wrap:wrap;margin-top:26px}.steps span{font-size:11px;padding:8px 12px;background:#152331;border:1px solid #2a3b4a;border-radius:100px;color:#abc7c4}@media(max-width:780px){.layout{grid-template-columns:1fr}.panel{padding:20px}.hero{padding:36px 0 20px}header{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="brand">A<span>•</span> Automation Studio</div><span class="tag">LOCAL SANDBOX / NO EXTERNAL SENDS</span></header>
+<section class="hero"><div class="eyebrow">01 / EXPLORE REAL WORKFLOW BEHAVIOR</div><h1>From inquiry to decision. <span style="color:#86e3cb">Without the guesswork.</span></h1><p>Run a deterministic lead inquiry workflow against synthetic data. Inspect every decision, duplicate check and unresolved field. No account, API key, or live CRM required.</p><div class="steps"><span>01 Intake</span><span>02 Validate</span><span>03 Deduplicate</span><span>04 Qualify</span><span>05 Review gate</span></div></section>
+<div class="layout">
+<section class="panel"><div class="kicker">BUSINESS VIEW · TEMPLATE 01</div><h2>Lead Inquiry Qualification</h2><p class="muted">Choose sample business details. Run twice using the same event ID to see duplicate protection. Try an empty field to see validation respond.</p>
+<form id="demo">
+<div class="field"><label for="event_id">Synthetic event ID</label><input id="event_id" name="event_id" value="lead-demo-001" required maxlength="80"></div>
+<div class="field"><label for="service_requested">Requested service</label><input id="service_requested" name="service_requested" value="Workflow automation" required maxlength="120"></div>
+<div class="field"><label for="budget_range">Indicative budget</label><select id="budget_range" name="budget_range"><option value="Under $1,000">Under $1,000</option><option value="$1,000–$5,000" selected>$1,000–$5,000</option><option value="Above $5,000">Above $5,000</option></select></div>
+<div class="field"><label for="timeline">Preferred timeline</label><select id="timeline" name="timeline"><option value="Within 2 weeks">Within 2 weeks</option><option value="Within 1 month" selected>Within 1 month</option><option value="Exploring options">Exploring options</option></select></div>
+<button class="primary" id="run" type="submit">Run mock qualification →</button></form>
+<div class="notice">This is a local simulation, not an AI model prediction or a live CRM write. “Ready for review” never means “sent” or “delivered”.</div>
+</section>
+<section class="panel"><div class="kicker">INSPECT ENGINEERING · LIVE TRACE</div><h2>Execution result</h2><p class="muted">Observe the real response from the Python workflow, not a hard-coded visual animation.</p><div id="status" class="status" role="status" aria-live="polite">AWAITING RUN</div><div class="result">
+<div class="line"><span>Workflow state</span><strong id="workflow">Not started</strong></div>
+<div class="line"><span>Input validation</span><strong id="validation">Not started</strong></div>
+<div class="line"><span>Deduplication</span><strong id="dedup">Not started</strong></div>
+<div class="line"><span>Qualification</span><strong id="qualification">Not started</strong></div>
+<div class="line"><span>External dispatches</span><strong id="dispatch">0</strong></div>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div class="kicker">REDACTED EXECUTION JSON</div><button class="secondary" type="button" id="copy">Copy trace</button></div><pre id="trace" class="trace" aria-live="polite">No execution yet. Submit the synthetic lead form to inspect the result.</pre><div class="foot">Process-local deduplication resets when the server restarts. No persistent identity or provider receipts.</div>
+</section></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let latest="";
+$("demo").addEventListener("submit",async event=>{
+ event.preventDefault();const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
+ const payload={event_id:$("event_id").value,service_requested:$("service_requested").value,budget_range:$("budget_range").value,timeline:$("timeline").value};
+ try{const response=await fetch("/api/mock-run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+ const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");
+ const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
+ $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
+ $("dispatch").textContent=String(data.external_dispatch_count);$("status").textContent="MOCK RUN COMPLETED · NO SENDS";
+ latest=JSON.stringify(data,null,2);$("trace").textContent=latest;
+ }catch(error){$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}finally{button.disabled=false;}
+});
+$("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
+</script>
+</body></html>
