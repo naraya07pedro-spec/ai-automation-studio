@@ -159,9 +159,19 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.screenshot(path=str(ROOT / "browser-artifacts" / "mobile-375px.png"),
                              full_page=True)
         # Outer page should not require horizontal scrolling at phone width.
-        overflow = self.page.evaluate(
-            "() => document.documentElement.scrollWidth > window.innerWidth + 1")
-        self.assertFalse(overflow, "mobile document horizontal overflow")
+        overflow = self.page.evaluate("""() => ({
+            page: document.documentElement.scrollWidth,
+            viewport: window.innerWidth,
+            culprits: [...document.querySelectorAll('body *')]
+              .filter(el => el.getBoundingClientRect().right > window.innerWidth + 1)
+              .slice(0, 12).map(el => ({
+                tag: el.tagName, id: el.id, className: String(el.className).slice(0, 60),
+                right: Math.round(el.getBoundingClientRect().right)
+              }))
+        })""")
+        self.assertLessEqual(
+            overflow["page"], overflow["viewport"] + 1,
+            "mobile horizontal overflow: " + str(overflow))
 
 
 if __name__ == "__main__":
