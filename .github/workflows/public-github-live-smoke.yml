@@ -40,3 +40,30 @@ jobs:
           echo "Only public transport and open-issue parsing were live checked."
           echo "Explicit aas:* labels and a real eligible issue are NOT guaranteed."
           echo "No GitHub writes, tokens, real customer data or persistent local DB."
+
+  labeled-public-issue-to-memory:
+    name: Real labeled public issue to ephemeral SQLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require the exact synthetic fixture and verify full local import parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/probe_public_github_live.py \
+            --repo naraya07pedro-spec/ai-automation-studio \
+            --expect-issue-number 47 \
+            --require-eligible \
+            --check-ephemeral-import
+      - name: Scope declaration
+        run: |
+          echo "Only the pre-existing owned public fixture is read."
+          echo "No issue is created, labeled, edited or closed by this workflow."
+          echo "SQLite is :memory:; no local persistent or GitHub writes."
+
