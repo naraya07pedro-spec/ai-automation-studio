@@ -13,8 +13,15 @@ from lead_inquiry_review_transitions import MockReviewTransitions
 
 
 class MockSingleUseReviewGrants:
-    def __init__(self, store):
+    def __init__(self, store, *, authority=None, clock=None):
+        """Authority and clock are installed by a trusted composition root.
+
+        Default-deny: without both, no grant can be issued or consumed.
+        Caller-supplied authority/clock at the API boundary remains forbidden.
+        """
         self._store = store
+        self._authority = authority
+        self._clock = clock
         self._reviews = MockReviewTransitions(store)
         with store._connect() as db:
             db.execute(
@@ -30,15 +37,37 @@ class MockSingleUseReviewGrants:
         return {"status": status, "review_version": version,
                 "event_state_changed": False, "external_dispatch_count": 0}
 
-    def issue(self, source, event_id, *, proposal, verifier, now):
-        """Issue opaque random token after mock preflight and version-0 inspection.
+    def _trusted_now(self):
+        if not callable(self._clock):
+            return None
+        try:
+            current = self._clock()
+        except Exception:
+            return None
+        return current if type(current) is int and current >= 0 else None
 
-        Token is returned only once; DB stores its SHA-256 hash. A verifier is
-        injected by test harness, NOT actual verified authorization.
+    def issue(self, source, event_id, *, proposal):
+        """Issue a short-lived mock grant using only constructor-owned policy.
+
+        Proposal may contain event_ref, intent, evidence_kind, evidence_digest
+        and operator_ref. It cannot specify a verifier, clock or lifetime.
         """
+        if not callable(self._authority) or not callable(self._clock):
+            return self._out("ISSUER_NOT_CONFIGURED")
+        if not isinstance(proposal, dict) or set(proposal) != {
+            "event_ref", "intent", "evidence_kind", "evidence_digest",
+            "operator_ref",
+        }:
+            return self._out("INVALID_PROPOSAL")
+        now = self._trusted_now()
+        if now is None:
+            return self._out("TRUSTED_CLOCK_UNAVAILABLE")
+        scoped = dict(proposal)
+        scoped["issued_at"] = now
+        scoped["expires_at"] = now + 60
         verdict = evaluate_reconciliation(
             self._store, source=source, event_id=event_id,
-            proposal=proposal, verifier=verifier, now=now,
+            proposal=scoped, verifier=self._authority, now=now,
         )
         if verdict["preflight_status"] != "PRECHECK_PASSED_NO_TRANSITION":
             return self._out(verdict["preflight_status"])
@@ -65,7 +94,7 @@ class MockSingleUseReviewGrants:
                     "INSERT INTO mock_review_grants "
                     "(token_hash,source,event_id,expected_version,expires_at) "
                     "VALUES (?,?,?,?,?)",
-                    (digest, source, event_id, 0, proposal["expires_at"]),
+                    (digest, source, event_id, 0, scoped["expires_at"]),
                 )
                 db.execute("COMMIT")
             except BaseException:
@@ -76,7 +105,7 @@ class MockSingleUseReviewGrants:
         result["token"] = token
         return result
 
-    def consume_hold(self, source, event_id, *, token, now):
+    def consume_hold(self, source, event_id, *, token):
         """Single transaction: compare event, version, grant and burn token.
 
         Only OPEN -> ACKNOWLEDGED_HOLD is possible; never marks the source
@@ -86,8 +115,9 @@ class MockSingleUseReviewGrants:
             return self._out("INVALID_EVENT")
         if not isinstance(token, str) or len(token) > 256 or not token:
             return self._out("INVALID_TOKEN")
-        if type(now) is not int or now < 0:
-            return self._out("INVALID_TIME")
+        now = self._trusted_now()
+        if now is None:
+            return self._out("TRUSTED_CLOCK_UNAVAILABLE")
         digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
         with self._store._connect() as db:
             try:
