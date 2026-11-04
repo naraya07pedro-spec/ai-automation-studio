@@ -816,3 +816,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - All three jobs ran runtime drift gate, historic evidence reporting, fixture contract, and complete Python standard-library unittest suite. Logs: **296 tests per job, 0 failures**, **888 test executions** across three runtimes; 15 new real HTTP tests.
 - Tests use local `ThreadingHTTPServer` on ephemeral loopback ports and exercise the actual `MockInquiryFlow`. This does not constitute browser visual QA, hosted deployment, integration-provider verification, or production readiness.
 - This evidence update creates a new PR HEAD and must itself pass all matrix jobs before latest-head verification.
+
+
+## Slice 28 · 2026-11-04 · Executable stage timeline and local-only follow-up draft review
+
+**Goal:** Deliver the next visible product vertical improvement, not add another isolated SQLite compatibility subsystem.
+
+**Completed**
+- Verified PR #29 exact-head CI with three successful Python matrix jobs (296 tests per job) and squash-merged PR #29 into main. Created `feat/lead-inquiry-review-timeline-slice-28`.
+- Added `prototype/lead_inquiry_demo_review.py` with seven deterministic redacted execution stages and a bounded memory-only draft-review token store. Only first-seen, qualified synthetic events get a fixed non-sending follow-up draft and a one-time token.
+- Updated `app/local_server.py`: `/api/mock-run` now includes `timeline` and `review_offer`; added `POST /api/mock-review` that accepts exactly two decisions (ACKNOWLEDGE/REJECT), never authorizes external work or changes event state. Explicit host and origin checks for POST routes.
+- Updated `web/index.html`: visible server-derived stage timeline, canned draft preview, local acknowledge/reject buttons and status updates. Uses safe text nodes for values; no external send button.
+- Added `tests/test_local_draft_review_http.py` with **12** real local HTTP checks for stage evidence, draft redaction, single-use token behavior, duplicates/conflicts, unsupported SEND, wrong payload shape, blocked origins/hosts, and UI controls.
+- Added `docs/LOCAL_REVIEW_TIMELINE.md` covering the usage contract, safety/non-production boundaries and next user-facing step.
+
+**Evidence gate**
+- Read back changed files from GitHub, verify fixture contract and full standard-library test suite across Python 3.11/3.12/3.13 on the exact PR head. Record measured logs only after success.
+
+**Open risks**
+- Review is a local UI acknowledgement only, **not operator identity or verified permission**. Tokens are in-memory and can be lost on restart. Do not mistake it for the separate earlier durable mock grant system or real action approval.
+- Fixed draft never sends and does not adapt to actual incoming text. No live provider capability, real CRM changes or persistent run history.
+- Loopback-only HTTP controls reduce accidental exposure but are not a full authentication or browser security boundary. No public deployment or manual visual QA yet.
+
+**Next slice proposed:** Add visible template gallery with explicitly marked executable vs preview items and a guided configuration state, retaining the real mock workflow path.
