@@ -525,31 +525,45 @@ def main(argv=None):
         except OperatorConfigurationError as exc:
             raise SystemExit("Recovery blocked: " + str(exc)) from None
         with recovery_lock:
+            audit = LocalSecurityAudit(home / "security-audit.sqlite3")
             try:
-                owner = LocalOperatorAuth.load(home / "operator.json")
-            except OperatorConfigurationError as exc:
-                raise SystemExit("Recovery blocked: " + str(exc)) from None
-            if args.enable_recovery:
-                current = getpass.getpass("Current owner password: ")
-                status, result = owner.setup_recovery(current)
+                try:
+                    owner = LocalOperatorAuth.load(home / "operator.json")
+                except OperatorConfigurationError as exc:
+                    raise SystemExit("Recovery blocked: " + str(exc)) from None
+                if args.enable_recovery:
+                    audit.record("RECOVERY_ENROLL", "ATTEMPT")
+                    current = getpass.getpass("Current owner password: ")
+                    status, result = owner.setup_recovery(current)
+                    audit.record("RECOVERY_ENROLL", (
+                        "SUCCESS" if status == 200 else
+                        "UNCERTAIN" if result.get("error") == "operator_restart_required"
+                        else "DENIED" if status in (401, 403, 422, 429) else "FAILED"))
+                    if status != 200:
+                        raise SystemExit("Recovery setup blocked: " + result["error"])
+                    print("SAVE THIS CODE OFFLINE. IT IS SHOWN ONLY ONCE:")
+                    print(result["recovery_code"])
+                    print("One-time code enabled. Keep it outside the computer.")
+                    return
+                audit.record("RECOVERY_RESET", "ATTEMPT")
+                code = getpass.getpass("One-time offline recovery code: ")
+                fresh = getpass.getpass("New local operator password: ")
+                confirm = getpass.getpass("Confirm new password: ")
+                if fresh != confirm:
+                    raise SystemExit("Recovery blocked: new passwords did not match.")
+                status, result = owner.recover_with_code(code, fresh)
+                audit.record("RECOVERY_RESET", (
+                    "SUCCESS" if status == 200 else
+                    "UNCERTAIN" if result.get("error") == "operator_restart_required"
+                    else "DENIED" if status in (401, 403, 422, 429) else "FAILED"))
                 if status != 200:
-                    raise SystemExit("Recovery setup blocked: " + result["error"])
-                print("SAVE THIS CODE OFFLINE. IT IS SHOWN ONLY ONCE:")
-                print(result["recovery_code"])
-                print("One-time code enabled. Keep it outside the computer.")
+                    raise SystemExit("Recovery blocked: " + result["error"])
+                print("Owner recovered. Recovery code consumed permanently.")
+                print("Start the server and sign in with the new password.")
+                print("Re-enable offline recovery with --enable-recovery.")
                 return
-            code = getpass.getpass("One-time offline recovery code: ")
-            fresh = getpass.getpass("New local operator password: ")
-            confirm = getpass.getpass("Confirm new password: ")
-            if fresh != confirm:
-                raise SystemExit("Recovery blocked: new passwords did not match.")
-            status, result = owner.recover_with_code(code, fresh)
-            if status != 200:
-                raise SystemExit("Recovery blocked: " + result["error"])
-            print("Owner recovered. Recovery code consumed permanently.")
-            print("Start the server and sign in with the new password.")
-            print("Re-enable offline recovery with --enable-recovery.")
-            return
+            finally:
+                audit.close()
     if args.init_owner:
         password = getpass.getpass("New local operator password (12+ characters): ")
         confirm = getpass.getpass("Confirm password: ")
