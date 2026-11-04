@@ -1079,3 +1079,35 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Updated `docs/BROWSER_QA_GATE.md` to reflect the actual 14-test browser suite and distinguish automated DOM tests from independent visual/accessibility review.
 - **Latest-head caveat:** documenting these results changed the PR head; the final head needs a fresh **browser + three-version Python matrix success** before merge. No real external integration or production rollout was tested.
 
+## Slice 37 · 2026-11-04 · First functional local workflow engine with durable SQLite history
+
+**Product priority:** Go beyond repeatedly testing five synthetic mock workflows. Deliver a usable local account-free rule-workflow lifecycle that a user can configure, activate, run, and inspect across an application restart without relying on AI or external provider credentials.
+
+**Implemented (first verified on PR #41, then reconciled on branch `feat/local-workflow-core-slice-37-reconciled` based on merged Slice 36)**
+- Added `app/local_workflow_core.py`: isolated SQLite-backed local rule definitions and persisted run ledger. A user creates a private DRAFT with a service filter, budget threshold and draft/review policy; activates immutable v1 with an expected-version gate; executes allowlisted non-PII categorical events; retrieves the last 25 runs and count. Per-workflow idempotency, payload-conflict detection, exact policy reason codes, and explicit limits (50 workflows, 500 runs per workflow) prevent silent uncontrolled growth.
+- Updated `app/local_server.py`: isolated new core endpoints `/api/local-create`, `/api/local-activate`, `/api/local-run`, `/api/local-workflows` and `/api/local-history`, retaining loopback-only exposure and local Host/Origin restrictions. `create_handler()` defaults to an isolated in-memory core for existing tests; application startup uses `~/.ai-automation-studio/local-workflows.sqlite3` for persistent local, explicitly entered categorical metadata. Five original mock workflows remain unchanged and process-local.
+- Updated `web/index.html`: new **functional local core** panel for creating private rule drafts, activating them, running pseudonymous events and viewing persisted results/history. Clear safety notice prohibits customer PII, secrets, live sends or exposing the unauthenticated server.
+- Added `tests/test_local_workflow_core_http.py`: HTTP/SQLite acceptance for draft activation, restart persistence, rule qualification branches, duplicate vs payload conflict, invalid fields, local host/origin protection and concurrent same-ID requests.
+- Extended `tests_browser/test_real_browser.py` with two real-browser journeys: create → activate → run → history → reload and duplicate/conflict protection, without stubbing server responses.
+- Updated `README.md` and added `docs/LOCAL_WORKFLOW_CORE_V1.md` to distinguish **functional local rules** from the five **mock-only** demonstrations and document the actual security/data-processing boundary.
+
+**Strict boundaries:** This is deterministic *local execution*, **not** a full AI agent, auto-triggered workflow, connected CRM, public SaaS, background worker, persistent human approval or verified external success. It accepts only manually entered categorical events, uses no PII fields, makes zero external dispatches, and has no encrypted datastore or user authentication. Global architecture choices remain deferred; this is a scoped prototype engine, not a global platform decision.
+
+**Verification gate:** Open a PR based on `main`, inspect actual file diff and both GitHub Actions browser and Python matrix CI against the **exact current code-and-docs PR head**. Record success/failures and repairs. Do not merge before verified checks. This slice is independent of still-open PR #40 (Slice 36) and must not claim its unrelated code is merged.
+
+**Next product stage:** Controlled intake of real, non-sensitive events (e.g. explicit local import), versioned policy edits, and safe read-only provider adapters. Gate each live capability on real connector evidence, identity controls and data scope; do not substitute synthetic green tests for production validation.
+
+
+**Slice 37 verified CI and repair notes**
+- PR [#41](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/41) first CI head `b7c56376e663f688a1c8a7009b3977e15a81ccd9` passed all **12 real-browser** journeys ([run 41824660945](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824660945)) but failed Python during `unittest` discovery, before executing newly added tests. The test class helper was incorrectly named `run`, overriding `unittest.TestCase.run(result)` and producing `TypeError`. This was a **test-harness naming defect**. The implementation engine itself was not shown to fail by this error.
+- Renamed the test helper to `submit_event` across 21 call sites, with no behavioral weakening and no engine or API changes. Code head `bb0a380f6e8e6279dd6b338440b427a1d7f00c1c`.
+- [Real-browser run 41824920271](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824920271): **12/12 Chromium browser tests PASS**, including workflow create/activate/run/history after page reload and duplicate-vs-conflict handling.
+- [Python matrix run 41824920597](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824920597): Python **3.11, 3.12 and 3.13 each ran 424 tests, zero failures** (**1272 executed unittest methods** across the three jobs). All pre-existing 402 tests remained intact; 22 new core tests were added.
+- This documentation-only evidence commit changes the PR HEAD, and must pass both workflows again on that exact HEAD before merge. No networked provider, authenticated user, AI model, or PII handling was tested.
+
+
+**Branch reconciliation and final integration gate**
+- PR #40 (Slice 36) later gained verified exact-head CI and was squash-merged to main (`310dd2328a664335dcc3a7d88edc1893dc47ea44`).
+- To preserve the previously merged browser async response guards and the new local workflow core, the feature was transplanted onto a fresh branch from updated `main`, preserving all 4 Slice 36 delayed-response browser tests and both new Slice 37 local-core browser tests. Expected integrated browser suite **16 cases**, Python suite **424 methods per interpreter**; those totals are *not* claims until integrated CI completes.
+- PR #41 remains an independently green feature branch and will be superseded by an integrated clean PR from the new branch once that PR passes exact-head CI. Do not merge both versions of the feature.
+
