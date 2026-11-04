@@ -67,7 +67,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
         return self.send("POST", "/api/local-activate",
                          {"workflow_id": workflow_id, "expected_version": version})
 
-    def run(self, **overrides):
+    def submit_event(self, **overrides):
         return self.send("POST", "/api/local-run", {**EVENT, **overrides})
 
     def ready(self):
@@ -86,7 +86,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
 
     def test_cannot_execute_inactive_workflow(self):
         self.create()
-        status, result = self.run()
+        status, result = self.submit_event()
         self.assertEqual(409, status)
         self.assertEqual("workflow_not_active", result["error"])
         self.assertEqual(0, self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]["total"])
@@ -99,7 +99,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
 
     def test_local_rule_match_review_required(self):
         self.ready()
-        status, result = self.run()
+        status, result = self.submit_event()
         self.assertEqual(200, status)
         self.assertEqual("RECORDED_LOCAL", result["status"])
         self.assertEqual("NEEDS_REVIEW_LOCAL", result["decision"])
@@ -109,7 +109,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
     def test_draft_only_match_not_a_send(self):
         self.create(followup_policy="draft_only")
         self.activate()
-        status, result = self.run()
+        status, result = self.submit_event()
         self.assertEqual(200, status)
         self.assertEqual("QUALIFIED_DRAFT_ONLY", result["decision"])
         self.assertEqual("MATCHED_LOCAL_RULES", result["reason"])
@@ -118,16 +118,16 @@ class LocalCoreHTTPTests(unittest.TestCase):
     def test_service_mismatch_does_not_qualify(self):
         self.ready()
         self.assertEqual("SERVICE_MISMATCH",
-                         self.run(service_code="integration")[1]["reason"])
+                         self.submit_event(service_code="integration")[1]["reason"])
 
     def test_low_budget_blocks_qualification(self):
         self.ready()
         self.assertEqual("BUDGET_BELOW_THRESHOLD",
-                         self.run(budget_tier=1)[1]["reason"])
+                         self.submit_event(budget_tier=1)[1]["reason"])
 
     def test_flexible_timeline_needs_review(self):
         self.ready()
-        result = self.run(timeline="flexible")[1]
+        result = self.submit_event(timeline="flexible")[1]
         self.assertEqual("NEEDS_REVIEW_LOCAL", result["decision"])
         self.assertEqual("TIMELINE_UNSPECIFIED", result["reason"])
 
@@ -135,13 +135,13 @@ class LocalCoreHTTPTests(unittest.TestCase):
         self.create(service_filter="any", min_budget_tier=1,
                     followup_policy="draft_only")
         self.activate()
-        result = self.run(service_code="consulting", budget_tier=1)[1]
+        result = self.submit_event(service_code="consulting", budget_tier=1)[1]
         self.assertEqual("QUALIFIED_DRAFT_ONLY", result["decision"])
 
     def test_duplicate_replays_without_new_history(self):
         self.ready()
-        first = self.run()[1]
-        second = self.run()[1]
+        first = self.submit_event()[1]
+        second = self.submit_event()[1]
         self.assertEqual("REPLAYED_LOCAL", second["status"])
         self.assertEqual(first["created_at"], second["created_at"])
         history = self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]
@@ -151,15 +151,15 @@ class LocalCoreHTTPTests(unittest.TestCase):
 
     def test_changed_payload_same_id_is_conflict(self):
         self.ready()
-        self.run()
-        status, result = self.run(budget_tier=1)
+        self.submit_event()
+        status, result = self.submit_event(budget_tier=1)
         self.assertEqual(409, status)
         self.assertEqual("event_id_payload_conflict", result["error"])
         self.assertEqual(1, self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]["total"])
 
     def test_durable_workflow_and_history_survive_new_connection(self):
         self.ready()
-        self.run()
+        self.submit_event()
         reopened = LocalWorkflowCore(self.path)
         self.addCleanup(reopened.close)
         listing = reopened.list_workflows()
@@ -171,8 +171,8 @@ class LocalCoreHTTPTests(unittest.TestCase):
     def test_run_history_is_bounded_and_not_silently_trimmed(self):
         self.ready()
         with mock.patch.object(core_module, "MAX_RUNS_PER_WORKFLOW", 1):
-            self.run()
-            status, result = self.run(event_id="event_101")
+            self.submit_event()
+            status, result = self.submit_event(event_id="event_101")
         self.assertEqual(409, status)
         self.assertEqual("run_capacity_reached", result["error"])
         self.assertEqual(1, self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]["total"])
@@ -194,12 +194,12 @@ class LocalCoreHTTPTests(unittest.TestCase):
 
     def test_invalid_event_and_untrusted_fields_not_echoed(self):
         self.ready()
-        code, response = self.run(event_id="private@example.com")
+        code, response = self.submit_event(event_id="private@example.com")
         self.assertEqual(422, code)
         self.assertNotIn("private@", json.dumps(response))
-        self.assertEqual(422, self.run(budget_tier=True)[0])
-        self.assertEqual(422, self.run(timeline="unknown")[0])
-        self.assertEqual(422, self.run(credential="secret")[0])
+        self.assertEqual(422, self.submit_event(budget_tier=True)[0])
+        self.assertEqual(422, self.submit_event(timeline="unknown")[0])
+        self.assertEqual(422, self.submit_event(credential="secret")[0])
 
     def test_unknown_and_invalid_history(self):
         self.assertEqual(404, self.send("GET", "/api/local-history?workflow_id=missing")[0])
@@ -218,7 +218,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
     def test_no_spoofed_external_actions_or_unknown_routes(self):
         self.ready()
         self.assertEqual(404, self.send("POST", "/api/local-dispatch", EVENT)[0])
-        result = self.run()[1]
+        result = self.submit_event()[1]
         self.assertEqual(0, result["external_dispatch_count"])
         history = self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]
         self.assertEqual(0, history["external_dispatch_count"])
@@ -226,7 +226,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
     def test_concurrent_same_event_is_atomic(self):
         self.ready()
         with ThreadPoolExecutor(max_workers=8) as executor:
-            results = list(executor.map(lambda _: self.run()[1]["status"], range(12)))
+            results = list(executor.map(lambda _: self.submit_event()[1]["status"], range(12)))
         self.assertEqual(1, results.count("RECORDED_LOCAL"))
         self.assertEqual(11, results.count("REPLAYED_LOCAL"))
         self.assertEqual(1, self.send("GET", "/api/local-history?workflow_id=sample_flow")[1]["total"])
@@ -240,7 +240,7 @@ class LocalCoreHTTPTests(unittest.TestCase):
 
     def test_history_excludes_raw_message_credentials_and_private_memory(self):
         self.ready()
-        self.run()
+        self.submit_event()
         _, hist = self.send("GET", "/api/local-history?workflow_id=sample_flow")
         self.assertEqual({"event_id", "workflow_version", "service_code",
                           "budget_tier", "timeline", "decision", "reason",
