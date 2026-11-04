@@ -1072,3 +1072,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 
 **Next product stage:** Controlled intake of real, non-sensitive events (e.g. explicit local import), versioned policy edits, and safe read-only provider adapters. Gate each live capability on real connector evidence, identity controls and data scope; do not substitute synthetic green tests for production validation.
 
+
+**Slice 37 verified CI and repair notes**
+- PR [#41](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/41) first CI head `b7c56376e663f688a1c8a7009b3977e15a81ccd9` passed all **12 real-browser** journeys ([run 41824660945](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824660945)) but failed Python during `unittest` discovery, before executing newly added tests. The test class helper was incorrectly named `run`, overriding `unittest.TestCase.run(result)` and producing `TypeError`. This was a **test-harness naming defect**. The implementation engine itself was not shown to fail by this error.
+- Renamed the test helper to `submit_event` across 21 call sites, with no behavioral weakening and no engine or API changes. Code head `bb0a380f6e8e6279dd6b338440b427a1d7f00c1c`.
+- [Real-browser run 41824920271](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824920271): **12/12 Chromium browser tests PASS**, including workflow create/activate/run/history after page reload and duplicate-vs-conflict handling.
+- [Python matrix run 41824920597](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41824920597): Python **3.11, 3.12 and 3.13 each ran 424 tests, zero failures** (**1272 executed unittest methods** across the three jobs). All pre-existing 402 tests remained intact; 22 new core tests were added.
+- This documentation-only evidence commit changes the PR HEAD, and must pass both workflows again on that exact HEAD before merge. No networked provider, authenticated user, AI model, or PII handling was tested.
+
