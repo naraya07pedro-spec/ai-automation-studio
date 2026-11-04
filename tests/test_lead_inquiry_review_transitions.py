@@ -74,6 +74,20 @@ class LegacyReviewDisabledTests(unittest.TestCase):
         self.assertEqual("OPEN", self.transitions.inspect("mock_inbox", "evt")["status"])
         self.assertEqual("PENDING", self.store.state("mock_inbox", "evt"))
 
+    def test_legacy_cannot_create_review_state_row(self):
+        self.old_write()
+        with self.store._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM mock_review_transitions").fetchone()[0]
+        self.assertEqual(0, count)
+
+    def test_forged_event_ref_cannot_bypass_disabled_legacy_path(self):
+        result = self.transitions.acknowledge_hold(
+            "mock_inbox", "evt", event_ref="f" * 64,
+            expected_version=0, preflight_status="PRECHECK_PASSED_NO_TRANSITION",
+            reviewer_ref="mock_operator")
+        self.assertEqual("LEGACY_PATH_DISABLED", result["status"])
+        self.assertEqual("OPEN", self.transitions.inspect("mock_inbox", "evt")["status"])
+
     def test_review_state_persists_as_open_after_reopening(self):
         self.old_write()
         reopened = MockReviewTransitions(DurableMockEventStore(self.path))
