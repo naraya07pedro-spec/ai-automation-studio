@@ -168,9 +168,13 @@ class WorkflowControlHTTPTests(unittest.TestCase):
 
     def test_outdated_publish_and_control_versions_fail_closed(self):
         self.ready();self.stage()
-        self.assertEqual(409,self.publish(expected_version=9)[0])
+        # A malformed request whose target is <= expected is invalid (422),
+        # not a valid optimistic-concurrency conflict (409).
+        self.assertEqual(422,self.publish(expected_version=9)[0])
         self.assertEqual(409,self.publish(draft_version=9)[0])
         self.publish()
+        self.assertEqual("workflow_version_conflict",
+                         self.publish(expected_version=1,draft_version=2)[1]["error"])
         self.assertEqual("workflow_version_conflict",self.stage(expected_version=1)[1]["error"])
         self.assertEqual("workflow_control_conflict",self.control(True,expected_version=1)[1]["error"])
 
