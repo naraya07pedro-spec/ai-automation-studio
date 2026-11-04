@@ -75,6 +75,16 @@ class RealBrowserWorkflowTests(unittest.TestCase):
                          "#crm-id", "#knowledge-id"):
             self.page.locator(selector).fill("e2e_" + suffix)
 
+    def wait_for_gate(self, name):
+        # Playwright.wait_for_function internally evaluates a string, which
+        # this app's intentionally strict CSP rejects (no 'unsafe-eval').
+        # DevTools evaluation here does not weaken the served CSP.
+        for _ in range(100):
+            if self.page.evaluate("(key) => typeof window[key] === 'function'", name):
+                return
+            time.sleep(0.05)
+        self.fail("timed out waiting for actual network response gate")
+
     def test_gallery_navigation_and_no_external_links(self):
         (ROOT / "browser-artifacts").mkdir(exist_ok=True)
         self.page.screenshot(path=str(ROOT / "browser-artifacts" / "desktop-gallery.png"),
@@ -109,6 +119,53 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#source").select_option("mock_web_form")
         self.assertTrue(self.page.locator("#run").is_disabled())
         self.assertIn("Validate again", self.page.locator("#setup-status").inner_text())
+
+    def test_stale_setup_validation_response_cannot_reenable_run(self):
+        # Delay the REAL server response rather than replacing it with a stub.
+        self.page.evaluate("""() => {
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = async (url, options) => {
+                const response = await nativeFetch(url, options);
+                if (url === "/api/mock-setup") {
+                    await new Promise(resolve => { window.__releaseSetup = resolve; });
+                }
+                return response;
+            };
+        }""")
+        self.page.locator("#validate-setup").click()
+        self.wait_for_gate("__releaseSetup")
+        self.page.locator("#source").select_option("mock_web_form")
+        self.assertTrue(self.page.locator("#run").is_disabled())
+        self.page.evaluate("window.__releaseSetup()")
+        self.page.wait_for_timeout(150)
+        self.assertTrue(self.page.locator("#run").is_disabled())
+        self.assertIn("Validate again", self.page.locator("#setup-status").inner_text())
+        self.assertTrue(self.page.locator("#ack").is_disabled())
+
+    def test_inflight_lead_run_cannot_reenable_after_setup_edit(self):
+        self.page.locator("#validate-setup").click()
+        expect(self.page.locator("#run")).to_be_enabled()
+        # The HTTP request still reaches the local engine. Only response
+        # delivery is delayed to exercise the UI's stale-result boundary.
+        self.page.evaluate("""() => {
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = async (url, options) => {
+                const response = await nativeFetch(url, options);
+                if (url === "/api/mock-run") {
+                    await new Promise(resolve => { window.__releaseRun = resolve; });
+                }
+                return response;
+            };
+        }""")
+        self.page.locator("#run").click()
+        self.wait_for_gate("__releaseRun")
+        self.page.locator("#destination").select_option("mock_sheet")
+        self.assertTrue(self.page.locator("#run").is_disabled())
+        self.page.evaluate("window.__releaseRun()")
+        expect(self.page.locator("#status")).to_contain_text("STALE RESPONSE IGNORED")
+        self.assertTrue(self.page.locator("#run").is_disabled())
+        self.assertTrue(self.page.locator("#ack").is_disabled())
+        self.assertIn("stale", self.page.locator("#draft").inner_text().lower())
 
     def test_support_triage_real_browser_duplicate(self):
         self.page.locator("#triage-run").click()
