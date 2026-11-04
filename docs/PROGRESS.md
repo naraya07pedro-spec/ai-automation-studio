@@ -1150,3 +1150,13 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Updated `docs/LOCAL_CSV_BATCH_INTAKE_V1.md` to state this UI selection behavior and its limited scope.
 - **Verification pending:** a newly documented PR head must independently pass **19 real-browser tests and 449 Python tests on each of 3.11/3.12/3.13** before merge. The initial green Python CI does not certify subsequent file edits; the original browser failure must not be described as passing.
 
+
+**Slice 38 FINAL VERIFIED & MERGED · 2026-11-04**
+- [PR #43](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/43) **squash-merged** into `main` at `e48c8fb6c30d2446dbb6de3c1ef89299efd82c23`. Its exact verified PR HEAD was `833549e22cf0473e8c62571594fcad103fed2a59`, comprising only the nine scoped implementation/test/documentation paths.
+- [Exact-head browser run 41829798110](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829798110): **success, 19/19 genuine Chromium tests**, including manual CSV file attachment, dry-run preview, explicit atomic local commit, persisted history across page reload, stale snapshot denial and invalid column rejection.
+- [Exact-head Python run 41829797860](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829797860): **success, 449 tests each** on Python 3.11 / 3.12 / 3.13, zero failures (**1,347 executions**). Pre-existing 424 tests remain intact; 25 new batch acceptance cases cover SQLite durability, shared canonical identity, concurrency, all-or-none behavior and hostile input rejection.
+- CI links, first browser failure and root-cause repair, exact SHA and scope are also recorded as a permanent [PR #43 conversation comment](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/43). No additional source-code commit was made between the final CI results and the merge.
+- **User-visible capability now on `main`:** select an actual small local CSV; review categorical decisions without writes; explicitly commit all new event records to the same persistent SQLite history; replay only exact duplicates; reject changed payload/expired preview. The **raw CSV is not stored**. This is a real *manual local intake*, not an AI agent or external source integration.
+- **Unfinished product core:** user/identity authorization, editing and pausing versioned workflows, real read-only connector and externally triggered events, persistent queue, actual AI model integration and permissioned external writes. The current server remains intentionally loopback-only, unauthenticated and **not suitable for real customer data**.
+- This final change is a **post-merge progress-documentation-only** update; it does not alter the exact tested implementation commit.
+
