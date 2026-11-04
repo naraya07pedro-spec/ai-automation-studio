@@ -617,7 +617,7 @@ def main(argv=None):
         print("Local operator provisioned; password is never printed.")
         return
     try:
-        start_local_server()
+        start_local_server(enable_local_agent=args.enable_local_agent)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
