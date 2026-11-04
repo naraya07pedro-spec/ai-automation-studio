@@ -374,3 +374,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - SQLite remains a bounded experiment, not a final architecture choice. Only the review hold changes; original event stays `PENDING`.
 
 **Next smallest slice (proposed):** Remove or quarantine the legacy bare-preflight transition path without losing regression coverage, then define actual issuer/identity and evidence trust boundaries before considering any real connector or event completion.
+
+
+**Verified GitHub Actions evidence**
+- PR #15 code revision `0b067a440e5e21b480d5493a0bcee7fbdfe41165`: [Actions run 41770506984](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41770506984) completed **success**.
+- Both synthetic fixture contract and Python standard-library unittest steps passed; CI job log reports **143 tests, 0 failures**, including 15 new slice-13 tests.
+- Existing Node.js 20 deprecation warning from GitHub Actions dependencies remains a separate maintenance task.
+- This documentation-only commit needs its own green CI check before asserting the latest PR HEAD passed.
