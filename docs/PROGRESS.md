@@ -616,3 +616,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Existing `COMPLETED` records are preserved as historical unverified state. No actual external delivery evidence is verified.
 
 **Next smallest slice (proposed):** Isolate backup experiments inside a newly created disposable workspace, harden output verification and produce a deterministic artifact manifest for review. Continue deferring real migration and production recovery until operator trust, path isolation and provenance are independently validated.
+
+
+**Verified GitHub Actions evidence**
+- PR #23 code revision `a5c13466ef36396ae0d3af4064c51929a2743271`: [GitHub Actions run 41784998321](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41784998321), completed **success**.
+- Fixture contract validation and full standard-library Python unittest suite succeeded; job log reports **212 tests, 0 failures**, including the 10 new fault-injection and alias regression tests.
+- Existing Node.js 20 deprecation warning remains for older GitHub Actions dependencies, not a failed test.
+- This docs-only change must pass GitHub Actions on its own latest PR-head SHA before declaring final HEAD verified.
