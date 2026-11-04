@@ -174,6 +174,22 @@
 <div class="kicker" style="margin-top:16px">PERSISTED LOCAL EXECUTION HISTORY · LAST 25</div><pre id="local-history" class="trace" aria-live="polite">No active workflow selected.</pre>
 </div></div></section>
 
+<section class="panel" id="local-control-panel" style="margin-top:20px" aria-label="Versioned workflow controls">
+<div class="kicker">FUNCTIONAL LOCAL CONTROL · SAFE VERSIONS & PAUSE</div><h2>Change rules without rewriting earlier results</h2>
+<p class="muted">Stage a new rule revision, inspect it, then publish explicitly. Events already saved retain the exact workflow version and decision used when they ran. Pause blocks new local evaluations and CSV imports. Resume is a separate explicit action.</p>
+<div class="layout">
+<div><div class="field"><label for="local-control-choice">Active or paused local workflow</label><select id="local-control-choice"></select></div>
+<div class="kicker" style="margin-top:18px">DRAFT NEXT VERSION</div><form id="local-stage-form"><div class="core-compact">
+<div class="field"><label for="local-stage-service">New service filter</label><select id="local-stage-service"><option value="any">Any service</option><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+<div class="field"><label for="local-stage-budget">New minimum budget tier</label><select id="local-stage-budget"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></div>
+<div class="field"><label for="local-stage-policy">New next-action policy</label><select id="local-stage-policy"><option value="review_required">Review required</option><option value="draft_only">Draft only</option></select></div></div>
+<button class="primary" id="local-stage" type="submit" disabled>Stage new revision (no activation)</button></form>
+<div class="core-actions" style="margin-top:10px"><button type="button" class="primary" id="local-publish" disabled>Publish staged revision</button></div>
+<div class="core-actions"><button type="button" class="secondary" id="local-pause" disabled>Pause local workflow</button><button type="button" class="secondary" id="local-resume" disabled>Resume local workflow</button></div>
+<div id="local-control-status" class="setup-msg" role="status" aria-live="polite">Select a workflow to stage, publish or pause.</div></div>
+<div><div class="kicker">IMMUTABLE LOCAL RULE HISTORY</div><pre id="local-revisions" class="trace" aria-live="polite">No workflow selected.</pre>
+<div class="notice core-notice">A pause stops new local work after the database control transition. It does not undo or interrupt a request already committed, and it cannot cancel external effects, because this prototype has no external connectors. A stale CSV preview becomes invalid after pause, resume or publish.</div></div>
+</div></section>
 <section class="panel" id="local-batch-panel" style="margin-top:20px" aria-label="Local CSV event intake">
 <div class="kicker">FUNCTIONAL LOCAL INTAKE · EXPLICIT PREVIEW BEFORE COMMIT</div>
 <h2>Import events from a local CSV</h2>
@@ -296,6 +312,78 @@ const refreshLocalHistory=async()=>{
  $("local-history").textContent=data.total+" saved events · most recent "+data.runs.length+" displayed\n"+JSON.stringify(data.runs,null,2);}
  catch(error){$("local-history").textContent="Local history unavailable: "+error.message;}
 };
+// Changing rule versions is independent from past run evidence.
+const selectedControl=()=>localRows.find(w=>w.workflow_id===$("local-control-choice").value);
+const refreshLocalRevisions=async()=>{
+ const w=selectedControl();
+ if(!w){$("local-revisions").textContent="No active or paused workflow selected.";return;}
+ try{const data=await localRead("/api/local-revisions?workflow_id="+encodeURIComponent(w.workflow_id));
+ $("local-revisions").textContent=JSON.stringify(data.revisions,null,2);
+ }catch(error){$("local-revisions").textContent="Revision history unavailable: "+error.message;}
+};
+const updateLocalControls=preferred=>{
+ const selector=$("local-control-choice"),previous=selector.value;selector.replaceChildren();
+ for(const w of localRows.filter(w=>w.status==="ACTIVE"||w.status==="PAUSED")){
+  const option=document.createElement("option");option.value=w.workflow_id;
+  option.textContent=w.display_name+" · v"+w.version+" · "+w.status;
+  selector.append(option);
+ }
+ const choice=[preferred,previous,$("local-run-choice").value].find(
+  id=>[...selector.options].some(option=>option.value===id));
+ if(choice)selector.value=choice;
+ const w=selectedControl();
+ if(w){
+  $("local-stage-service").value=w.service_filter;
+  $("local-stage-budget").value=String(w.min_budget_tier);
+  $("local-stage-policy").value=w.followup_policy;
+ }
+ $("local-stage").disabled=!w||w.pending_version!==null;
+ $("local-publish").disabled=!w||w.pending_version===null;
+ $("local-pause").disabled=!w||w.status!=="ACTIVE";
+ $("local-resume").disabled=!w||w.status!=="PAUSED";
+ if(typeof refreshBatchButton==="function")refreshBatchButton();
+ refreshLocalRevisions();
+};
+$("local-control-choice").addEventListener("change",()=>updateLocalControls($("local-control-choice").value));
+const applyLocalControl=async(path,request,success)=>{
+ try{
+  const result=await localPost(path,request);
+  $("local-control-status").textContent=success+" · "+result.status+" · external dispatch 0";
+  invalidateBatch();
+  await refreshLocalWorkflows(request.workflow_id);
+ }catch(error){$("local-control-status").textContent="Action rejected · "+error.message;
+  await refreshLocalWorkflows(request.workflow_id);}
+};
+$("local-stage-form").addEventListener("submit",async event=>{
+ event.preventDefault();const w=selectedControl();if(!w)return;
+ await applyLocalControl("/api/local-stage",{
+  workflow_id:w.workflow_id,expected_version:w.version,
+  service_filter:$("local-stage-service").value,
+  min_budget_tier:Number($("local-stage-budget").value),
+  followup_policy:$("local-stage-policy").value
+ },"Draft prepared, current active rules unchanged");
+});
+$("local-publish").addEventListener("click",async()=>{
+ const w=selectedControl();if(!w||w.pending_version===null)return;
+ await applyLocalControl("/api/local-publish",{
+  workflow_id:w.workflow_id,expected_version:w.version,
+  draft_version:w.pending_version
+ },"New version published, earlier results preserved");
+});
+$("local-pause").addEventListener("click",async()=>{
+ const w=selectedControl();if(!w)return;
+ await applyLocalControl("/api/local-pause",{
+  workflow_id:w.workflow_id,expected_version:w.version,
+  expected_epoch:w.control_epoch
+ },"New local execution stopped");
+});
+$("local-resume").addEventListener("click",async()=>{
+ const w=selectedControl();if(!w)return;
+ await applyLocalControl("/api/local-resume",{
+  workflow_id:w.workflow_id,expected_version:w.version,
+  expected_epoch:w.control_epoch
+ },"Local execution restored");
+});
 const refreshLocalWorkflows=async(preferred)=>{
  try{const data=await localRead("/api/local-workflows");localRows=data.workflows;
  const list=$("local-workflows");list.replaceChildren();
@@ -306,13 +394,15 @@ const refreshLocalWorkflows=async(preferred)=>{
  const draft=$("local-activate-choice"),active=$("local-run-choice");
  const previousDraft=draft.value,previousActive=active.value;draft.replaceChildren();active.replaceChildren();
  for(const w of localRows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" (v"+w.version+")";
- if(w.status==="DRAFT")draft.append(option);else if(w.status==="ACTIVE")active.append(option);}
+ if(w.status==="DRAFT")draft.append(option);else if(w.status==="ACTIVE"||w.status==="PAUSED")active.append(option);}
  if([...draft.options].some(o=>o.value===preferred||o.value===previousDraft))draft.value=[...draft.options].some(o=>o.value===preferred)?preferred:previousDraft;
  const selectedActive=[preferred,previousActive,savedLocalWorkflow()].find(
   id=>[...active.options].some(option=>option.value===id));
  if(selectedActive)active.value=selectedActive;
  rememberLocalWorkflow(active.value);
- $("local-activate").disabled=!draft.options.length;$("local-run").disabled=!active.options.length;
+ $("local-activate").disabled=!draft.options.length;
+ $("local-run").disabled=!localRows.some(w=>w.workflow_id===active.value&&w.status==="ACTIVE");
+ updateLocalControls(preferred);
  await refreshLocalHistory();
  }catch(error){$("local-workflows").textContent="Local registry unavailable: "+error.message;$("local-activate").disabled=true;$("local-run").disabled=true;}
 };
@@ -342,13 +432,13 @@ $("local-run-form").addEventListener("submit",async event=>{event.preventDefault
  await refreshLocalWorkflows(payload.workflow_id);}
  catch(error){$("local-run-status").textContent="Local execution blocked: "+error.message;
  $("local-result").textContent="No new local run was committed.";}
- finally{button.disabled=!$("local-run-choice").options.length;}});
+ finally{button.disabled=!localRows.some(w=>w.workflow_id===$("local-run-choice").value&&w.status==="ACTIVE");}});
 $("local-run-choice").addEventListener("change",()=>{rememberLocalWorkflow($("local-run-choice").value);refreshLocalHistory();});
 $("local-refresh-history").addEventListener("click",refreshLocalHistory);
 // Local CSV intake is a deliberate two-step workflow, not a connector.
 // A preview token binds the file, active workflow version and DB run count.
 let batchRevision=0;let batchSnapshot=null;let batchBusy=false;
-const refreshBatchButton=()=>{$("local-batch-preview").disabled=batchBusy||!$("local-run-choice").value||!$("local-batch-file").files.length;};
+const refreshBatchButton=()=>{$("local-batch-preview").disabled=batchBusy||!localRows.some(w=>w.workflow_id===$("local-run-choice").value&&w.status==="ACTIVE")||!$("local-batch-file").files.length;};
 const invalidateBatch=()=>{
  batchRevision++;batchSnapshot=null;$("local-batch-commit").disabled=true;
  $("local-batch-result").textContent="Preview invalidated. Check the current file and workflow again.";
