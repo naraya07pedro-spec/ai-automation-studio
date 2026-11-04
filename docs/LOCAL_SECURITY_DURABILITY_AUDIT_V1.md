@@ -22,7 +22,7 @@ A successful `os.replace` gives *atomic visibility*, not necessarily *crash dura
 - UTC timestamp;
 - one of `OPERATOR_LOGIN`, `OPERATOR_LOGOUT`, `OWNER_ROTATE`, `PUBLIC_SOURCE_GRANT`, `PUBLIC_SOURCE_REVOKE`, `RECOVERY_ENROLL`, `RECOVERY_RESET`;
 - one of `ATTEMPT`, `SUCCESS`, `DENIED`, `FAILED`, `UNCERTAIN`;
-- optional **16-character SHA-256 fingerprint** of the normalized public repo name for grants/revocations. No raw GitHub repo name is stored in this ledger.
+- optional **16-character SHA-256 pseudonymous fingerprint (public repository names may be identified by dictionary matching)** of the normalized public repo name for grants/revocations. No raw GitHub repo name is stored in this ledger.
 
 Passwords, password hashes, session cookies, CSRF tokens, recovery codes/hashes, raw request bodies, IP addresses, GitHub issue text, owner identities and customer records **are not part of the event schema**.
 
