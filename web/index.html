@@ -21,8 +21,17 @@
 </style>
 </head>
 <body>
+<section id="operator-gate" aria-label="Local operator login" style="position:fixed;z-index:9999;inset:0;background:#090e17;display:flex;align-items:center;justify-content:center;padding:22px;overflow:auto">
+<form id="operator-login-form" style="width:min(460px,100%);padding:30px;border:1px solid #2d7967;border-radius:16px;background:#141d29;box-shadow:0 16px 55px #05070a">
+<div class="kicker">LOCAL SINGLE-OPERATOR ACCESS</div>
+<h2>Unlock your local workbench</h2>
+<p class="muted">Enter the password provisioned on this computer. No account, password, or session token is sent to an external provider. The server remains localhost-only.</p>
+<div class="field"><label for="operator-password">Local operator password</label><input id="operator-password" type="password" minlength="12" maxlength="128" required autocomplete="current-password"></div>
+<button type="submit" class="primary" id="operator-login-button">Unlock local workbench</button>
+<div id="operator-login-status" role="status" aria-live="polite" style="margin-top:12px;color:#e9c694">A provisioned local owner is required.</div>
+</form></section>
 <main>
-<header><div class="brand">A<span>•</span> Automation Studio</div><span class="tag">LOCAL SANDBOX / NO EXTERNAL SENDS</span></header>
+<header><div class="brand">A<span>•</span> Automation Studio</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="tag">LOCAL SANDBOX / NO EXTERNAL SENDS</span><button id="operator-logout" type="button" class="secondary" hidden>Lock session</button></div></header>
 <section class="hero"><div class="eyebrow">01 / EXPLORE REAL WORKFLOW BEHAVIOR</div><h1>From inquiry to decision. <span style="color:#86e3cb">Without the guesswork.</span></h1><p>Run a deterministic lead inquiry workflow against synthetic data. Inspect every decision, duplicate check and unresolved field. No account, API key, or live CRM required.</p><div class="steps"><span>01 Intake</span><span>02 Validate</span><span>03 Deduplicate</span><span>04 Qualify</span><span>05 Review gate</span></div></section>
 <section id="template-gallery" aria-label="Workflow template gallery"><div class="gallery-header"><div><div class="eyebrow">TEMPLATE LIBRARY · EXPLICIT AVAILABILITY</div><h2 style="font-size:25px;letter-spacing:-.04em;margin:8px 0 0">Explore workflows</h2></div><span class="tag">5 MOCK EXECUTABLE · 0 PREVIEWS</span></div><div id="gallery" class="gallery" aria-live="polite"><p class="muted">Loading verified template metadata…</p></div></section>
 <div class="layout">
@@ -238,6 +247,18 @@ aas:timeline:urgent
 </main>
 <script>
 const $=id=>document.getElementById(id);
+// All state-changing mock and real-core POSTs use the same session CSRF
+// header, not only the new GitHub connector. Session cookie is HttpOnly.
+let operatorCsrf=null;
+const rawFetch=window.fetch.bind(window);
+const appFetch=(url,options={})=>{
+ const method=(options.method||"GET").toUpperCase();
+ if(method!=="POST")return window.fetch(url,options);
+ // Keep the currently installed fetch implementation, so browser tests
+ // can genuinely delay real HTTP responses and protect async ordering.
+ return window.fetch(url,{...options,headers:{
+  ...(options.headers||{}),"X-AAS-CSRF":operatorCsrf||""}});
+};
 let latest="";let reviewToken=null;let setupValid=false;let templatesLoaded=false;
 // Monotonic revision rejects late setup/run responses after any edit or newer validation.
 let setupRevision=0;
@@ -246,18 +267,18 @@ const setupPayload=()=>({template_id:"lead-inquiry",setup:{source:$("source").va
 const invalidateSetup=()=>{setupRevision++;setupValid=false;$("run").disabled=true;$("setup-status").textContent="Setup changed. Validate again before running.";resetReview();$("draft").textContent="Previous draft is stale. Validate setup and run a fresh synthetic inquiry.";};
 for(const id of ["source","destination","follow_up_policy","timezone","monthly_budget_idr"]){$(id).addEventListener("change",invalidateSetup);$(id).addEventListener("input",invalidateSetup);}
 $("setup-form").addEventListener("submit",async event=>{event.preventDefault();const revision=++setupRevision;const request=setupPayload();setupValid=false;$("run").disabled=true;$("setup-status").textContent="Validating synthetic setup…";
-try{const response=await fetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(request)});const data=await response.json();if(revision!==setupRevision)return;setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid||!templatesLoaded;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){if(revision!==setupRevision)return;$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;$("run").disabled=true;}});
-const loadGallery=async()=>{try{const [catalogResponse,setupResponse]=await Promise.all([fetch("/api/templates"),fetch("/api/setup-choices")]);if(!catalogResponse.ok||!setupResponse.ok)throw Error("unavailable");const catalog=await catalogResponse.json();const choices=await setupResponse.json();
+try{const response=await appFetch("/api/mock-setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(request)});const data=await response.json();if(revision!==setupRevision)return;setupValid=response.ok&&data.setup_status==="DRAFT_VALID";$("run").disabled=!setupValid||!templatesLoaded;$("setup-status").textContent=setupValid?"DRAFT_VALID · Run is enabled. No live integration activated.":"BLOCKED · "+(data.errors||[]).join(", ");}catch(error){if(revision!==setupRevision)return;$("setup-status").textContent="Setup verification unavailable. Mock run remains disabled.";setupValid=false;$("run").disabled=true;}});
+const loadGallery=async()=>{try{const [catalogResponse,setupResponse]=await Promise.all([appFetch("/api/templates"),appFetch("/api/setup-choices")]);if(!catalogResponse.ok||!setupResponse.ok)throw Error("unavailable");const catalog=await catalogResponse.json();const choices=await setupResponse.json();
 if(catalog.executable_count!==5||catalog.preview_count!==0||choices.template_id!=="lead-inquiry")throw Error("unexpected contract");
 const gallery=$("gallery");gallery.replaceChildren();for(const template of catalog.templates){const card=document.createElement("article");card.className="template-card";if(template.status==="EXECUTABLE_MOCK")card.setAttribute("aria-current","true");
 const cat=document.createElement("div");cat.className="category";cat.textContent=template.category;const title=document.createElement("h3");title.textContent=template.title;const desc=document.createElement("p");desc.textContent=template.description;const mode=document.createElement("div");mode.className="mode-tag"+(template.status==="EXECUTABLE_MOCK"?"":" preview");mode.textContent=template.status;
 const open=document.createElement("button");open.type="button";open.textContent=template.status==="EXECUTABLE_MOCK"?"Configure mock":"Preview only";open.disabled=template.status!=="EXECUTABLE_MOCK";if(!open.disabled)open.addEventListener("click",()=>$(template.id==="support-triage"?"triage-panel":template.id==="appointment-followup"?"appointment-panel":template.id==="crm-handoff"?"crm-panel":template.id==="knowledge-routing"?"knowledge-panel":"setup-panel").scrollIntoView({behavior:"smooth"}));card.append(cat,title,desc,mode,open);gallery.append(card);}templatesLoaded=true;
 }catch(error){$("gallery").textContent="Template metadata could not be verified. The mock setup cannot be activated.";templatesLoaded=false;$("run").disabled=true;}};
-loadGallery();
+// Gallery loads only after operator session is established.
 $("demo").addEventListener("submit",async event=>{
  event.preventDefault();if(!setupValid||!templatesLoaded){$("status").textContent="VALIDATE SETUP FIRST";return;}const revision=setupRevision;resetReview();$("review-status").textContent="No review action available.";const button=$("run");button.disabled=true;$("status").textContent="PROCESSING MOCK RUN";
  const payload={event_id:$("event_id").value,service_requested:$("service_requested").value,budget_range:$("budget_range").value,timeline:$("timeline").value,...setupPayload()};
- try{const response=await fetch("/api/mock-run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+ try{const response=await appFetch("/api/mock-run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
  const data=await response.json();if(revision!==setupRevision){$("status").textContent="SETUP CHANGED · STALE RESPONSE IGNORED";return;}if(!response.ok)throw new Error(data.error||"Request failed");
  const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
  $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
@@ -271,7 +292,7 @@ $("demo").addEventListener("submit",async event=>{
  }catch(error){if(revision===setupRevision){resetReview();$("status").textContent="MOCK RUN FAILED";$("trace").textContent="The local demo could not complete. Verify that the local Python server is running.";latest="";}}finally{button.disabled=!setupValid||!templatesLoaded;}
 });
 const reviewDecision=async decision=>{if(!reviewToken)return;const token=reviewToken;resetReview();$("review-status").textContent="Recording local review...";
-try{const response=await fetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
+try{const response=await appFetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
 $("ack").addEventListener("click",()=>reviewDecision("ACKNOWLEDGE"));
 $("reject").addEventListener("click",()=>reviewDecision("REJECT"));
 // Guard all secondary mock workflows against out-of-order HTTP responses.
@@ -288,14 +309,14 @@ const crmGuard=workflowGuard("crm-form","crm-run","crm-status",["crm-state","crm
 const knowledgeGuard=workflowGuard("knowledge-form","knowledge-run","knowledge-status",["knowledge-state","knowledge-policy","knowledge-route","knowledge-transferred","knowledge-preview","knowledge-timeline"]);
 $("triage-form").addEventListener("submit",async event=>{event.preventDefault();const ticket=triageGuard.begin();$("triage-status").textContent="RUNNING MOCK TRIAGE";
 try{const input={event_id:$("ticket-id").value,category:$("ticket-category").value,severity:$("ticket-severity").value,customer_impact:$("ticket-impact").value==="true"};
-const response=await fetch("/api/mock-triage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});const data=await response.json();if(!triageGuard.current(ticket))return;if(!response.ok)throw Error("rejected");
+const response=await appFetch("/api/mock-triage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});const data=await response.json();if(!triageGuard.current(ticket))return;if(!response.ok)throw Error("rejected");
 $("triage-state").textContent=data.status;$("triage-queue").textContent=data.queue;$("triage-urgency").textContent=data.urgency;$("triage-dispatch").textContent=String(data.external_dispatch_count);
 $("triage-status").textContent="MOCK ONLY · NO TICKET CREATED";const steps=$("triage-timeline");steps.replaceChildren();for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=stage.stage;const value=document.createElement("strong");value.textContent=stage.status;item.append(label,value);steps.append(item);}
 }catch(error){if(triageGuard.current(ticket)){$("triage-status").textContent="MOCK TRIAGE REJECTED · NO SIDE EFFECTS";$("triage-queue").textContent="Not assigned";$("triage-urgency").textContent="Not assessed";}}finally{triageGuard.end(ticket);}});
 $("appointment-form").addEventListener("submit",async event=>{
 event.preventDefault();const ticket=appointmentGuard.begin();$("appointment-status").textContent="EVALUATING SYNTHETIC APPOINTMENT";
 try{const payload={event_id:$("appointment-id").value,as_of:$("reference-time").value,appointment_at:$("appointment-time").value,channel:$("appointment-channel").value};
-const response=await fetch("/api/mock-appointment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await response.json();if(!appointmentGuard.current(ticket))return;
+const response=await appFetch("/api/mock-appointment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await response.json();if(!appointmentGuard.current(ticket))return;
 $("appointment-state").textContent=data.status||"BLOCKED";$("appointment-window").textContent=data.window||"NOT_ASSESSED";$("appointment-plan").textContent=data.followup_plan||"NOT_PREPARED";$("appointment-sent").textContent=String(data.external_dispatch_count||0);
 const timeline=$("appointment-timeline");timeline.replaceChildren();
 for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const title=document.createElement("span");title.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(title,state);timeline.append(item);}
@@ -305,7 +326,7 @@ $("appointment-status").textContent=response.ok?"MOCK PLAN EVALUATED · NOTHING 
 $("crm-form").addEventListener("submit",async event=>{
 event.preventDefault();const ticket=crmGuard.begin();$("crm-status").textContent="BUILDING SYNTHETIC RECORD PREVIEW";
 try{const payload={event_id:$("crm-id").value,lead_stage:$("crm-stage").value,service_code:$("crm-service").value,owner_queue:$("crm-owner").value,mapping_profile:$("crm-mapping").value,review_acknowledged:$("crm-review").value==="true"};
-const response=await fetch("/api/mock-crm-handoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+const response=await appFetch("/api/mock-crm-handoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
 const data=await response.json();if(!crmGuard.current(ticket))return;$("crm-state").textContent=data.status||"BLOCKED";$("crm-dedup").textContent=data.deduplication||"NOT_RUN";$("crm-review-result").textContent=data.review_gate||"NOT_VERIFIED";$("crm-created").textContent=data.crm_record_created?"1":"0";
 $("crm-record").textContent=data.record_preview?JSON.stringify(data.record_preview,null,2):"No record prepared. No CRM write occurred.";
 const timeline=$("crm-timeline");timeline.replaceChildren();for(const step of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=step.stage;const state=document.createElement("strong");state.textContent=step.status;item.append(label,state);timeline.append(item);}
@@ -315,7 +336,7 @@ $("crm-status").textContent=response.ok?"MOCK EVALUATION COMPLETE · ZERO CRM WR
 $("knowledge-form").addEventListener("submit",async event=>{
 event.preventDefault();const ticket=knowledgeGuard.begin();$("knowledge-status").textContent="EVALUATING SYNTHETIC METADATA";
 try{const payload={event_id:$("knowledge-id").value,document_kind:$("knowledge-kind").value,classification:$("knowledge-classification").value,destination:$("knowledge-destination").value,review_acknowledged:$("knowledge-review").value==="true"};
-const response=await fetch("/api/mock-knowledge-routing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+const response=await appFetch("/api/mock-knowledge-routing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
 const data=await response.json();if(!knowledgeGuard.current(ticket))return;$("knowledge-state").textContent=data.status||"BLOCKED";$("knowledge-policy").textContent=data.policy_decision||"NOT_ASSESSED";$("knowledge-route").textContent=data.destination||"NOT_ASSIGNED";$("knowledge-transferred").textContent=data.document_transferred?"1":"0";
 $("knowledge-preview").textContent=data.routing_preview?JSON.stringify(data.routing_preview,null,2):"No routing preview. No document transfer.";
 const timeline=$("knowledge-timeline");timeline.replaceChildren();for(const stage of data.timeline||[]){const row=document.createElement("div");row.className="stage";const label=document.createElement("span");label.textContent=stage.stage;const value=document.createElement("strong");value.textContent=stage.status;row.append(label,value);timeline.append(row);}
@@ -328,7 +349,7 @@ let localRows=[];
 const savedLocalWorkflow=()=>{try{return sessionStorage.getItem("aas.activeLocalWorkflow.v1")||"";}catch{return "";}};
 const rememberLocalWorkflow=id=>{try{if(id)sessionStorage.setItem("aas.activeLocalWorkflow.v1",id);}catch{/* Optional UI preference only. */}};
 const localRead=async(path,options)=>{
- const response=await fetch(path,options);const data=await response.json();
+ const response=await appFetch(path,options);const data=await response.json();
  if(!response.ok)throw Error(data.error||"local_request_failed");return data;
 };
 const localPost=(path,body)=>localRead(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -596,7 +617,51 @@ $("public-github-commit").addEventListener("click",async()=>{
   $("local-run-choice").disabled=false;refreshPublicGithubButton();
  }
 });
-refreshLocalWorkflows();
+const operatorReady=()=>{
+ $("operator-gate").style.display="none";
+ $("operator-password").value="";
+ $("operator-logout").hidden=false;
+ loadGallery();
+ refreshLocalWorkflows();
+};
+const lockOperatorUI=message=>{
+ operatorCsrf=null;
+ $("operator-gate").style.display="flex";
+ $("operator-login-status").textContent=message||"Local session locked. Log in to continue.";
+ $("operator-logout").hidden=true;
+ $("local-batch-commit").disabled=true;
+ $("public-github-commit").disabled=true;
+};
+$("operator-login-form").addEventListener("submit",async event=>{
+ event.preventDefault();const button=$("operator-login-button");
+ button.disabled=true;
+ try{
+  const response=await rawFetch("/api/operator-login",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({password:$("operator-password").value})});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"operator_login_failed");
+  operatorCsrf=data.csrf_token;
+  operatorReady();
+ }catch(error){
+  $("operator-login-status").textContent="Login rejected: "+error.message;
+ }finally{button.disabled=false;}
+});
+$("operator-logout").addEventListener("click",async()=>{
+ try{await appFetch("/api/operator-logout",{
+  method:"POST",headers:{"Content-Type":"application/json"},
+  body:"{}"});}finally{lockOperatorUI("Local session locked.");}
+});
+const restoreOperatorSession=async()=>{
+ try{
+  const response=await rawFetch("/api/operator-session");
+  const data=await response.json();
+  if(data.authenticated&&data.csrf_token){
+   operatorCsrf=data.csrf_token;operatorReady();
+  }else{lockOperatorUI("Sign in with the local owner's password.");}
+ }catch(error){lockOperatorUI("Local session check failed. Try signing in.");}
+};
+restoreOperatorSession();
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
 </body></html>
