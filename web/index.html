@@ -42,7 +42,7 @@
 <div class="line"><span>Qualification</span><strong id="qualification">Not started</strong></div>
 <div class="line"><span>External dispatches</span><strong id="dispatch">0</strong></div>
 </div>
-<div class="kicker" style="margin-top:22px">EXECUTION TIMELINE · SERVER-DERIVED</div><div id="timeline" class="timeline" aria-live="polite"><span class="muted">No run yet.</span></div>
+<div class="kicker" style="margin-top:22px">EXECUTION TIMELINE · SERVER-DERIVED</div><div id="lead-timeline" class="timeline" aria-live="polite"><span class="muted">No run yet.</span></div>
 <div class="kicker" style="margin-top:20px">LOCAL FOLLOW-UP DRAFT · NEVER SENT</div><div id="draft" class="draft"><p>Run a fresh synthetic inquiry to prepare a fixed mock draft.</p></div>
 <div class="review-actions"><button type="button" class="secondary" id="ack" disabled>Acknowledge review</button><button type="button" class="secondary" id="reject" disabled>Reject draft</button></div><div id="review-status" class="foot" role="status" aria-live="polite">No review action available.</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div class="kicker">REDACTED EXECUTION JSON</div><button class="secondary" type="button" id="copy">Copy trace</button></div><pre id="trace" class="trace" aria-live="polite">No execution yet. Submit the synthetic lead form to inspect the result.</pre><div class="foot">Process-local deduplication resets when the server restarts. No persistent identity or provider receipts.</div>
@@ -156,7 +156,7 @@ $("demo").addEventListener("submit",async event=>{
  const r=data.result;$("workflow").textContent=r.workflow_status||"BLOCKED";$("validation").textContent=r.validation?.activation_status||"UNKNOWN";
  $("dedup").textContent=r.deduplication?.status||"NOT_RUN";$("qualification").textContent=r.qualification?.qualification_status||"NOT_RUN";
  $("dispatch").textContent=String(data.external_dispatch_count);$("status").textContent="MOCK RUN COMPLETED · NO SENDS";
- const timeline=$("timeline");timeline.replaceChildren();
+ const timeline=$("lead-timeline");timeline.replaceChildren();
  for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const name=document.createElement("span");name.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(name,state);timeline.append(item);}
  const offer=data.review_offer;const draft=$("draft");draft.replaceChildren();
  if(offer?.draft){const title=document.createElement("h3");title.textContent=offer.draft.subject;const body=document.createElement("p");body.textContent=offer.draft.body;const foot=document.createElement("p");foot.textContent="Recipient: NOT_SET · Delivery: NEVER_SENT · No verified operator";draft.append(title,body,foot);if(offer.review_token){reviewToken=offer.review_token;$("ack").disabled=false;$("reject").disabled=false;$("review-status").textContent="Awaiting local review (does not authorize sending).";}else{$("review-status").textContent="Draft-only policy. No local review token was issued."};}
