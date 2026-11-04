@@ -169,6 +169,9 @@ class PublicGitHubReadOnlyIntake:
         repo = self._check_repo(repo_input)
         if repo is None:
             return _error("invalid_public_repo")
+        policy_epoch = self.policy.version() if self.policy is not None else None
+        if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+            return _error("public_source_not_allowed", 403)
         # Fail before any network read if local work is not ACTIVE.
         with self.core._lock:
             local = self.core.db.execute(
