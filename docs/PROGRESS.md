@@ -714,3 +714,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract, runtime baseline reporting and full Python standard-library unittest suite succeeded. CI job log: **255 tests run, 0 failures** (242 previously plus 13 new subprocess/runtime tests).
 - Existing non-blocking Node.js 20 deprecation warning for older GitHub Actions dependencies remains.
 - This note is a docs-only commit with its own new head SHA; verify CI for that final head before calling it green.
+
+
+## Slice 25 · 2026-11-04 · Cross-version matrix and explicit synthetic fixture drift rejection
+
+**Goal:** Detect unexpected SQLite logical-dump changes across multiple Python CI builds before promoting any new runtime as compatible with the fixed synthetic recovery contract.
+
+**Completed**
+- Verified PR #26 final-head CI success, squash-merged it to main, and branched `feat/runtime-drift-matrix-slice-25`.
+- Added `prototype/lead_inquiry_runtime_drift.py` with a fail-closed gate for both fixed fixture schemas. Actual pinned-manifest verification is authoritative; the Python/SQLite version screen is informational. Either fixture failure yields `RUNTIME_DRIFT_DETECTED`, not an auto-updated checksum.
+- Added `tools/check_runtime_drift.py`, a CLI that prints a sanitized status and exits nonzero if fixture verification fails.
+- Changed `.github/workflows/mock-prototype-tests.yml` to a Python **3.11 / 3.12 / 3.13** `ubuntu-latest` matrix with `fail-fast: false`. Each leg records the runtime, runs the drift checker, validates fixture contract, and executes the entire unittest suite.
+- Added `tests/test_lead_inquiry_runtime_drift.py` with **12 tests** for baseline success, untested-version-but-verified result, forged hashes, a single failing schema, false success statuses, invalid runtime result, rejected loose boolean verdicts, error sanitization, and both-schema execution.
+- Added `docs/RUNTIME_DRIFT_MATRIX.md` with the version policy and explicit review process if a hash drifts.
+
+**Verification gate**
+- Read all committed changes back; require all three matrix legs to complete successfully on the exact PR-head SHA. Record each runner's observed Python and SQLite versions. Do not claim multi-version compatibility from one green leg.
+
+**Critical limits**
+- A matrix job passing proves these fixed synthetic fixtures match the pinned dump signatures **on that tested runtime**, not that production data or every SQLite version is compatible.
+- The expected reference is locally stored and not independently signed. A code maintainer can update both producer and verifier. Fingerprints are version-sensitive; drift is intentionally a failing condition.
+- No distributed/OS-level isolation proof, power-loss crash test, original historical migration, live provider connection, or permanent architecture decision. Tests remain mock-only.
+
+**Next smallest slice (proposed):** Build a reviewed runtime evidence registry from actual matrix results and test explicit failure behavior under alternate SQLite dump formats, without hiding version drift or promoting synthetic recovery to production.
