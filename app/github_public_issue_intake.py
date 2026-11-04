@@ -98,7 +98,8 @@ def _sanitize_issues(repo, issues):
     ignored = 0
     repo_hash = hashlib.sha256(repo.lower().encode("ascii")).hexdigest()[:12]
     for item in issues:
-        if type(item) is not dict or "pull_request" in item:
+        if (type(item) is not dict or "pull_request" in item
+                or item.get("state") != "open"):
             ignored += 1
             continue
         number = item.get("number")
