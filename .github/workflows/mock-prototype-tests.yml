@@ -21,6 +21,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Record mock runtime compatibility baseline
+        run: |
+          PYTHONPATH=prototype python -c "from lead_inquiry_runtime_contract import runtime_contract; print(runtime_contract())"
       - name: Validate synthetic fixture contract
         run: python tools/validate_fixture_contract.py
       - name: Run all standard-library tests
