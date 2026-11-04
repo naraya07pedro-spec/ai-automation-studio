@@ -279,7 +279,10 @@ aas:timeline:urgent
 <div class="field"><label for="local-agent-model">Installed Ollama model</label><input id="local-agent-model" maxlength="80" placeholder="e.g. qwen2.5:3b" autocomplete="off"></div>
 <div class="field"><label for="local-agent-mode">Allowed tools</label><input id="local-agent-mode" value="Calculator and UTC time only" disabled></div></div>
 <div class="field"><label for="local-agent-prompt">Your request (max 3,000 characters)</label><textarea id="local-agent-prompt" maxlength="3000" rows="4" style="width:100%;min-height:110px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="Ask a question or request a calculation. Do not enter secrets or customer records."></textarea></div>
+<div class="field" style="display:flex;gap:10px;align-items:center"><input id="local-agent-remember" type="checkbox" style="width:auto" disabled><label for="local-agent-remember" style="margin:0">Save this conversation on my PC (plain local SQLite, max 6 turns)</label></div>
 <button id="local-agent-send" class="primary" type="button" disabled>Run local agent</button>
+<div class="core-actions" style="margin-top:12px"><button id="local-agent-history-refresh" type="button" class="secondary" disabled>View saved context</button><button id="local-agent-history-clear" type="button" class="secondary" disabled>Delete saved context</button></div>
+<pre class="trace" id="local-agent-history-display" aria-label="Saved local agent context">Local history is disabled by default.</pre>
 <div class="setup-msg" id="local-agent-status" role="status" aria-live="polite">Checking local-model permission…</div>
 <pre class="trace" id="local-agent-output" aria-label="Local agent result">No agent run yet. Model responses are unverified.</pre>
 </section>
@@ -732,6 +735,40 @@ $("operator-audit-refresh").addEventListener("click",refreshOperatorAudit);
 
 let localAgentRevision=0;
 let localAgentEnabled=false;
+let localAgentHistoryEnabled=false;
+const localAgentRemember=$("local-agent-remember");
+const agentHistoryDisplay=$("local-agent-history-display");
+const refreshAgentHistory=async()=>{
+ if(!localAgentHistoryEnabled||!operatorCsrf)return;
+ const revision=localAgentRevision;
+ try{
+  const response=await appFetch("/api/local-agent-history");
+  const data=await response.json();
+  if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"history_unavailable");
+  agentHistoryDisplay.textContent=(data.turns||[]).length
+    ?(data.turns||[]).map((p,i)=>(i+1)+". User: "+p.prompt+"\nAgent: "+p.answer).join("\n\n")
+    :"No saved turns.";
+ }catch(error){
+  if(revision===localAgentRevision)agentHistoryDisplay.textContent="History unavailable: "+error.message;
+ }
+};
+$("local-agent-history-refresh").addEventListener("click",refreshAgentHistory);
+$("local-agent-history-clear").addEventListener("click",async()=>{
+ if(!localAgentHistoryEnabled||!operatorCsrf)return;
+ const revision=++localAgentRevision;
+ try{
+  const response=await appFetch("/api/local-agent-clear",{
+   method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+  const data=await response.json();
+  if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"history_clear_failed");
+  agentHistoryDisplay.textContent="No saved turns.";
+  localAgentStatus.textContent="Local context deleted. Previous model memory will not be replayed.";
+ }catch(error){
+  if(revision===localAgentRevision)localAgentStatus.textContent="Delete failed: "+error.message;
+ }
+});
 const localAgentSend=$("local-agent-send");
 const localAgentStatus=$("local-agent-status");
 const localAgentOutput=$("local-agent-output");
@@ -740,12 +777,18 @@ $("local-agent-model").addEventListener("input",invalidateLocalAgent);
 $("local-agent-prompt").addEventListener("input",invalidateLocalAgent);
 const refreshLocalAgent=async()=>{
  const revision=++localAgentRevision;
- localAgentEnabled=false;localAgentSend.disabled=true;
+ localAgentEnabled=false;localAgentHistoryEnabled=false;
+ localAgentRemember.disabled=true;localAgentSend.disabled=true;
  try{
   const response=await appFetch("/api/local-agent-capabilities");
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
+  localAgentHistoryEnabled=localAgentEnabled&&data.persisted===true;
+  localAgentRemember.disabled=!localAgentHistoryEnabled;
+  if(!localAgentHistoryEnabled)localAgentRemember.checked=false;
+  $("local-agent-history-refresh").disabled=!localAgentHistoryEnabled;
+  $("local-agent-history-clear").disabled=!localAgentHistoryEnabled;
   localAgentSend.disabled=!localAgentEnabled;
   localAgentStatus.textContent=localAgentEnabled
     ?"Enabled locally. Only calculator and UTC clock tools are permitted."
@@ -770,11 +813,12 @@ localAgentSend.addEventListener("click",async()=>{
  try{
   const response=await appFetch("/api/local-agent-run",{
    method:"POST",headers:{"Content-Type":"application/json"},
-   body:JSON.stringify({model,prompt})});
+   body:JSON.stringify({model,prompt,remember:localAgentRemember.checked})});
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   if(!response.ok)throw Error(data.error||"local_agent_failed");
   localAgentOutput.textContent=data.answer||"Empty model response";
+  if(data.remembered)refreshAgentHistory();
   localAgentStatus.textContent="Local model responded. Tools: "+
     ((data.tools_used||[]).join(", ")||"none")+". Verify generated claims.";
  }catch(error){
@@ -800,6 +844,12 @@ const operatorReady=()=>{
 const lockOperatorUI=message=>{
  operatorCsrf=null;
  localAgentEnabled=false;
+ localAgentHistoryEnabled=false;
+ localAgentRemember.checked=false;
+ localAgentRemember.disabled=true;
+ $("local-agent-history-refresh").disabled=true;
+ $("local-agent-history-clear").disabled=true;
+ agentHistoryDisplay.textContent="Session locked. Saved content hidden.";
  invalidateLocalAgent();
  localAgentOutput.textContent="Local session locked; previous answer cleared.";
  localAgentStatus.textContent="Sign in to access the local agent.";
