@@ -17,6 +17,7 @@
  .layout > *, .panel, .template-card{min-width:0}
  .tag{overflow-wrap:anywhere}
 }
+.core-notice{border-left-color:#e7c386;background:#2a271c}.core-list{display:grid;gap:8px;margin:14px 0}.core-workflow{background:#0b1722;border:1px solid #32445a;padding:11px 13px;border-radius:10px;font-size:12px;line-height:1.6}.core-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.core-actions>button{flex:1}.core-compact{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}@media(max-width:600px){.core-compact{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -138,6 +139,40 @@
 <div class="kicker" style="margin-top:20px">METADATA-ONLY ROUTE PREVIEW</div><pre id="knowledge-preview" class="trace" aria-live="polite">No route preview prepared.</pre>
 <div class="kicker" style="margin-top:20px">SERVER-DERIVED ROUTE TIMELINE</div><div id="knowledge-timeline" class="timeline" aria-live="polite">No run yet.</div>
 <div class="notice">SIMULATED ONLY. Restricted labels are blocked. No file bytes, uploads, transfer, or authenticated operator approval.</div></div></div></section>
+<section class="panel" id="local-core-panel" style="margin-top:20px" aria-label="Functional local rule workflow core">
+<div class="kicker">FUNCTIONAL LOCAL CORE · V1 · STORED ON THIS COMPUTER</div><h2>Build and run your first local rule workflow</h2>
+<p class="muted">Unlike the five synthetic mock examples above, this workbench saves your own workflow configuration and categorical run history in a local SQLite database. Create a draft, activate its immutable v1 rules, then run a pseudonymous event. No AI model, external destination, actual messages or customer records are involved.</p>
+<div class="notice core-notice"><strong>Data boundary:</strong> use invented event IDs and nonpersonal workflow labels only. Do not enter names, emails, phone numbers, secrets or real customer data. This local server is not authenticated or safe to expose to a network. The workbench stores IDs, selected rule categories and results on this computer, and does not silently delete history.</div>
+<div class="layout" style="margin-top:20px">
+<div><div class="kicker">01 · DEFINE A PRIVATE WORKFLOW</div>
+<form id="local-create-form">
+<div class="core-compact">
+<div class="field"><label for="local-id">Workflow identifier</label><input id="local-id" value="my_sales_flow" maxlength="40" pattern="[a-z][a-z0-9_-]{2,39}" required></div>
+<div class="field"><label for="local-name">Nonpersonal display name</label><input id="local-name" value="My Sales Rules" maxlength="50" pattern="[A-Za-z0-9][A-Za-z0-9 ]{2,49}" required></div>
+<div class="field"><label for="local-service-filter">Service to match</label><select id="local-service-filter"><option value="any">Any of three categories</option><option value="automation" selected>Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+<div class="field"><label for="local-budget-filter">Minimum budget tier</label><select id="local-budget-filter"><option value="1">Tier 1</option><option value="2" selected>Tier 2</option><option value="3">Tier 3</option></select></div>
+<div class="field"><label for="local-policy">Next-action policy</label><select id="local-policy"><option value="review_required" selected>Require local review</option><option value="draft_only">Draft only</option></select></div>
+</div><button class="primary" type="submit" id="local-create">Save workflow as draft</button>
+</form><div id="local-create-status" class="setup-msg" role="status" aria-live="polite">No local workflow created in this session.</div>
+<hr style="border:0;border-top:1px solid #263747;margin:24px 0">
+<div class="kicker">02 · ACTIVATE PINNED V1 RULES</div><form id="local-activate-form">
+<div class="field"><label for="local-activate-choice">Saved draft</label><select id="local-activate-choice"></select></div>
+<button id="local-activate" class="primary" type="submit" disabled>Activate local rules</button></form>
+<div id="local-activation-status" class="setup-msg" role="status" aria-live="polite">Activation is local only and never enables external actions.</div>
+</div>
+<div><div class="kicker">SAVED WORKFLOWS · LOCAL DATABASE</div><div id="local-workflows" class="core-list" aria-live="polite">Loading local workflow registry…</div>
+<div class="kicker" style="margin-top:22px">03 · EXECUTE LOCAL RULES</div>
+<form id="local-run-form"><div class="field"><label for="local-run-choice">Active workflow</label><select id="local-run-choice"></select></div>
+<div class="core-compact"><div class="field"><label for="local-event">Invented event ID (no PII)</label><input id="local-event" value="sample_event_001" required maxlength="60" pattern="[A-Za-z0-9_-]{3,60}"></div>
+<div class="field"><label for="local-service">Service category</label><select id="local-service"><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+<div class="field"><label for="local-budget">Budget tier</label><select id="local-budget"><option value="1">Tier 1</option><option value="2" selected>Tier 2</option><option value="3">Tier 3</option></select></div>
+<div class="field"><label for="local-timeline">Priority</label><select id="local-timeline"><option value="soon">Soon</option><option value="urgent">Urgent</option><option value="flexible">Flexible / unknown</option></select></div></div>
+<button class="primary" id="local-run" type="submit" disabled>Evaluate and persist this event</button></form>
+<div id="local-run-status" class="setup-msg" role="status" aria-live="polite">Select an active workflow. No external dispatch is possible.</div>
+<pre id="local-result" class="trace" aria-live="polite">No local event recorded yet.</pre>
+<div class="core-actions"><button id="local-refresh-history" class="secondary" type="button">Refresh local history</button></div>
+<div class="kicker" style="margin-top:16px">PERSISTED LOCAL EXECUTION HISTORY · LAST 25</div><pre id="local-history" class="trace" aria-live="polite">No active workflow selected.</pre>
+</div></div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -213,6 +248,68 @@ const timeline=$("knowledge-timeline");timeline.replaceChildren();for(const stag
 $("knowledge-status").textContent=response.ok?"MOCK POLICY EVALUATED · NO TRANSFER":"INVALID METADATA · NO TRANSFER";
 }catch(error){$("knowledge-status").textContent="LOCAL ROUTING DEMO UNAVAILABLE · NO TRANSFER";$("knowledge-transferred").textContent="0";}finally{button.disabled=false;}
 });
+// Separate functional local-rule workbench. It has no provider adapters,
+// no AI calls and no route to initiate external dispatches.
+let localRows=[];
+const localRead=async(path,options)=>{
+ const response=await fetch(path,options);const data=await response.json();
+ if(!response.ok)throw Error(data.error||"local_request_failed");return data;
+};
+const localPost=(path,body)=>localRead(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+const refreshLocalHistory=async()=>{
+ const wid=$("local-run-choice").value;
+ if(!wid){$("local-history").textContent="No active workflow selected.";return;}
+ try{const data=await localRead("/api/local-history?workflow_id="+encodeURIComponent(wid));
+ $("local-history").textContent=data.total+" saved events · most recent "+data.runs.length+" displayed\n"+JSON.stringify(data.runs,null,2);}
+ catch(error){$("local-history").textContent="Local history unavailable: "+error.message;}
+};
+const refreshLocalWorkflows=async(preferred)=>{
+ try{const data=await localRead("/api/local-workflows");localRows=data.workflows;
+ const list=$("local-workflows");list.replaceChildren();
+ if(!localRows.length)list.textContent="No saved workflows. Create your first local draft.";
+ for(const w of localRows){const item=document.createElement("div");item.className="core-workflow";
+ item.textContent=w.display_name+" · "+w.workflow_id+" · V"+w.version+" · "+w.status+" · "+w.run_count+" saved events";
+ list.append(item);}
+ const draft=$("local-activate-choice"),active=$("local-run-choice");
+ const previousDraft=draft.value,previousActive=active.value;draft.replaceChildren();active.replaceChildren();
+ for(const w of localRows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" (v"+w.version+")";
+ if(w.status==="DRAFT")draft.append(option);else if(w.status==="ACTIVE")active.append(option);}
+ if([...draft.options].some(o=>o.value===preferred||o.value===previousDraft))draft.value=[...draft.options].some(o=>o.value===preferred)?preferred:previousDraft;
+ if([...active.options].some(o=>o.value===preferred||o.value===previousActive))active.value=[...active.options].some(o=>o.value===preferred)?preferred:previousActive;
+ $("local-activate").disabled=!draft.options.length;$("local-run").disabled=!active.options.length;
+ await refreshLocalHistory();
+ }catch(error){$("local-workflows").textContent="Local registry unavailable: "+error.message;$("local-activate").disabled=true;$("local-run").disabled=true;}
+};
+$("local-create-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("local-create");button.disabled=true;
+ try{const payload={workflow_id:$("local-id").value,display_name:$("local-name").value,
+ service_filter:$("local-service-filter").value,min_budget_tier:Number($("local-budget-filter").value),
+ followup_policy:$("local-policy").value};
+ const result=await localPost("/api/local-create",payload);
+ $("local-create-status").textContent=result.status+" · "+result.workflow_id+" · stored locally, not active.";
+ await refreshLocalWorkflows(result.workflow_id);}
+ catch(error){$("local-create-status").textContent="Draft rejected: "+error.message;}
+ finally{button.disabled=false;}});
+$("local-activate-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("local-activate");button.disabled=true;
+ try{const wid=$("local-activate-choice").value;const entry=localRows.find(w=>w.workflow_id===wid&&w.status==="DRAFT");
+ if(!entry)throw Error("draft_not_available");
+ const result=await localPost("/api/local-activate",{workflow_id:wid,expected_version:entry.version});
+ $("local-activation-status").textContent=result.status+" · v"+result.version+" · local execution only.";
+ await refreshLocalWorkflows(wid);}
+ catch(error){$("local-activation-status").textContent="Activation blocked: "+error.message;}
+ finally{button.disabled=!$("local-activate-choice").options.length;}});
+$("local-run-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("local-run");button.disabled=true;
+ try{const payload={workflow_id:$("local-run-choice").value,event_id:$("local-event").value,
+ service_code:$("local-service").value,budget_tier:Number($("local-budget").value),timeline:$("local-timeline").value};
+ const result=await localPost("/api/local-run",payload);
+ $("local-run-status").textContent=result.status+" · "+result.decision+" · external dispatch: 0";
+ $("local-result").textContent=JSON.stringify(result,null,2);
+ await refreshLocalWorkflows(payload.workflow_id);}
+ catch(error){$("local-run-status").textContent="Local execution blocked: "+error.message;
+ $("local-result").textContent="No new local run was committed.";}
+ finally{button.disabled=!$("local-run-choice").options.length;}});
+$("local-run-choice").addEventListener("change",refreshLocalHistory);
+$("local-refresh-history").addEventListener("click",refreshLocalHistory);
+refreshLocalWorkflows();
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
 </body></html>
