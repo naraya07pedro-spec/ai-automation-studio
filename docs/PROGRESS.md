@@ -259,3 +259,27 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Both `Validate synthetic fixture contract` and `Run all standard-library tests` steps passed. Job log: **84 tests run, 0 failures** (14 new integrated tests and 70 previous tests).
 - The CI environment reports a Node.js 20 deprecation warning for current action versions; the run still passed. Action-version maintenance remains a separate follow-up.
 - Because the present progress-log update creates a new commit, CI for that latest commit must be checked independently before claiming final-head success.
+
+
+## Slice 10 · 2026-11-04 · Redacted inspection and manual acknowledgement of PENDING mock events
+
+**Goal:** Let an operator inspect unresolved mock events and record an explicit review acknowledgement without allowing a blind replay, secret exposure or false completion.
+
+**Completed**
+- Added `prototype/lead_inquiry_pending_review.py`: a separate review surface for the existing durable mock event store. `list_pending(limit=...)` exposes only an opaque SHA-256 event reference, `PENDING` status and acknowledgement flag. It does not return event IDs, customer messages, raw payload or database file path.
+- `acknowledge(event_ref, reviewer_ref, acknowledgement)` requires an exact deliberate acknowledgement phrase and writes an atomic, unique review record in `mock_pending_reviews`; a repeated acknowledgement reports `ALREADY_ACKNOWLEDGED`.
+- **Critical:** acknowledgement keeps original event **PENDING**. Subsequent execution remains `NEEDS_RECONCILIATION`. It is not a transition to COMPLETED, not permission to dispatch and not evidence of delivery.
+- Added `tests/test_lead_inquiry_pending_review.py` with 13 test methods including list redaction, restart persistence, missing/stale refs, explicit acknowledgement, status preservation, bounds, corruption/error propagation and zero external dispatch.
+- This is a mock-only prototype. `reviewer_ref` is caller-supplied and not authenticated. Do not present it as verified human identity or a security control.
+
+**Verification gate**
+- Read committed files back from the branch; count test methods.
+- Only claim GitHub Actions tests passed after verifying the run on the exact PR head.
+- No network, live CRM/email send, secrets, human login UI, actual permission enforcement, crash/power-loss durability or audit tamper resistance demonstrated.
+
+**Known risks**
+- Listing hashes of source+event identity hides the raw identifier from output but is not encryption; low-entropy event IDs may be guessable. Treat this as data minimization, not full anonymity.
+- The review table stores caller-provided reviewer refs without verifying identity; real operator authentication, authorization, audit retention, and case resolution must be implemented separately.
+- The prototype can acknowledge uncertainty, **not resolve uncertain external effects**. No automatic replay or state mutation beyond the acknowledgement record.
+
+**Next small slice (proposed):** Define a secure explicit state-transition contract for mock reconciliation, with independent identity/approval gates. Then audit storage prototypes, error paths and compatibility before any production connector.
