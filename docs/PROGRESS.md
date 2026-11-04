@@ -1044,3 +1044,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No real providers, persistent user identity, durable approval, public deployment, or generalized concurrency guarantee for all five workflows.
 
 **Next:** verify and merge the browser prerequisite; review screenshot artifacts and race-regression evidence; then pursue a safe public demonstration strategy without publishing the loopback-only server.
+
+
+**Observed CI, first failure, and repair**
+- First full browser run [41817336411](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817336411) failed the two newly added tests while all eight original journeys passed. The Playwright test helper used `page.wait_for_function`, whose string evaluation was blocked by the application's CSP (`script-src 'self' 'unsafe-inline'`, without `unsafe-eval`). This was a **test harness error**, not evidence to weaken CSP.
+- Replaced the CSP-incompatible helper with bounded polling via Playwright's DevTools `page.evaluate`, preserving the app's CSP unchanged. Code/test head `0cb68e980b286b5895d3ffadba5209f39a9608c3`.
+- [Chromium Actions run 41817559222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559222): completed **success**, **10/10 real browser tests passed**, including both delayed-response race regressions.
+- [Python Actions run 41817559225](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41817559225): completed **success**, Python **3.11/3.12/3.13 each ran 402 tests, zero failures**; total **1206 Python test executions** across three interpreters. No existing backend tests were reduced.
+- This evidence note is a separate documentation commit, requiring **its own final-head CI** before claiming the newest PR HEAD is green. PR #36 is still the unmerged prerequisite at the time of writing; no live provider or public deployment attempted.
