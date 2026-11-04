@@ -443,3 +443,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract check and the full stdlib unittest job passed; the log reports **148 tests, 0 failures**. The updated grant test file contains 21 methods (5 more than previous 16).
 - CI still reports a Node.js 20 deprecation warning for older GitHub Action dependencies; this is separate maintenance, not an application test failure.
 - This docs-only commit must be checked independently on its own head SHA before claiming latest PR HEAD passed.
+
+
+## Slice 16 · 2026-11-04 · Mock review orchestration and mutation inventory
+
+**Goal:** Consolidate the recommended mock review entrypoint and expose the remaining mutation bypass risks rather than claiming a facade enforces production access control.
+
+**Completed**
+- Confirmed PR #17 latest-head GitHub Actions passed, squash-merged it to main and started `feat/mock-mutation-orchestrator-slice-16`.
+- Added `prototype/lead_inquiry_review_orchestrator.py`: a small mock review facade combining redacted pending listing, read-only review inspection, constructor-owned mock policy/clock, grant request and atomic single-use hold consumption. Request methods do **not** accept injected verifier, clock, expiry, or bare success status.
+- Added `tests/test_lead_inquiry_review_orchestrator.py` with 14 integration tests spanning grant issue/consume, restart replay denial, default deny, expiry, request-level injection rejection, redaction, invalid evidence/source, concurrency, and storage errors.
+- Added `docs/MOCK_MUTATION_AUDIT.md`: inventory of state-mutating entrypoints in `prototype/`, especially direct `mark_mock_completed`, overlapping durable decision store, caller-reference-only acknowledgement, and injectable mock authority.
+- Zero external dispatch. Source event remains `PENDING` after review hold. No production architecture selected.
+
+**Verification gate**
+- Read all new files and the progress log back from the review branch. Verify test count and wait for a successful GitHub Actions result on its exact PR head before claiming tests passed.
+
+**Critical limitations**
+- The facade is a **recommended API shape, not an enforced security boundary**: importable classes and local database connections still permit other code in the same process to call lower-level mutators.
+- Constructor-provided authority/clock are simulated and may be replaced by any code with class-construction access. This is not real operator authentication, authorization, signed provider evidence, or a trustworthy wall clock.
+- No actual app endpoint, real connector, deployment, encryption/retention controls, recovery after corruption, or distributed guarantee.
+- Duplicate durable-store prototypes remain for future consolidation.
+
+**Next smallest slice (proposed):** Quarantine the remaining direct mock-completion path and test that a caller cannot make an unresolved event appear completed through the supported orchestration path. Do not assume the facade alone solves privilege isolation.
