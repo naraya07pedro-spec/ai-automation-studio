@@ -381,3 +381,35 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Both synthetic fixture contract and Python standard-library unittest steps passed; CI job log reports **143 tests, 0 failures**, including 15 new slice-13 tests.
 - Existing Node.js 20 deprecation warning from GitHub Actions dependencies remains a separate maintenance task.
 - This documentation-only commit needs its own green CI check before asserting the latest PR HEAD passed.
+
+
+## Slice 14 · 2026-11-04 · Quarantine unsafe legacy bare-preflight review writer
+
+**Goal:** Eliminate the bypass where a caller could request `ACKNOWLEDGED_HOLD` with the literal `PRECHECK_PASSED_NO_TRANSITION`, without consuming a single-use grant. Preserve read-only review inspection and grant-only mock write behavior.
+
+**Completed**
+- Verified PR #15 CI succeeded on its exact head SHA, merged PR #15 to main, and branched `feat/quarantine-legacy-review-slice-14`.
+- Changed `prototype/lead_inquiry_review_transitions.py` so deprecated `MockReviewTransitions.acknowledge_hold(...)` **always** returns `LEGACY_PATH_DISABLED`; it performs no reads/writes and cannot change event/review state. The existing `inspect(...)` remains read-only and available to the grant coordinator.
+- Replaced the 14 tests previously exercising the unsafe method with **13 explicit denial and read-only regression cases** in `tests/test_lead_inquiry_review_transitions.py`, including fabricated preflight strings, stale versions, 40 concurrent bypass attempts, no review-row insertion, forged refs, reopening, unchanged `PENDING` and zero dispatch.
+- Updated `tests/test_lead_inquiry_single_use_grants.py` to demonstrate the stale-version race *through two independently issued grants*, then added a regression check showing a forged legacy preflight cannot consume or bypass a legitimate grant. The new test count for this file is **16** (previously 15).
+- No new grant issuer, live connector, authenticated identity service, actual provider action or final persistence architecture is introduced.
+
+**Verification gate**
+- Read all changed branch files back and confirm the old write method has no database write path.
+- Require the GitHub Actions fixture-contract check and full unittest suite to complete successfully on the exact PR head before claiming final CI pass.
+
+**Security limitations and trade-offs**
+- The grant issuer still receives a caller-injected verifier and caller-supplied clock, and the preflight only checks evidence digest *format*. This is a mock policy demonstration, not production access control.
+- Existing `MockPendingReview.acknowledge` writes an independent review acknowledgement record but does **not** change mock event or versioned review state. It remains separate from the now-quarantined legacy versioned writer.
+- A compatibility method is deliberately retained as a rejecting shim instead of deleted, so old callers receive an explicit fail-closed status; this is a breaking behavioral change for callers using its former mock mutation behavior.
+- The three durable/review table experiments have not been consolidated; crash-consistency and independent auth remain unverified.
+
+**Next smallest slice (proposed):** Make grant issuance a server-owned, testable mock authority boundary rather than accepting an untrusted verifier and clock from the request; document trust roots, then audit all state-mutating mock interfaces before considering real integrations.
+
+
+**Verified GitHub Actions evidence**
+- PR #16 revision `f3dceb11fe050567f0d88df0e50150a3f87504f1`: [Actions run 41772289078](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41772289078), completed **success**.
+- Fixture contract validation and the full unittest suite both passed; GitHub job log reported **143 tests, 0 failures**. The legacy review file now has 13 denial/read-only cases and the single-use grant file has 16 cases.
+- An earlier intermediate PR run at commit `33aaaae4fea8f9551b31a8268115dc8c7499c0f0` had **141 passing tests**; two extra no-write/forged-ref regressions were added before this final code revision. Those prior passed tests are not treated as coverage of the new cases.
+- Node.js 20 deprecation warnings for older GitHub Actions dependencies remain. The warnings did not fail this run.
+- This evidence describes the code revision above; the docs-only commit containing this note requires a separate CI run before claiming the final PR HEAD passed.
