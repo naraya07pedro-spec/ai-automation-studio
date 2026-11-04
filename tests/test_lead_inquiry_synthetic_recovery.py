@@ -78,14 +78,15 @@ class SyntheticRecoveryTests(unittest.TestCase):
     def test_existing_backup_is_never_overwritten(self):
         self.create()
         self.backup.write_bytes(b"EXISTING_BACKUP")
-        self.assertEqual("REHEARSAL_FAILED", self.run_rehearsal()["status"])
+        self.assertEqual("DESTINATION_EXISTS", self.run_rehearsal()["status"])
         self.assertEqual(b"EXISTING_BACKUP", self.backup.read_bytes())
         self.assertFalse(self.restored.exists())
 
     def test_existing_restore_is_never_overwritten(self):
         self.create()
         self.restored.write_bytes(b"EXISTING_RESTORE")
-        self.assertEqual("REHEARSAL_FAILED", self.run_rehearsal()["status"])
+        self.assertEqual("DESTINATION_EXISTS", self.run_rehearsal()["status"])
+        self.assertFalse(self.backup.exists())
         self.assertEqual(b"EXISTING_RESTORE", self.restored.read_bytes())
 
     def test_path_collision_source_backup(self):
@@ -131,6 +132,73 @@ class SyntheticRecoveryTests(unittest.TestCase):
         self.assertEqual("REHEARSAL_FAILED",
                          rehearse_synthetic_backup_restore(self.source, invalid, self.restored)["status"])
 
+    def test_restore_target_symlink_rejected_before_backup_created(self):
+        self.create()
+        target = Path(self.temp.name) / "protected.db"
+        target.write_bytes(b"DO_NOT_TOUCH")
+        try:
+            self.restored.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unsupported")
+        self.assertEqual("DESTINATION_EXISTS", self.run_rehearsal()["status"])
+        self.assertFalse(self.backup.exists())
+        self.assertEqual(b"DO_NOT_TOUCH", target.read_bytes())
+
+    def test_backup_target_symlink_rejected_without_overwriting_target(self):
+        self.create()
+        target = Path(self.temp.name) / "protected.db"
+        target.write_bytes(b"DO_NOT_TOUCH")
+        try:
+            self.backup.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unsupported")
+        self.assertEqual("DESTINATION_EXISTS", self.run_rehearsal()["status"])
+        self.assertFalse(self.restored.exists())
+        self.assertEqual(b"DO_NOT_TOUCH", target.read_bytes())
+
+    def test_parent_directory_symlink_is_rejected(self):
+        self.create()
+        real_dir = Path(self.temp.name) / "real"
+        real_dir.mkdir()
+        alias = Path(self.temp.name) / "alias"
+        try:
+            alias.symlink_to(real_dir, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unsupported")
+        backup = alias / "new-backup.db"
+        result = rehearse_synthetic_backup_restore(self.source, backup, self.restored)
+        self.assertEqual("REHEARSAL_FAILED", result["status"])
+        self.assertFalse((real_dir / "new-backup.db").exists())
+
+    def test_source_backup_alias_spelling_detected(self):
+        self.create()
+        alias = self.source.parent / "." / self.source.name
+        result = rehearse_synthetic_backup_restore(self.source, alias, self.restored)
+        self.assertEqual("PATH_COLLISION", result["status"])
+
+    def test_backup_restore_parent_alias_collision_detected(self):
+        self.create()
+        shared = Path(self.temp.name) / "shared.db"
+        alias = Path(self.temp.name) / "." / "shared.db"
+        result = rehearse_synthetic_backup_restore(self.source, shared, alias)
+        self.assertEqual("PATH_COLLISION", result["status"])
+        self.assertFalse(shared.exists())
+
+    def test_existing_restore_does_not_create_backup_artifact(self):
+        self.create()
+        self.restored.write_bytes(b"PRESERVE")
+        result = self.run_rehearsal()
+        self.assertEqual("DESTINATION_EXISTS", result["status"])
+        self.assertFalse(self.backup.exists())
+        self.assertEqual(b"PRESERVE", self.restored.read_bytes())
+
+    def test_missing_restore_parent_does_not_create_backup(self):
+        self.create()
+        missing = Path(self.temp.name) / "not-created" / "restore.db"
+        result = rehearse_synthetic_backup_restore(self.source, self.backup, missing)
+        self.assertEqual("REHEARSAL_FAILED", result["status"])
+        self.assertFalse(self.backup.exists())
+
     def test_result_never_exposes_source_content(self):
         self.create()
         result = str(self.run_rehearsal())
@@ -148,7 +216,7 @@ class SyntheticRecoveryTests(unittest.TestCase):
         self.create()
         self.assertEqual("SYNTHETIC_REHEARSAL_PASSED", self.run_rehearsal()["status"])
         prior = self.backup.read_bytes()
-        self.assertEqual("REHEARSAL_FAILED", self.run_rehearsal()["status"])
+        self.assertEqual("DESTINATION_EXISTS", self.run_rehearsal()["status"])
         self.assertEqual(prior, self.backup.read_bytes())
 
 
