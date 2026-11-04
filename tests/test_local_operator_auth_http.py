@@ -302,17 +302,18 @@ class AuthenticatedLocalHTTPTests(unittest.TestCase):
                           {"password":True},{"password":None}):
             code,_,_=self.request("POST","/api/operator-login",candidate)
             self.assertIn(code,(401,422))
+        # Invalid logout schema must be tested with a valid session+CSRF;
+        # an anonymous caller is correctly rejected earlier with 401.
+        cookie,csrf=self.login()
         self.assertEqual(422,self.request(
             "POST","/api/operator-logout",
-            {"unexpected":True})[0])
+            {"unexpected":True},cookie=cookie,csrf=csrf)[0])
 
     def test_owner_file_or_session_credentials_not_exposed(self):
         cookie,csrf=self.login()
         for path in ("/operator.json","/api/operator-config",
                      "/api/operator-password","/.ai-automation-studio"):
             self.assertEqual(404,self.request("GET",path,cookie=cookie)[0])
-        root=self.request("GET","/")[1] if False else None
-        self.assertIsNone(root)
 
 if __name__ == "__main__":
     unittest.main()
