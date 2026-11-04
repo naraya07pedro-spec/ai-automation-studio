@@ -290,3 +290,27 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Both synthetic fixture validation and the full stdlib unittest step passed. Job log reports **97 tests run, 0 failures**; 13 are newly added in slice 10.
 - Existing GitHub Action dependencies still emit the Node.js 20 deprecation warning. Maintenance remains pending, separate from the mock tests.
 - A documentation-only follow-up commit recording this result must have its own CI verification; do not reuse the prior successful run as proof for a different commit.
+
+
+## Slice 11 · 2026-11-04 · Fail-closed reconciliation preflight contract
+
+**Goal:** Define executable safety checks for a future human-authorized resolution decision without falsely claiming that mock operators are authenticated or permitting a transition to COMPLETED.
+
+**Completed**
+- Merged PR #12 (slice 10) into `main` before starting this slice.
+- Added `prototype/lead_inquiry_reconciliation_preflight.py` with strict mock event identity binding, explicit acknowledgement-only intent, synthetic-evidence-kind and fixed-size digest validation, 300-second maximum proposal lifetime, and an external authorization-verifier boundary.
+- The preflight checks current `PENDING` state both before and after verifier invocation; expired, changed, malformed, unapproved or unsupported proposals fail closed.
+- The result never includes raw event/customer data, never sends external actions and **never changes any event state**. A successful check is explicitly `PRECHECK_PASSED_NO_TRANSITION`.
+- Added `tests/test_lead_inquiry_reconciliation_preflight.py` with 17 isolated standard-library tests including expiry, invalid authorization, changed status during verification, spoofed event refs, unsupported completion intent, storage failure redaction, and no mutation.
+
+**Verification gate**
+- Read back the committed source, tests and progress log from the PR branch and count tests.
+- Require GitHub Actions on the exact PR-head commit to report a completed successful fixture-contract and full unittest run before marking CI green.
+
+**Security and evidence limitations**
+- The `verifier` is **injected and simulated in tests**. No real login/session, identity attestation, privilege management, evidence provenance, or durable one-time authorization token exists. Passing the preflight is **NOT** real operator verification.
+- The `evidence_digest` is only a format check, not independent proof of the claim or provider state. It does not authorize completion.
+- Rechecking status before return reduces stale decisions but cannot eliminate time-of-check/time-of-use races; any future real transition must compare state + version atomically under a transaction with real scoped auth.
+- Two earlier durable-store prototypes still coexist. This slice makes no new storage backend or final architecture selection.
+
+**Next smallest slice (proposed):** Add a fully mock-only, versioned state-transition test contract with atomic compare-and-set and real verifier integration requirements written explicitly. Avoid enabling completion, live connectors, or outbound effects without independently verified identity and evidence gates.
