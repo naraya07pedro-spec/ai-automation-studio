@@ -11,6 +11,7 @@ import sqlite3
 import tempfile
 
 from lead_inquiry_legacy_inventory import inventory_mock_sqlite
+from lead_inquiry_manifest_verifier import verify_fixed_fixture_manifest
 from lead_inquiry_synthetic_recovery import (
     _check, _fingerprint, _verified_synthetic, rehearse_synthetic_backup_restore,
 )
@@ -87,9 +88,12 @@ def run_disposable_recovery(*, schema="EVENT_STATE_V1"):
                     or not artifacts["source"] == artifacts["backup"] == artifacts["restored"]
                     or before != hashlib.sha256(source.read_bytes()).hexdigest()):
                 return _result("ARTIFACT_MISMATCH", schema)
-            return _result("DISPOSABLE_REHEARSAL_PASSED", schema, {
+            candidate = _result("DISPOSABLE_REHEARSAL_PASSED", schema, {
                 "manifest_version": 1, "artifact_checks": artifacts,
                 "all_artifacts_verified": True, "source_unchanged": True,
                 "workspace_deleted_on_exit": True})
+            if verify_fixed_fixture_manifest(candidate)["valid"] is not True:
+                return _result("FIXTURE_REFERENCE_MISMATCH", schema)
+            return candidate
     except (OSError, sqlite3.Error, ValueError, TypeError):
         return _result("WORKSPACE_FAILED", schema)
