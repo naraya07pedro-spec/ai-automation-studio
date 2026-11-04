@@ -6,17 +6,30 @@ A **localhost-only** automation studio prototype with a functional SQLite-backed
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.
 
+**Slice 43: one-time local operator setup is mandatory before the normal server will bind.** Run in a terminal on your own computer:
+
 ```bash
+python app/local_server.py --init-owner
 python app/local_server.py
 ```
 
-On the same computer, open **http://127.0.0.1:8765**. The server intentionally binds to `127.0.0.1` only. Do not expose it using public proxies or port forwarding.
+The first command prompts securely for a **12–128-character password** and confirmation, stores only a salted scrypt verifier at `~/.ai-automation-studio/operator.json`, and refuses to overwrite an existing owner. **Do not delete the owner file casually: there is no password recovery mechanism yet.** The second command loads that identity and fails closed when it is absent or invalid. Open **http://127.0.0.1:8765**, enter the password on the local login screen, and use **Lock session** to revoke the session.
+
+The server binds only to `127.0.0.1`. Sessions are one-hour, short-lived process-memory tokens in HttpOnly, SameSite=Strict cookies; every mutation requires the matching session CSRF token, including old mock APIs and GitHub source preview. No real user accounts, cloud provider credentials, outside identity provider or GitHub login are created. Do not expose this unauthenticated-at-the-network-layer local HTTP service using public proxies or port forwarding. It remains unsuitable for real customer data or a compromised local PC.
+
+## Local operator access gate (Slice 43)
+
+Every ordinary app API, local workflow record, revision history, mock action, and public-source preview/commit now requires the provisioned owner's active session; POSTs additionally require a matching per-session CSRF header. Wrong passwords are rate-limited, cookies are HttpOnly, logout revokes sessions, and restarting the server invalidates all in-memory sessions. The HTML login shell and a minimal health endpoint remain readable so the operator can unlock the workbench.
+
+This is **single-owner authorization on localhost**, not secure multi-user IAM. The local verifier file and SQLite remain on the same device and are not encrypted by the app; malware or other processes with the same OS user's privileges may bypass these controls. The loopback connection uses plain HTTP and cookies cannot be marked Secure. Existing backend unit tests inject intentionally unguarded test handlers to preserve historical pure-workflow evidence, while browser CI uses a separately defined **authenticated fixture server** with a test-only ephemeral owner password; the real `python app/local_server.py` never falls back to this fixture.
+
+[Read the local operator security contract and limits](docs/LOCAL_OPERATOR_ACCESS_V1.md).
 
 ## Functional local workflow workbench (new)
 
 Scroll to **Build and run your first local rule workflow**. Create a private rule-based workflow with an allowlisted service filter, budget threshold and review/draft-only policy, activate immutable version 1, manually supply a pseudonymous event, and inspect the locally persisted outcome. Duplicate event IDs replay the original result; changing their payload causes a conflict instead of a second execution. Rules and audit history survive restart of the local server.
 
-**Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server is unauthenticated and SQLite is not encrypted by the app. Local rules and history stay on localhost; only the optional read-only GitHub source makes a user-initiated outbound HTTPS GET. There are no external writes, sends or CRM changes. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
+**Do not supply personal customer records, emails, phone numbers, secrets or real identities.** The server requires one local operator session and SQLite is not encrypted by the app. Local rules and history stay on localhost; only the optional read-only GitHub source makes a user-initiated outbound HTTPS GET. There are no external writes, sends or CRM changes. The rule engine is deterministic, not generative AI. See [core specification](docs/LOCAL_WORKFLOW_CORE_V1.md) for exact endpoints, policy semantics, persistence and known gaps.
 
 ## Complete public GitHub issue → local SQLite acceptance (Slice 42)
 
