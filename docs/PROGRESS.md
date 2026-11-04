@@ -1141,3 +1141,12 @@ Each slice must report: goal, exact files changed, checks run and their results,
 
 **Next after tests:** Versioned workflow changes/pausing and first constrained live read-only integration, with independent capability and permission verification. Protect both the operator's data and prior immutable run outcomes.
 
+
+**Slice 38 first CI and browser regression repair**
+- PR [#43](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/43) initially tested code+documentation head `86f7ffa2346b80b09c10b1bb13b219a9152fa546`.
+- [Python matrix run 41829283875](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829283875) completed **success**: Python 3.11, 3.12 and 3.13 each ran **449 tests with zero failures** (424 existing + 25 new; 1,347 executions total). Existing suites were not reduced.
+- [Real Chromium browser run 41829283870](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41829283870) reported **one failure out of 19**. The new CSV test verified successful preview/commit and a persisted two-event history *before reload*, but after reload the UI selected a different previously saved active workflow, showing that workflow's one event. The CSV records had not disappeared; the **active-workflow selection was not preserved across page reload**. The other two new browser CSV tests and all 16 existing browser tests passed.
+- Fixed `web/index.html` to remember the current nonpersonal workflow ID in **tab-scoped `sessionStorage` only**, restore it among active options after reload, and prefer the most recently activated workflow when refreshed. No CSV bytes, preview token, event records or credentials are saved to browser storage. Code fix head `ab59435be7882335d1ad667ab5cfcc0cf3823d9f`.
+- Updated `docs/LOCAL_CSV_BATCH_INTAKE_V1.md` to state this UI selection behavior and its limited scope.
+- **Verification pending:** a newly documented PR head must independently pass **19 real-browser tests and 449 Python tests on each of 3.11/3.12/3.13** before merge. The initial green Python CI does not certify subsequent file edits; the original browser failure must not be described as passing.
+
