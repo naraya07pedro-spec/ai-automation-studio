@@ -321,3 +321,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Fixture validation and the full stdlib unittest job both passed; job log reported **114 tests run, 0 failures**, including the 17 tests newly introduced in slice 11.
 - Node.js 20 deprecation warning remains in the CI action dependencies but did not fail the test job.
 - The docs-only progress-log commit that adds this note requires a fresh CI result on its new SHA before the final PR HEAD can be marked verified.
+
+
+## Slice 12 · 2026-11-04 · Atomic versioned mock review-state transition
+
+**Goal:** Enforce one-winner versioned review updates across concurrent local SQLite connections without completing events or authorizing an external action.
+
+**Completed**
+- PR #13 merged to main after verified successful GitHub Actions run.
+- Added `prototype/lead_inquiry_review_transitions.py`: a new **review-state** table, separate from the existing `mock_events` event state. `inspect` returns OPEN/version 0 or ACKNOWLEDGED_HOLD/version 1, without customer data. `acknowledge_hold` uses a SQLite `BEGIN IMMEDIATE` transaction, event identity binding, current PENDING check, expected-version comparison and explicit mock preflight status.
+- Added `tests/test_lead_inquiry_review_transitions.py` with 14 cases: restart, stale/replayed versions, current-version double hold, invalid refs/identity, preflight failure, completed/missing event, storage failure, redacted result, and 40 simultaneous contenders.
+- A review acknowledgement does **not** update `mock_events` or make any outbound call. The underlying event remains PENDING with its prior reconciliation requirement.
+
+**Evidence gate**
+- Re-read committed files and count new tests; GitHub Actions PR-head validation must pass for a verified suite count.
+- Single-winner concurrency in SQLite is an implementation result **only for this local mock review-state table**, not distributed exactly-once delivery.
+
+**Limits and threat model**
+- The `preflight_status` input is **caller supplied and forgeable**; no authenticated identity, signed authorization token, proof provenance or true operator authorization exists. Do not expose the prototype transition as a production endpoint.
+- Versioning prevents two racing review writers from winning the same expected version, but does not solve every crash/power-loss, replay, authentication or time-of-check/time-of-use risk.
+- Source event completion, actual provider outcomes, approval service, durable backup/restore and long-term retention remain unimplemented.
+- SQLite is still a bounded prototype rather than an architecture commitment; review/storage prototypes should be consolidated after independent regression checks.
+
+**Next smallest slice:** Bind the mock review transition to an internally created, short-lived, single-use authorization artifact instead of accepting a bare preflight status string. Continue to prohibit any live connector or event completion.
+
+
+**Verified GitHub Actions evidence**
+- PR #14 code commit `50985fcbb4aa87bf519dc9c3c1f6fd1f4618f365`: [Actions run 41769924007](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41769924007) completed **success**.
+- The synthetic fixture contract check and all Python stdlib unittest tests passed. Job log reports **128 tests run, 0 failures**, including the 14 new slice-12 tests.
+- A Node.js 20 deprecation warning remains for older GitHub Actions dependencies. This does not indicate a test failure but needs separate maintenance.
+- This evidence covers that commit; recheck CI on the docs-only commit adding this evidence before asserting the latest PR head is verified.
