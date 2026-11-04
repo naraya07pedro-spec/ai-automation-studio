@@ -737,3 +737,14 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No distributed/OS-level isolation proof, power-loss crash test, original historical migration, live provider connection, or permanent architecture decision. Tests remain mock-only.
 
 **Next smallest slice (proposed):** Build a reviewed runtime evidence registry from actual matrix results and test explicit failure behavior under alternate SQLite dump formats, without hiding version drift or promoting synthetic recovery to production.
+
+
+**Verified three-runtime GitHub Actions evidence**
+- PR #27 head `c5315a3b8f196e6c591f80250323c2bf31d2baad`: [Actions run 41792558426](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41792558426), completed **success** for all **three** matrix jobs.
+- Python **3.11.17** + SQLite **3.45.1**: **267 tests**, 0 failures; both fixture pinned references matched.
+- Python **3.12.16** + SQLite **3.45.1**: **267 tests**, 0 failures; both fixture pinned references matched. Existing informational runtime screen still labels Python minor as `UNTESTED_PYTHON`; actual pinned fixture CI verification is green, so screen label is not a compatibility verdict.
+- Python **3.13.17** + SQLite **3.45.1**: **267 tests**, 0 failures; both fixture pinned references matched. Existing informational runtime screen still labels Python minor as `UNTESTED_PYTHON`.
+- **801 test executions** in total, but only **267 distinct unittest methods** per runtime. Every job passed pinned drift check, fixture contract and full unittest suite.
+- **Not a SQLite version matrix:** all three Python builds used SQLite 3.45.1 on Ubuntu runner; no proof for other SQLite versions, platforms or production backups.
+- Node.js 20 deprecation warnings remain non-blocking workflow maintenance debt.
+- The docs-only commit recording these results changes the PR HEAD SHA; verify all three CI jobs again on the new head before the final green claim.
