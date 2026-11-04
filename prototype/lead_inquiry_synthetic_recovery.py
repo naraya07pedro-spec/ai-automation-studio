@@ -21,8 +21,25 @@ def _report(status, schema=None, count=None, matching=None):
 
 
 def _readable_file(path):
+    """Accept only a directly named, single-link mock fixture file.
+
+    Rejecting hard links and symlinked parent directories reduces obvious
+    aliasing but does not make path inspection race-free.
+    """
     p = Path(path)
-    return p.is_file() and not p.is_symlink()
+    if not p.is_file() or p.is_symlink():
+        return False
+    try:
+        if p.stat().st_nlink != 1:
+            return False
+        return not any(parent.is_symlink() for parent in (p.parent, *p.parent.parents))
+    except OSError:
+        return False
+
+
+def _recovery_checkpoint(stage):
+    """Internal no-op seam for fault-injection tests only, not an API option."""
+    return None
 
 
 def _connect_ro(path):
@@ -110,15 +127,19 @@ def rehearse_synthetic_backup_restore(source, backup, restored):
             if not _check(origin):
                 return _report("SOURCE_INTEGRITY_FAILED")
             _new_destination(dst)
+            _recovery_checkpoint("backup_reserved")
             with closing(sqlite3.connect(dst, timeout=3)) as copy:
                 origin.backup(copy)
+            _recovery_checkpoint("backup_copied")
         with closing(_connect_ro(dst)) as copy:
             if not _verified_synthetic(copy) or not _check(copy):
                 return _report("BACKUP_VERIFY_FAILED")
             backup_hash = _fingerprint(copy)
             _new_destination(out)
+            _recovery_checkpoint("restore_reserved")
             with closing(sqlite3.connect(out, timeout=3)) as destination:
                 copy.backup(destination)
+            _recovery_checkpoint("restore_copied")
         with closing(_connect_ro(out)) as restoration:
             if not _verified_synthetic(restoration) or not _check(restoration):
                 return _report("RESTORE_VERIFY_FAILED")
