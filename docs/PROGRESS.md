@@ -223,3 +223,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - The existing AC01–AC04 integrated prototype still uses in-memory deduplication. This durable store is not wired into its processing path yet.
 
 **Next smallest slice (proposed):** Wire the durable event store into the integrated mock workflow behind a safe explicit option, test restart behavior end to end and fail closed on file/lock/corruption errors. No external sends.
+
+
+**Verified GitHub Actions evidence**
+- PR #10 commit `0605eae23eabc0a750465cd5e85f4301fbda7b11`: [run 41758453848](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41758453848) **completed / success**, including fixture validation and the full `unittest` job.
+- The job log reports **70 tests executed**. This is the repository-wide total at that commit, **not** 70 new slice-08 tests; slice 08 adds 15 test methods.
+- The log also includes an upstream Node.js 20 deprecation warning affecting `actions/checkout@v4` and `actions/setup-python@v5`; the workflow passed, but CI dependency maintenance remains pending.
+- This evidence applies to that exact commit only. The follow-up docs-only commit updating this log requires its own CI result.
