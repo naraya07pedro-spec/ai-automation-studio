@@ -530,7 +530,7 @@ let publicGithubRevision=0,publicGithubSnapshot=null,publicGithubBusy=false;
 const refreshPublicGithubButton=()=>{
  const w=localRows.find(item=>item.workflow_id===$("local-run-choice").value);
  const repo=$("public-github-repo").value.trim();
- const format=/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
+ const format=/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
  $("public-github-preview").disabled=publicGithubBusy||!w||w.status!=="ACTIVE"||!format.test(repo);
 };
 const invalidatePublicGithub=message=>{
