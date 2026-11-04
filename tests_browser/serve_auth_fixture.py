@@ -28,10 +28,15 @@ def main():
     policy.grant("Octocat/Hello-World")
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
+    def fixture_local_agent(prompt, model):
+        return {"mode": "LOCAL_MODEL", "answer": "Fixture answer: " + str(len(prompt)),
+                "tools_used": ["calculate"], "external_dispatch_count": 0}
+
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
-                       source_policy=policy, security_audit=audit))
+                       source_policy=policy, security_audit=audit,
+                       local_agent_runner=fixture_local_agent))
     try:
         server.serve_forever()
     finally:
