@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
 from lead_inquiry_flow import MockInquiryFlow
 from lead_inquiry_demo_review import LocalMockReview, execution_timeline
+from lead_inquiry_template_catalog import (list_templates, setup_choices,
+    validate_guided_setup, default_setup)
 
 MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
@@ -56,11 +58,15 @@ def create_handler(flow=None):
                            "text/html; charset=utf-8")
             elif self.path == "/api/health":
                 self._send(200, {"status": "MOCK_ONLY", "external_dispatch_count": 0})
+            elif self.path == "/api/templates":
+                self._send(200, list_templates())
+            elif self.path == "/api/setup-choices":
+                self._send(200, setup_choices())
             else:
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -93,6 +99,12 @@ def create_handler(flow=None):
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
                 return
+            if self.path == "/api/mock-setup":
+                verdict = validate_guided_setup(data)
+                self._send(200 if verdict["status"] == "DRAFT_VALID" else 422, {
+                    "mode": "MOCK_ONLY", "setup_status": verdict["status"],
+                    "errors": verdict["errors"], "external_dispatch_count": 0})
+                return
             if self.path == "/api/mock-review":
                 if (type(data) is not dict or set(data) != {"review_token", "decision"}):
                     self._send(422, {"error": "invalid_review_request"})
@@ -102,24 +114,34 @@ def create_handler(flow=None):
                 self._send(200, {"mode": "MOCK_ONLY", "review": result,
                                  "external_dispatch_count": 0})
                 return
+            event_fields = {"event_id", "service_requested", "budget_range", "timeline"}
             if (type(data) is not dict
-                    or set(data) != {"event_id", "service_requested",
-                                     "budget_range", "timeline"}
-                    or any(type(v) is not str or not v.strip() or len(v) > 120
-                           for v in data.values())
+                    or set(data) not in (event_fields, event_fields | {"template_id", "setup"})
+                    or any(type(data[k]) is not str or not data[k].strip() or len(data[k]) > 120
+                           for k in event_fields)
                     or len(data["event_id"]) > 80):
                 self._send(422, {"error": "invalid_synthetic_fields"})
                 return
+            setup_request = (
+                {"template_id": data["template_id"], "setup": data["setup"]}
+                if "setup" in data else default_setup())
+            setup_verdict = validate_guided_setup(setup_request)
+            if setup_verdict["status"] != "DRAFT_VALID":
+                self._send(422, {"error": "invalid_mock_setup",
+                                 "errors": setup_verdict["errors"]})
+                return
+            configuration = setup_verdict["configuration"]
             event = {
                 "source_event_id": data["event_id"],
                 "inquiry": {key: data[key] for key in _REQUIRED},
             }
             # Shared process-local store must not be accessed simultaneously.
             with lock:
-                result = workflow.process(_CONFIGURATION, event, _REQUIRED)
-                offer = review.offer(result)
+                result = workflow.process(configuration, event, _REQUIRED)
+                offer = review.offer(result, policy=configuration["follow_up_policy"])
             self._send(200, {"mode": "MOCK_ONLY", "result": result,
-                             "timeline": execution_timeline(result),
+                             "timeline": execution_timeline(result, policy=configuration["follow_up_policy"]),
+                             "setup_status": setup_verdict["status"],
                              "review_offer": offer,
                              "external_dispatch_count": 0})
 

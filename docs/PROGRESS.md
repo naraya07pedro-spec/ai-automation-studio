@@ -846,3 +846,35 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Python 3.11, 3.12 and 3.13 matrix jobs all passed: **308 unit tests per job, 0 failures** (296 previous + 12 new local review HTTP tests), **924 total test executions**.
 - All three jobs passed current pinned runtime drift gate, historical runtime evidence report, fixture contract and complete unittest suite.
 - CI tests verify backend and HTTP functionality, not an interactive human browser visual audit or real provider behavior. This evidence note changes the PR HEAD and requires another successful full matrix on that final commit.
+
+
+## Slice 29 · 2026-11-04 · Template gallery and server-validated guided mock setup
+
+**Goal:** Add real product discovery and bounded configuration to the existing Lead Inquiry executable mock path, without implying unbuilt templates are functional.
+
+**Completed**
+- Verified PR #30 exact-head CI was successful across Python 3.11, 3.12, and 3.13, squash-merged into main, and branched `feat/template-gallery-guided-setup-slice-29`.
+- Added `prototype/lead_inquiry_template_catalog.py`: five honest template entries (one executable synthetic Lead Inquiry plus four explicitly non-executable previews), strict allowlisted source/destination/timezone/policy/model/budget setup choices, existing `validate_configuration` integration, and fail-closed unsupported template rejection.
+- Updated `app/local_server.py`: GET `/api/templates`, GET `/api/setup-choices`, POST `/api/mock-setup`, backward-compatible optional guided setup on POST `/api/mock-run`, and **server-side revalidation** before any event registration. Mock-only, loopback HTTP, no external side effects.
+- Updated `prototype/lead_inquiry_demo_review.py` to honor `draft_only` (fixed never-sent mock draft, no local review token) and accurately label that policy in the execution timeline; approval-required path unchanged.
+- Updated `web/index.html`: responsive five-card catalog, disabled preview actions, guided configuration form, validate-before-run gate, invalidation when setup changes, backend response trace and explicit sandbox labels.
+- Added `tests/test_local_template_setup_http.py` with **17 integration/contract tests**, covering gallery availability, exact configuration choices, successful setup, blocked preview activation, unknown/live destinations, draft-only non-review behavior, budget/type bounds, non-echoing secrets, blocked origin, and workflow execution after valid setup.
+- Added `docs/TEMPLATE_GALLERY_GUIDED_SETUP.md` with local usage and strict boundaries.
+
+**Verification gate**
+- Read all files back from GitHub, ensure 17 new methods, and require three complete Python CI matrix jobs (current runtime drift, evidence report, synthetic contract, full unittest suite) on exact PR-head SHA. Record measured tests and any errors before declaring success.
+
+**Important limits**
+- Only **one executable mock template**, not five, and only five catalog cards, not a completed 45-scenario product.
+- No production AI calls or provider connectors. The guided budget is demonstrative configuration only, not enforcement over paid external actions.
+- Process-local memory review and dedup remain non-durable. UI smoke-test assertions are not a substitute for manual browser visual review.
+- No public deployment, auth, real workflow builder or customer data.
+
+**Next product slice:** add a second independently executable local mock workflow, or strengthen active guided setup UI against stale async responses after browser edits. Prioritize visible utility over additional isolated infra tests.
+
+
+**Verified GitHub Actions evidence**
+- PR #31 code/docs head `d016144a58f63eba5f6dbe13ecfcb362d2947bc6`: [Actions run 41800033394](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41800033394) completed **success**.
+- Python **3.11, 3.12 and 3.13** CI matrix jobs each ran **325 unit tests with zero failures** (previous 308 + 17 guided setup/catalog tests); total **975 test executions** across three interpreters, 325 distinct unittest methods per runtime.
+- All three jobs passed pinned fixture runtime drift check, runtime evidence reporting, synthetic fixture contract and full stdlib unittest suite. New HTTP tests verify preview blocking, revalidation before reservation, and draft-only no-token handling.
+- Automatic HTTP and source inspection do not prove pixel-level browser behavior, accessibility completeness or production safety. This documentation commit creates a new PR HEAD; verify its own three-job CI before claiming final-head success.
