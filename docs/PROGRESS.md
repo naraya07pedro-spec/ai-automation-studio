@@ -939,3 +939,25 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Fixed code commit `e9aed642c471f46f8fe284e5b1377bf1f79dc047`: [Actions run 41806747222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41806747222) completed **success**, all three matrix jobs green, **363 unittest methods per Python interpreter, 0 failures** (343 previous plus 20 new appointment tests), total **1089 test executions**.
 - All jobs passed pinned fixture drift gate, runtime evidence report, synthetic fixture validator and complete unittest suite. No evidence of external notification, scheduler, provider receipt, production calendar integration, or manual browser visual QA.
 - This documentation-only commit changes PR HEAD and must pass the three-job CI matrix again before declaring final-head green.
+
+
+## Slice 32 · 2026-11-04 · Fourth executable local mock: CRM Handoff
+
+**Goal:** Deliver a fourth independent product-facing workflow that maps synthetic lead attributes into a mock CRM record preview with strong no-write boundaries, honest approval language and duplicate/conflict handling.
+
+**Completed**
+- Verified PR #33 exact final head `fafb97921e9ee5ad068b911d74c04ba19ccf32d3` passed all three CI jobs; squash merged PR #33 to main and branched `feat/crm-handoff-mock-slice-32`.
+- Added `prototype/crm_handoff_flow.py`: strict synthetic field enums, standard and compact mapping profiles, optional caller-claimed local review, capacity-bounded in-memory dedup and conflicts, redacted six-step timeline, `crm_record_created: false` and `external_dispatch_count: 0` for all outcomes.
+- Updated `prototype/lead_inquiry_template_catalog.py`: CRM Handoff promoted from `PREVIEW_NOT_EXECUTABLE` to `EXECUTABLE_MOCK`; gallery now **4 executable / 1 preview**.
+- Updated `app/local_server.py`: POST `/api/mock-crm-handoff` behind existing loopback, size, MIME, origin and host checks, synchronized process-local workflow access.
+- Updated `web/index.html`: fourth interactive template panel with review-demo selection, fixed mapping profile, synthetic value inputs, record-preview inspector and actual server-derived timeline.
+- Updated earlier catalog expectation tests in `tests/test_local_template_setup_http.py`, `tests/test_support_triage_http.py`, `tests/test_appointment_followup_http.py` without weakening previous workflow tests.
+- Added `tests/test_crm_handoff_http.py` with **19 new HTTP/engine tests** for field mappings, unacknowledged review, replay/conflict, invalid data, independent workflow registers, hard no-write outcomes, preview-only semantics and UI contract.
+- Added `docs/CRM_HANDOFF_FOURTH_VERTICAL.md` with usage, security caveats and rollout limitations.
+
+**Verification gate:** Read all changed paths back, then run Python 3.11/3.12/3.13 CI on exact PR head (pinned fixture check, evidence report, fixture contract and full unittest suite). Document actual CI results or repair failures before reporting success.
+
+**Limits**
+- `review_acknowledged` is user-supplied and is **not** verified identity or real approval. No real customer records, CRM API writes, durable record or live provider.
+- Run-history state is held in process memory, deleted at restart. This remains a local mock demo, not a public or production application.
+- Next: build Knowledge & Document Routing as fifth truly executable mock, then review deployment and visual QA separately.
