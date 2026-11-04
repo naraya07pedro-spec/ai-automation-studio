@@ -177,41 +177,53 @@ const reviewDecision=async decision=>{if(!reviewToken)return;const token=reviewT
 try{const response=await fetch("/api/mock-review",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({review_token:token,decision})});const result=await response.json();$("review-status").textContent=result.review?.status||"Review unavailable";}catch(error){$("review-status").textContent="Local review failed. No external action was attempted.";}};
 $("ack").addEventListener("click",()=>reviewDecision("ACKNOWLEDGE"));
 $("reject").addEventListener("click",()=>reviewDecision("REJECT"));
-$("triage-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("triage-run");button.disabled=true;$("triage-status").textContent="RUNNING MOCK TRIAGE";
+// Guard all secondary mock workflows against out-of-order HTTP responses.
+const workflowGuard=(form,run,status,outputs)=>{
+ let version=0;const button=$(run);
+ const clear=()=>{for(const id of outputs){$(id).textContent=/(?:-dispatch|-sent|-created|-transferred)$/.test(id)?"0":id.endsWith("-timeline")||id.endsWith("-record")||id.endsWith("-preview")?"Previous result is stale. Run again.":"STALE · RUN AGAIN";}};
+ const change=()=>{version++;clear();$(status).textContent="INPUT CHANGED · RUN AGAIN";button.disabled=false;};
+ $(form).addEventListener("input",change);$(form).addEventListener("change",change);
+ return {begin:()=>{version++;clear();button.disabled=true;return version;},current:t=>t===version,end:t=>{if(t===version)button.disabled=false;}};
+};
+const triageGuard=workflowGuard("triage-form","triage-run","triage-status",["triage-state","triage-queue","triage-urgency","triage-dispatch","triage-timeline"]);
+const appointmentGuard=workflowGuard("appointment-form","appointment-run","appointment-status",["appointment-state","appointment-window","appointment-plan","appointment-sent","appointment-timeline"]);
+const crmGuard=workflowGuard("crm-form","crm-run","crm-status",["crm-state","crm-dedup","crm-review-result","crm-created","crm-record","crm-timeline"]);
+const knowledgeGuard=workflowGuard("knowledge-form","knowledge-run","knowledge-status",["knowledge-state","knowledge-policy","knowledge-route","knowledge-transferred","knowledge-preview","knowledge-timeline"]);
+$("triage-form").addEventListener("submit",async event=>{event.preventDefault();const ticket=triageGuard.begin();$("triage-status").textContent="RUNNING MOCK TRIAGE";
 try{const input={event_id:$("ticket-id").value,category:$("ticket-category").value,severity:$("ticket-severity").value,customer_impact:$("ticket-impact").value==="true"};
-const response=await fetch("/api/mock-triage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});const data=await response.json();if(!response.ok)throw Error("rejected");
+const response=await fetch("/api/mock-triage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});const data=await response.json();if(!triageGuard.current(ticket))return;if(!response.ok)throw Error("rejected");
 $("triage-state").textContent=data.status;$("triage-queue").textContent=data.queue;$("triage-urgency").textContent=data.urgency;$("triage-dispatch").textContent=String(data.external_dispatch_count);
 $("triage-status").textContent="MOCK ONLY · NO TICKET CREATED";const steps=$("triage-timeline");steps.replaceChildren();for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=stage.stage;const value=document.createElement("strong");value.textContent=stage.status;item.append(label,value);steps.append(item);}
-}catch(error){$("triage-status").textContent="MOCK TRIAGE REJECTED · NO SIDE EFFECTS";$("triage-queue").textContent="Not assigned";$("triage-urgency").textContent="Not assessed";}finally{button.disabled=false;}});
+}catch(error){if(triageGuard.current(ticket)){$("triage-status").textContent="MOCK TRIAGE REJECTED · NO SIDE EFFECTS";$("triage-queue").textContent="Not assigned";$("triage-urgency").textContent="Not assessed";}}finally{triageGuard.end(ticket);}});
 $("appointment-form").addEventListener("submit",async event=>{
-event.preventDefault();const button=$("appointment-run");button.disabled=true;$("appointment-status").textContent="EVALUATING SYNTHETIC APPOINTMENT";
+event.preventDefault();const ticket=appointmentGuard.begin();$("appointment-status").textContent="EVALUATING SYNTHETIC APPOINTMENT";
 try{const payload={event_id:$("appointment-id").value,as_of:$("reference-time").value,appointment_at:$("appointment-time").value,channel:$("appointment-channel").value};
-const response=await fetch("/api/mock-appointment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await response.json();
+const response=await fetch("/api/mock-appointment",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await response.json();if(!appointmentGuard.current(ticket))return;
 $("appointment-state").textContent=data.status||"BLOCKED";$("appointment-window").textContent=data.window||"NOT_ASSESSED";$("appointment-plan").textContent=data.followup_plan||"NOT_PREPARED";$("appointment-sent").textContent=String(data.external_dispatch_count||0);
 const timeline=$("appointment-timeline");timeline.replaceChildren();
 for(const stage of data.timeline||[]){const item=document.createElement("div");item.className="stage";const title=document.createElement("span");title.textContent=stage.stage;const state=document.createElement("strong");state.textContent=stage.status;item.append(title,state);timeline.append(item);}
 $("appointment-status").textContent=response.ok?"MOCK PLAN EVALUATED · NOTHING SENT":"INVALID SYNTHETIC INPUT · NO SEND";
-}catch(error){$("appointment-status").textContent="LOCAL APPOINTMENT DEMO UNAVAILABLE · NO SEND";$("appointment-sent").textContent="0";}finally{button.disabled=false;}
+}catch(error){if(appointmentGuard.current(ticket)){$("appointment-status").textContent="LOCAL APPOINTMENT DEMO UNAVAILABLE · NO SEND";$("appointment-sent").textContent="0";}}finally{appointmentGuard.end(ticket);}
 });
 $("crm-form").addEventListener("submit",async event=>{
-event.preventDefault();const button=$("crm-run");button.disabled=true;$("crm-status").textContent="BUILDING SYNTHETIC RECORD PREVIEW";
+event.preventDefault();const ticket=crmGuard.begin();$("crm-status").textContent="BUILDING SYNTHETIC RECORD PREVIEW";
 try{const payload={event_id:$("crm-id").value,lead_stage:$("crm-stage").value,service_code:$("crm-service").value,owner_queue:$("crm-owner").value,mapping_profile:$("crm-mapping").value,review_acknowledged:$("crm-review").value==="true"};
 const response=await fetch("/api/mock-crm-handoff",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-const data=await response.json();$("crm-state").textContent=data.status||"BLOCKED";$("crm-dedup").textContent=data.deduplication||"NOT_RUN";$("crm-review-result").textContent=data.review_gate||"NOT_VERIFIED";$("crm-created").textContent=data.crm_record_created?"1":"0";
+const data=await response.json();if(!crmGuard.current(ticket))return;$("crm-state").textContent=data.status||"BLOCKED";$("crm-dedup").textContent=data.deduplication||"NOT_RUN";$("crm-review-result").textContent=data.review_gate||"NOT_VERIFIED";$("crm-created").textContent=data.crm_record_created?"1":"0";
 $("crm-record").textContent=data.record_preview?JSON.stringify(data.record_preview,null,2):"No record prepared. No CRM write occurred.";
 const timeline=$("crm-timeline");timeline.replaceChildren();for(const step of data.timeline||[]){const item=document.createElement("div");item.className="stage";const label=document.createElement("span");label.textContent=step.stage;const state=document.createElement("strong");state.textContent=step.status;item.append(label,state);timeline.append(item);}
 $("crm-status").textContent=response.ok?"MOCK EVALUATION COMPLETE · ZERO CRM WRITES":"INVALID MOCK INPUT · ZERO CRM WRITES";
-}catch(error){$("crm-status").textContent="LOCAL CRM DEMO UNAVAILABLE · NO WRITE";$("crm-created").textContent="0";}finally{button.disabled=false;}
+}catch(error){if(crmGuard.current(ticket)){$("crm-status").textContent="LOCAL CRM DEMO UNAVAILABLE · NO WRITE";$("crm-created").textContent="0";}}finally{crmGuard.end(ticket);}
 });
 $("knowledge-form").addEventListener("submit",async event=>{
-event.preventDefault();const button=$("knowledge-run");button.disabled=true;$("knowledge-status").textContent="EVALUATING SYNTHETIC METADATA";
+event.preventDefault();const ticket=knowledgeGuard.begin();$("knowledge-status").textContent="EVALUATING SYNTHETIC METADATA";
 try{const payload={event_id:$("knowledge-id").value,document_kind:$("knowledge-kind").value,classification:$("knowledge-classification").value,destination:$("knowledge-destination").value,review_acknowledged:$("knowledge-review").value==="true"};
 const response=await fetch("/api/mock-knowledge-routing",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-const data=await response.json();$("knowledge-state").textContent=data.status||"BLOCKED";$("knowledge-policy").textContent=data.policy_decision||"NOT_ASSESSED";$("knowledge-route").textContent=data.destination||"NOT_ASSIGNED";$("knowledge-transferred").textContent=data.document_transferred?"1":"0";
+const data=await response.json();if(!knowledgeGuard.current(ticket))return;$("knowledge-state").textContent=data.status||"BLOCKED";$("knowledge-policy").textContent=data.policy_decision||"NOT_ASSESSED";$("knowledge-route").textContent=data.destination||"NOT_ASSIGNED";$("knowledge-transferred").textContent=data.document_transferred?"1":"0";
 $("knowledge-preview").textContent=data.routing_preview?JSON.stringify(data.routing_preview,null,2):"No routing preview. No document transfer.";
 const timeline=$("knowledge-timeline");timeline.replaceChildren();for(const stage of data.timeline||[]){const row=document.createElement("div");row.className="stage";const label=document.createElement("span");label.textContent=stage.stage;const value=document.createElement("strong");value.textContent=stage.status;row.append(label,value);timeline.append(row);}
 $("knowledge-status").textContent=response.ok?"MOCK POLICY EVALUATED · NO TRANSFER":"INVALID METADATA · NO TRANSFER";
-}catch(error){$("knowledge-status").textContent="LOCAL ROUTING DEMO UNAVAILABLE · NO TRANSFER";$("knowledge-transferred").textContent="0";}finally{button.disabled=false;}
+}catch(error){if(knowledgeGuard.current(ticket)){$("knowledge-status").textContent="LOCAL ROUTING DEMO UNAVAILABLE · NO TRANSFER";$("knowledge-transferred").textContent="0";}}finally{knowledgeGuard.end(ticket);}
 });
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
