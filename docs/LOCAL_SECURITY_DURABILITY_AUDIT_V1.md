@@ -46,7 +46,7 @@ From the cloned repo on Windows PowerShell:
 powershell -NoProfile -File .\scripts\check_windows_local_acl.ps1
 ```
 
-The output flags broad well-known SID Allow ACEs for Everyone, Authenticated Users, built-in Users, Guests, and Anonymous. Exit codes: `0` no such broad entries detected (not proof of security), `2` broad access detected, `3` incomplete review, `4` not Windows. Missing files are marked NOT_PRESENT; there are no automatic permission fixes because altering ACL inheritance might break legitimate system access. The script itself has **not been executed on the user's Windows PC or certified in Windows CI**. It does not check every possible domain group, backup copy, encrypted-drive status, NTFS reparse point or privileged attacker.
+The output flags broad well-known SID Allow ACEs for Everyone, Authenticated Users, built-in Users, Guests, and Anonymous. Exit codes: `0` no such broad entries detected (not proof of security), `2` broad access detected, `3` incomplete review, `4` not Windows. Missing files are marked NOT_PRESENT; there are no automatic permission fixes because altering ACL inheritance might break legitimate system access. A separate Windows GitHub Actions workflow `.github/workflows/windows-local-acl-smoke.yml` tests the script on disposable fixtures: a missing operator directory must return **INCOMPLETE (3)**, and a synthetic file explicitly granted broad Everyone read access must return **RISK (2)**. This is a **pending runtime CI gate**, not an assumed success, and it does **not** establish the actual ACL security of the user's PC. It does not check every possible domain group, backup copy, encrypted-drive status, NTFS reparse point or privileged attacker.
 
 ## Verification scope
 
