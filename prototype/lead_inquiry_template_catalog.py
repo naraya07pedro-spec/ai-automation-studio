@@ -1,6 +1,6 @@
 """Honest mock template catalog and constrained guided setup validation.
 
-Two executable synthetic local templates. Remaining entries are non-executable
+Three executable synthetic local templates. Remaining entries are non-executable
 previews and can never activate connectors, AI calls, or external writes.
 """
 from lead_inquiry_validation import validate_configuration
@@ -19,9 +19,9 @@ _CATALOG = (
      "description": "Route synthetic support requests to mock queues with duplicate protection.",
      "mode": "MOCK_ONLY"},
     {"id": "appointment-followup", "title": "Appointment Follow-up",
-     "category": "Scheduling", "status": "PREVIEW_NOT_EXECUTABLE",
-     "description": "Future capability: safely coordinate appointment follow-ups.",
-     "mode": "NOT_IMPLEMENTED"},
+     "category": "Scheduling", "status": "EXECUTABLE_MOCK",
+     "description": "Simulate bounded reminder planning with explicit synthetic dates and no sends.",
+     "mode": "MOCK_ONLY"},
     {"id": "knowledge-routing", "title": "Knowledge & Document Routing",
      "category": "Knowledge Operations", "status": "PREVIEW_NOT_EXECUTABLE",
      "description": "Future capability: route documents to approved destinations.",
@@ -42,9 +42,9 @@ _DEFAULT = {"source": "mock_inbox", "destination": "mock_crm",
 
 
 def list_templates():
-    """Detached public metadata, two executable and three honest previews."""
+    """Detached public metadata, three executable and two honest previews."""
     return {"catalog_version": 1, "templates": [dict(item) for item in _CATALOG],
-            "executable_count": 2, "preview_count": 3,
+            "executable_count": 3, "preview_count": 2,
             "external_dispatch_count": 0}
 
 

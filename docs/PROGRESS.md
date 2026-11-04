@@ -908,3 +908,34 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Each CI job ran **343 tests, 0 failures** (325 previously plus 18 new support-triage tests); total **1029 test executions**, 343 distinct test methods per runtime.
 - Both supported local mock workflows are now exercised by real HTTP tests. No evidence of hosted browser experience, external support queue, AI inference, or persistent processing.
 - This note is a docs-only revision that changes the PR HEAD SHA; require its three-job Actions run to pass again before claiming latest-head CI green.
+
+
+## Slice 31 · 2026-11-04 · Third executable local mock: Appointment Follow-up
+
+**Goal:** Deliver a genuinely executable third user-facing mock template with deterministic timezone-aware appointment rules, visible execution evidence, independent duplicate protection, and no external side effects.
+
+**Completed**
+- Verified PR #32 final-head GitHub Actions all three matrix jobs succeeded (343 tests per Python interpreter), squash-merged PR #32 into main and branched `feat/appointment-followup-mock-slice-31`.
+- Added `prototype/appointment_followup_flow.py`: strict offset-aware ISO timestamp validation with explicit synthetic reference time; priority window within 24 hours, deferred draft within 30 days, manual review for recent past appointments; fail-closed out-of-range/malformed inputs, bounded 1000-event local dedup, no send or calendar operations.
+- Updated `prototype/lead_inquiry_template_catalog.py`: Appointment Follow-up promoted from preview to `EXECUTABLE_MOCK`; **3 executable / 2 preview** catalog counts.
+- Updated `app/local_server.py`: POST `/api/mock-appointment` with existing loopback host/origin, JSON/body size and local concurrency lock protections.
+- Updated `web/index.html`: third executable form and live response inspector; timeline generated from actual mock engine, sample synthetic timestamp values, card navigation and honest no-send labels.
+- Updated older catalog tests `tests/test_local_template_setup_http.py` and `tests/test_support_triage_http.py` to reflect honest three/two count without weakening the earlier workflows.
+- Added `tests/test_appointment_followup_http.py` with **20 real HTTP/engine tests**: 24h and 30-day boundaries, timezone equivalence, past appointments, duplicate/conflicting events, unknown and unsafe input refusal, capacity, independent state from support triage, origin check, no side effects and UI contract.
+- Added `docs/APPOINTMENT_FOLLOWUP_THIRD_VERTICAL.md` documenting fixed synthetic time semantics and no real scheduler.
+
+**Verification gate**
+- Read branch changes back, then require all three Python 3.11/3.12/3.13 GitHub Actions matrix jobs green on exact PR-head SHA, including fixture drift/registry/fixture contract and full unittest suite. Record actual test counts and evidence links only after completion.
+
+**Remaining limits**
+- This is not background scheduling or an actual delivered appointment reminder. No real recipients, SMS/email providers, calendars, model inference, customer data storage, durable approval or externally hosted app.
+- Existing browser UI still needs real-browser visual QA. Event history is process-local and non-durable.
+- Next product slice: fourth executable mock template (CRM Handoff), then fifth (Knowledge & Document Routing), with truthful simulated vs live status throughout.
+
+
+**Verified GitHub Actions evidence and timezone regression repair**
+- PR #33 initial [Actions run 41806482177](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41806482177) **failed** across Python 3.11, 3.12 and 3.13: 363 tests each, exactly **one test failure** per job, `test_same_instant_different_offset_is_duplicate`. Root cause: appointment dedup fingerprint used `datetime.isoformat()` preserving UTC-offset representation, treating equivalent instants with different offsets as conflicting logical events.
+- Repaired `prototype/appointment_followup_flow.py` to canonicalize both aware timestamps using `.astimezone(timezone.utc).isoformat()` before hashing. This preserves legitimate conflict detection while recognizing equal instants across offset representations. The original failing regression test was **not changed or weakened**.
+- Fixed code commit `e9aed642c471f46f8fe284e5b1377bf1f79dc047`: [Actions run 41806747222](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41806747222) completed **success**, all three matrix jobs green, **363 unittest methods per Python interpreter, 0 failures** (343 previous plus 20 new appointment tests), total **1089 test executions**.
+- All jobs passed pinned fixture drift gate, runtime evidence report, synthetic fixture validator and complete unittest suite. No evidence of external notification, scheduler, provider receipt, production calendar integration, or manual browser visual QA.
+- This documentation-only commit changes PR HEAD and must pass the three-job CI matrix again before declaring final-head green.
