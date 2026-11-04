@@ -1419,3 +1419,18 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Actual capability shipped:** first user-invoked local model inference CLI with two bounded read-only model-selected tools. No local Ollama installation or real model response was verified by this CI; a human-run local model smoke test is still needed. Existing UI and business-effect permissions remain unchanged.
 - **Open-source direction:** do not implement SaaS billing/tenant marketing as a presumed product goal. Continue toward an extensible, self-hostable agent platform, with beginner-friendly UX and independent runtime authorization.
 - Merge note added to `docs/PROGRESS.md` after successful merge; documentation-only.
+
+
+## Slice 48 · 2026-11-05 · Opt-in local AI agent via authenticated browser
+
+**Goal:** deliver the first operator-facing interface to the real local Ollama-backed agent from Slice 47, while preserving open-source, localhost-first, default-deny semantics (not SaaS).
+**Implemented in branch `feat/authenticated-local-agent-browser-slice-48`:**
+- `app/local_server.py`: `--enable-local-agent` required for browser inference; protected `GET /api/local-agent-capabilities` and `POST /api/local-agent-run`; existing owner-session/CSRF/origin checks and single in-flight agent request cap; input errors and unavailable model fail closed. Disabled by default, no cloud or external business action.
+- `web/index.html`: local agent section with model selector and prompt, disabled state until opt-in, text-only generated response, async stale-response guard, and clearing results on lock.
+- `tests/test_local_agent_browser_http.py`: six isolated tests for login/CSRF, capability access, off-state denial, invalid JSON contract, parallel request rejection and session revocation.
+- `tests_browser/serve_auth_fixture.py` and `tests_browser/test_real_browser.py`: one new actual Chromium scenario with deterministic **injected fake model response**. Fixture not present in production.
+- `docs/LOCAL_AGENT_BROWSER_V1.md`: instructions, model requirements, security/UX constraints and outstanding limits.
+
+**Verification gate (not yet reported passed):** exact final PR head Python tests on 3.11/3.12/3.13; full Chromium acceptance; actual GitHub public GET jobs and Windows ACL fixture. Check real actions logs and any regressions. Only merge on green exact head.
+
+**Truth boundaries:** no real installed Ollama/model end-to-end test in CI; authenticated UI is a frontend to a bounded single-turn local agent, not multi-agent collaboration, production connector writes, durable chat memory or background autonomous work.
