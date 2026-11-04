@@ -173,6 +173,25 @@
 <div class="core-actions"><button id="local-refresh-history" class="secondary" type="button">Refresh local history</button></div>
 <div class="kicker" style="margin-top:16px">PERSISTED LOCAL EXECUTION HISTORY · LAST 25</div><pre id="local-history" class="trace" aria-live="polite">No active workflow selected.</pre>
 </div></div></section>
+
+<section class="panel" id="local-batch-panel" style="margin-top:20px" aria-label="Local CSV event intake">
+<div class="kicker">FUNCTIONAL LOCAL INTAKE · EXPLICIT PREVIEW BEFORE COMMIT</div>
+<h2>Import events from a local CSV</h2>
+<p class="muted">Take a small, <strong>nonpersonal</strong> CSV file, inspect its categorised decisions, then explicitly commit all accepted rows to the active workflow selected above. There are no customer messages, real contacts, model calls or external sends. This is a local import, not an automatic webhook.</p>
+<div class="notice core-notice">Allowed CSV columns, in this exact order: <strong>event_id,service_code,budget_tier,timeline</strong>. Maximum 25 rows and 4 KB. Event IDs must be invented identifiers. Never upload names, emails, phone numbers, confidential files or API keys. The raw CSV is parsed in memory, not retained in the database.</div>
+<div class="layout" style="margin-top:18px">
+<div><div class="field"><label for="local-batch-file">Choose a CSV file from this computer</label>
+<input type="file" id="local-batch-file" accept=".csv,text/csv"></div>
+<div class="core-actions"><button type="button" class="primary" id="local-batch-preview" style="margin-top:16px" disabled>Preview local CSV rules</button><button type="button" class="primary" id="local-batch-commit" style="margin-top:16px" disabled>Commit verified preview locally</button></div>
+<div id="local-batch-status" class="setup-msg" role="status" aria-live="polite">Select an active workflow above and choose a small categorical CSV file. Nothing is committed before preview and confirmation.</div>
+<div class="foot">Changing the file or active workflow invalidates the preview. Any concurrent ledger change also invalidates its server-side consistency token.</div></div>
+<div><div class="kicker">PREVIEW · NO DATABASE WRITES UNTIL CONFIRMED</div>
+<pre class="trace" id="local-batch-result" aria-live="polite">No CSV preview yet.</pre>
+<div class="kicker" style="margin-top:18px">SAMPLE FORMAT · INVENTED IDs ONLY</div>
+<pre class="trace">event_id,service_code,budget_tier,timeline
+case_001,automation,3,soon
+case_002,integration,1,flexible</pre></div>
+</div></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -321,6 +340,67 @@ $("local-run-form").addEventListener("submit",async event=>{event.preventDefault
  finally{button.disabled=!$("local-run-choice").options.length;}});
 $("local-run-choice").addEventListener("change",refreshLocalHistory);
 $("local-refresh-history").addEventListener("click",refreshLocalHistory);
+// Local CSV intake is a deliberate two-step workflow, not a connector.
+// A preview token binds the file, active workflow version and DB run count.
+let batchRevision=0;let batchSnapshot=null;let batchBusy=false;
+const refreshBatchButton=()=>{$("local-batch-preview").disabled=batchBusy||!$("local-run-choice").value||!$("local-batch-file").files.length;};
+const invalidateBatch=()=>{
+ batchRevision++;batchSnapshot=null;$("local-batch-commit").disabled=true;
+ $("local-batch-result").textContent="Preview invalidated. Check the current file and workflow again.";
+ $("local-batch-status").textContent="Selection changed. Preview again before any commit.";
+ refreshBatchButton();
+};
+$("local-batch-file").addEventListener("change",invalidateBatch);
+$("local-run-choice").addEventListener("change",invalidateBatch);
+$("local-batch-preview").addEventListener("click",async()=>{
+ const rev=++batchRevision;batchSnapshot=null;$("local-batch-commit").disabled=true;
+ const file=$("local-batch-file").files[0],wid=$("local-run-choice").value;
+ if(!wid||!file||file.size===0||file.size>4096||!file.name.toLowerCase().endsWith(".csv")){
+  $("local-batch-status").textContent="Choose an active workflow and a non-empty .csv file of at most 4 KB.";
+  $("local-batch-result").textContent="No preview created.";return;
+ }
+ batchBusy=true;refreshBatchButton();$("local-batch-status").textContent="Validating CSV locally · no writes...";
+ try{
+  const csv_text=await file.text();if(rev!==batchRevision)return;
+  const data=await localPost("/api/local-batch-preview",{workflow_id:wid,csv_text});
+  if(rev!==batchRevision)return;
+  batchSnapshot={workflow_id:wid,csv_text,expected_version:data.workflow_version,
+   preview_token:data.preview_token};
+  $("local-batch-result").textContent=JSON.stringify({
+   status:data.status,new_count:data.new_count,replay_count:data.replay_count,
+   workflow_version:data.workflow_version,rows:data.rows,external_dispatch_count:0
+  },null,2);
+  $("local-batch-status").textContent="PREVIEW READY · "+data.new_count+" new · "+data.replay_count+" existing · no writes yet.";
+  $("local-batch-commit").disabled=false;
+ }catch(error){if(rev===batchRevision){
+  $("local-batch-result").textContent="CSV validation blocked. No rows were saved.";
+  $("local-batch-status").textContent="PREVIEW BLOCKED · "+error.message;
+ }}finally{batchBusy=false;refreshBatchButton();}
+});
+$("local-batch-commit").addEventListener("click",async()=>{
+ const snapshot=batchSnapshot,rev=batchRevision;
+ if(!snapshot||snapshot.workflow_id!==$("local-run-choice").value)return;
+ batchBusy=true;$("local-batch-commit").disabled=true;
+ $("local-batch-preview").disabled=true;
+ $("local-run-choice").disabled=true;
+ $("local-batch-file").disabled=true;
+ $("local-batch-status").textContent="Committing approved local preview in one transaction...";
+ try{
+  const data=await localPost("/api/local-batch-commit",snapshot);
+  if(rev!==batchRevision)return;
+  batchSnapshot=null;
+  $("local-batch-result").textContent=JSON.stringify(data,null,2);
+  $("local-batch-status").textContent=data.status+" · "+data.new_count+" saved · "+data.replay_count+" replays · 0 external sends.";
+  await refreshLocalWorkflows(snapshot.workflow_id);
+ }catch(error){if(rev===batchRevision){
+  batchSnapshot=null;
+  $("local-batch-status").textContent="COMMIT BLOCKED · "+error.message+" · preview again.";
+  $("local-batch-result").textContent="Batch was rejected. Verify local history; do not assume any external delivery.";
+ }}finally{
+  batchBusy=false;$("local-run-choice").disabled=false;$("local-batch-file").disabled=false;
+  refreshBatchButton();
+ }
+});
 refreshLocalWorkflows();
 $("copy").addEventListener("click",()=>{if(latest&&navigator.clipboard?.writeText)navigator.clipboard.writeText(latest).catch(()=>{});});
 </script>
