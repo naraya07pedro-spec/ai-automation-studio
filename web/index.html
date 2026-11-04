@@ -217,6 +217,7 @@ case_002,integration,1,flexible</pre></div>
 <div><div class="field"><label for="public-github-repo">Public GitHub repository (owner/repo, not URL)</label>
 <input id="public-github-repo" type="text" placeholder="organization/public-repository" autocomplete="off" maxlength="142" pattern="[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}"></div>
 <p class="muted">Target workflow: the <strong>active local workflow selected above</strong>. The source is read only when you explicitly request a preview. No automatic polling.</p>
+<p class="muted"><strong>Real public test source:</strong> <code>naraya07pedro-spec/ai-automation-studio</code> includes <strong>synthetic fixture issue #47</strong> with all three required labels. Enter that repository to try an actual GitHub read; no real customer records. Reading is manual, and SQLite changes only after explicit import approval.</p>
 <div class="core-actions"><button type="button" class="primary" id="public-github-preview" disabled>Read public issues &amp; preview locally</button>
 <button type="button" class="primary" id="public-github-commit" disabled>Import reviewed issues to local SQLite</button></div>
 <div id="public-github-status" class="setup-msg" role="status" aria-live="polite">Choose an active workflow and a public owner/repo. No external network request has been made by this control.</div></div>
