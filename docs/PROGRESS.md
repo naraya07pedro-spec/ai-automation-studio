@@ -527,3 +527,10 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No real backups/restores, data migration, authentication, provider integration, or final architecture selection.
 
 **Next smallest slice:** Prove schema fingerprinting, integrity verification and offline backup/restore on synthetic copies only; then choose a consolidation plan with explicit backwards-compatibility tests, not direct mutation of originals.
+
+
+**Verified GitHub Actions evidence**
+- PR #20 revision `1a8eff25e0b9884a22b2938d9bf1cfcdf015e3ce`: [Actions run 41777902620](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41777902620), completed **success**.
+- Synthetic fixture contract validation and the full Python standard-library unittest suite both passed. Job logs report **178 tests run, 0 failures**, including 16 new read-only inventory tests.
+- Node.js 20 deprecation warning for older GitHub Actions dependency versions remains; it did not fail this workflow.
+- The documentation-only commit recording this evidence requires a separate green GitHub Actions result before the latest PR head is marked verified.
