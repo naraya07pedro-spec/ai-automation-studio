@@ -504,3 +504,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Fixture contract and full Python standard-library unittest steps both succeeded. CI job log: **162 tests run, 0 failures**. Test count stayed constant because this slice revised existing tests to enforce deny-only semantics rather than adding test methods.
 - A Node.js 20 deprecation warning remains for older GitHub Action dependencies; it did not fail this run.
 - This documentation-only commit requires a fresh GitHub Actions result on the new SHA before claiming latest-HEAD success.
+
+
+## Slice 18 · 2026-11-04 · Read-only historical state inventory and migration gate
+
+**Goal:** Identify incompatible historical mock schemas and count legacy COMPLETED records safely, without converting, modifying, deleting or replaying data.
+
+**Completed**
+- Verified PR #19 last-head CI succeeded, squash-merged PR #19 to main, and created `feat/legacy-state-inventory-slice-18`.
+- Added `prototype/lead_inquiry_legacy_inventory.py`: opens an **existing file with SQLite `mode=ro`**, recognizes exact columns for historical `EVENT_STATE_V1` vs `LEGACY_DECISION_V1`, and returns only aggregate per-state counts. Unknown schema/value/file/corruption fails closed without exposing identifiers, payloads, digests or paths.
+- Added `tests/test_lead_inquiry_legacy_inventory.py` with **16** standard-library test methods, including historical COMPLETED count, legacy decisions not equivalent to completion, byte-for-byte nonmutation, corrupt/unknown schema, unrecognized state, symlink/path rejection and no external dispatch.
+- Added `docs/LEGACY_MIGRATION_GATE.md` covering schema incompatibility, safe offline backup/restore checks, separate legacy-unverified completion semantics, approval gates, dry-run, rollback, quarantine, and future independent verification. **No migration is executed in this slice.**
+
+**Verification gate**
+- Read committed new files and this progress log back from the branch; count test methods.
+- Run fixture contract and entire stdlib unittest suite in GitHub Actions. Do not claim passing tests until confirmed on the exact head commit.
+
+**Limitations**
+- Existing historical `COMPLETED` rows remain unchanged; their source system effects were never independently verified. Inventory is counts only, not evidence of delivery.
+- Legacy `READY_FOR_REVIEW` is a qualification decision, not a completed state. The two prototypes use the **same table name** with different columns and cannot be directly interchanged.
+- `mode=ro` only restricts this audit connection; other code or processes with file access can still mutate data, and a concurrent writer can make a snapshot stale. Schema matching is not a full integrity or authenticity check.
+- No real backups/restores, data migration, authentication, provider integration, or final architecture selection.
+
+**Next smallest slice:** Prove schema fingerprinting, integrity verification and offline backup/restore on synthetic copies only; then choose a consolidation plan with explicit backwards-compatibility tests, not direct mutation of originals.
