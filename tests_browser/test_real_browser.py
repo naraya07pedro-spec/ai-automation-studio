@@ -519,6 +519,56 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertEqual("operator_csrf_required",result["body"]["error"])
         self.assertFalse(self.page.locator("#operator-gate").is_visible())
 
+    def test_source_permissions_browser_requires_reauthentication_and_revocation(self):
+        self.create_functional_local_workflow()
+        self.page.locator("#public-github-repo").fill("exampleorg/acceptance-repo")
+        expect(self.page.locator("#public-github-preview")).to_be_disabled()
+        self.page.locator("#source-permission-repo").fill("exampleorg/acceptance-repo")
+        self.page.locator("#source-permission-password").fill("wrong-passphrase")
+        self.page.locator("#source-permission-grant").click()
+        expect(self.page.locator("#source-permission-status")).to_contain_text(
+            "invalid_operator_credentials")
+        expect(self.page.locator("#public-github-preview")).to_be_disabled()
+        self.page.locator("#source-permission-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#source-permission-grant").click()
+        expect(self.page.locator("#source-permission-list")).to_contain_text(
+            "exampleorg/acceptance-repo")
+        expect(self.page.locator("#public-github-preview")).to_be_enabled()
+        self.page.locator("#source-permission-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#source-permission-revoke").click()
+        expect(self.page.locator("#source-permission-list")).not_to_contain_text(
+            "exampleorg/acceptance-repo")
+        expect(self.page.locator("#public-github-preview")).to_be_disabled()
+
+    def test_zz_owner_rotation_revokes_browser_session_and_accepts_new_password(self):
+        old="ci_only_fixture_password_1234"
+        replacement="ci_only_fixture_password_ROTATED_44"
+        self.page.locator("#rotate-old-password").fill(old)
+        self.page.locator("#rotate-new-password").fill(replacement)
+        self.page.locator("#rotate-password-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        status=self.page.evaluate("""async () => {
+            const r=await fetch('/api/local-workflows');return r.status;}""")
+        self.assertEqual(401,status)
+        self.page.locator("#operator-password").fill(old)
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-login-status")).to_contain_text(
+            "invalid_operator_credentials")
+        self.page.locator("#operator-password").fill(replacement)
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_hidden()
+        # Restore the fixture password to avoid retaining an altered test
+        # credential in the shared CI process.
+        self.page.locator("#rotate-old-password").fill(replacement)
+        self.page.locator("#rotate-new-password").fill(old)
+        self.page.locator("#rotate-password-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        self.page.locator("#operator-password").fill(old)
+        self.page.locator("#operator-login-button").click()
+        expect(self.page.locator("#operator-gate")).to_be_hidden()
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())

@@ -135,8 +135,9 @@ def _sanitize_issues(repo, issues):
 class PublicGitHubReadOnlyIntake:
     """Ephemeral 5-minute approved-source snapshots; SQLite is only local."""
 
-    def __init__(self, core, batch, fetcher=None, clock=None):
+    def __init__(self, core, batch, fetcher=None, clock=None, policy=None):
         self.core, self.batch = core, batch
+        self.policy = policy
         self.fetcher = fetcher if fetcher is not None else _public_issues_http
         self.clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
@@ -168,6 +169,9 @@ class PublicGitHubReadOnlyIntake:
         repo = self._check_repo(repo_input)
         if repo is None:
             return _error("invalid_public_repo")
+        policy_epoch = self.policy.version() if self.policy is not None else None
+        if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+            return _error("public_source_not_allowed", 403)
         # Fail before any network read if local work is not ACTIVE.
         with self.core._lock:
             local = self.core.db.execute(
@@ -185,6 +189,8 @@ class PublicGitHubReadOnlyIntake:
         except Exception:
             # Do not surface provider content, URLs, secrets or raw stack.
             return _error("github_connection_unavailable", 502)
+        if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+            return _error("public_source_permission_changed", 409)
         if not rows:
             return 200, {
                 "status": "NO_MATCHING_PUBLIC_ISSUES", "workflow_id": wid,
@@ -204,9 +210,13 @@ class PublicGitHubReadOnlyIntake:
             return code, assessed
         snapshot_id = secrets.token_urlsafe(24)
         with self._lock:
+            if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+                return _error("public_source_permission_changed", 409)
             self._prune()
             self._snapshots[snapshot_id] = {
                 "workflow_id": wid,
+                "source_repo": repo,
+                "source_policy_epoch": policy_epoch,
                 "csv_text": csv_text,
                 "expected_version": assessed["workflow_version"],
                 "preview_token": assessed["preview_token"],
@@ -233,24 +243,32 @@ class PublicGitHubReadOnlyIntake:
         if (type(wid) is not str or not ID_PATTERN.fullmatch(wid)
                 or type(snapshot_id) is not str or len(snapshot_id) != 32):
             return _error("invalid_github_commit_fields")
-        with self._lock:
-            self._prune()
-            record = self._snapshots.get(snapshot_id)
-            if record is None or record["workflow_id"] != wid:
-                return _error("github_snapshot_not_found", 409)
-            # One-time capability: consume even if underlying local rules
-            # or ledger changed. Re-preview is mandatory.
-            del self._snapshots[snapshot_id]
-        code, outcome = self.batch.commit({
-            "workflow_id": wid,
-            "csv_text": record["csv_text"],
-            "expected_version": record["expected_version"],
-            "preview_token": record["preview_token"],
-        })
-        if code != 200:
-            return code, outcome
-        return 200, {
-            **outcome,
-            "status": "PUBLIC_GITHUB_IMPORT_COMMITTED_LOCAL",
-            "source": "PUBLIC_GITHUB_ISSUES_READ_ONLY",
-        }
+        # Lock policy through local database commit: revocation cannot
+        # happen between permission check and local persistence.
+        from contextlib import nullcontext
+        guard = self.policy._lock if self.policy is not None else nullcontext()
+        with guard:
+            with self._lock:
+                self._prune()
+                record = self._snapshots.get(snapshot_id)
+                if record is None or record["workflow_id"] != wid:
+                    return _error("github_snapshot_not_found", 409)
+                if (self.policy is not None
+                        and not self.policy.is_allowed(
+                            record["source_repo"], record["source_policy_epoch"])):
+                    del self._snapshots[snapshot_id]
+                    return _error("public_source_permission_changed", 403)
+                del self._snapshots[snapshot_id]
+            code, outcome = self.batch.commit({
+                "workflow_id": wid,
+                "csv_text": record["csv_text"],
+                "expected_version": record["expected_version"],
+                "preview_token": record["preview_token"],
+            })
+            if code != 200:
+                return code, outcome
+            return 200, {
+                **outcome,
+                "status": "PUBLIC_GITHUB_IMPORT_COMMITTED_LOCAL",
+                "source": "PUBLIC_GITHUB_ISSUES_READ_ONLY",
+            }

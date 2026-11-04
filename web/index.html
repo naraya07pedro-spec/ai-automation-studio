@@ -221,7 +221,18 @@ case_002,integration,1,flexible</pre></div>
 <div class="kicker">FIRST EXTERNAL READ-ONLY SOURCE · PUBLIC GITHUB ISSUES</div>
 <h2>Inspect real GitHub issues, then choose whether to import</h2>
 <p class="muted">Use an existing <strong>public</strong> GitHub repository whose issues have explicit categorization labels. Clicking preview performs one bounded read from GitHub's official public REST API, not a simulated dataset. The initial API response and any issue titles, bodies or user names are not stored. Only mapped categories and numeric issue IDs reach the local workflow ledger after explicit approval.</p>
-<div class="notice core-notice">No login, access token, private repository, webhook or write access is requested. The connector reads only the first 15 open issue/PR items and ignores pull requests and issues lacking exactly one approved label from each category. This server is still unauthenticated localhost software; never expose it publicly or use real customer data.</div>
+<div class="notice core-notice">No login, access token, private repository, webhook or write access is requested. The connector reads only the first 15 open issue/PR items and ignores pull requests and issues lacking exactly one approved label from each category. Only approved public repositories can be read. This server is still a localhost development service; never expose it publicly or use real customer data.</div>
+<section class="panel" id="source-permission-panel" style="margin:16px 0" aria-label="Public GitHub source permission">
+<div class="kicker">EXPLICIT SOURCE PERMISSION · DEFAULT DENY</div>
+<h2>Allow a specific public GitHub repository</h2>
+<p class="muted">Logged-in operators still cannot read arbitrary repositories. Approve each public <code>owner/repo</code> by re-entering your local password. Revoke access here to block future reads and invalidate earlier source previews, even if you approve the repo again.</p>
+<div class="layout">
+<div><div class="field"><label for="source-permission-repo">Public owner/repo</label><input id="source-permission-repo" placeholder="naraya07pedro-spec/ai-automation-studio" maxlength="142" autocomplete="off"></div>
+<div class="field"><label for="source-permission-password">Confirm local operator password</label><input id="source-permission-password" type="password" autocomplete="current-password"></div>
+<div class="core-actions"><button type="button" class="secondary" id="source-permission-grant">Allow source</button><button type="button" class="secondary" id="source-permission-revoke">Revoke source</button></div>
+<div id="source-permission-status" role="status" aria-live="polite" class="setup-msg">No public repositories are allowed until you explicitly approve them.</div></div>
+<div><div class="kicker">ALLOWED PUBLIC REPOSITORIES</div><pre id="source-permission-list" class="trace">Sign in to inspect source permissions.</pre><div class="foot">This grant controls local public metadata reads only. It does not authorize private GitHub API calls or issue edits. Maximum 16 grants.</div></div>
+</div></section>
 <div class="layout" style="margin-top:16px">
 <div><div class="field"><label for="public-github-repo">Public GitHub repository (owner/repo, not URL)</label>
 <input id="public-github-repo" type="text" placeholder="organization/public-repository" autocomplete="off" maxlength="142" pattern="[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}"></div>
@@ -244,6 +255,15 @@ aas:timeline:urgent
 <pre id="public-github-result" class="trace" aria-live="polite">No public issue preview yet.</pre>
 <div class="foot">Preview is frozen for a maximum of five minutes, stored only in server memory. Changing the repository or workflow discards it. A pause, rule publish or other new local event invalidates its commit. No GitHub issue is edited.</div>
 </div></div></section>
+<section class="panel" id="owner-rotation-panel" style="margin-top:20px" aria-label="Local owner password rotation">
+<div class="kicker">OWNER SECURITY · SESSION REVOCATION</div>
+<h2>Change operator password</h2>
+<p class="muted">Enter your current password, then a different 12–128-character password. A successful atomic change immediately revokes all operator sessions and requires a fresh login. Your existing workflow database is untouched. There is no unauthenticated password recovery path.</p>
+<form id="owner-rotation-form"><div class="layout">
+<div class="field"><label for="rotate-old-password">Current password</label><input type="password" id="rotate-old-password" required autocomplete="current-password"></div>
+<div class="field"><label for="rotate-new-password">New password</label><input type="password" id="rotate-new-password" required minlength="12" maxlength="128" autocomplete="new-password"></div>
+</div><button type="submit" id="rotate-password-button" class="secondary" style="margin-top:16px">Rotate password and revoke all sessions</button>
+<div id="rotate-password-status" role="status" aria-live="polite" class="setup-msg">Offline recovery is not enabled. Keep the current password safe.</div></form></section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -549,11 +569,12 @@ $("local-batch-commit").addEventListener("click",async()=>{
 // Public issue intake never reads titles/bodies/authors or writes to GitHub.
 // Server holds a five-minute filtered categorical snapshot after user intent.
 let publicGithubRevision=0,publicGithubSnapshot=null,publicGithubBusy=false;
+let allowedPublicSources=new Set();
 const refreshPublicGithubButton=()=>{
  const w=localRows.find(item=>item.workflow_id===$("local-run-choice").value);
  const repo=$("public-github-repo").value.trim();
  const format=/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
- $("public-github-preview").disabled=publicGithubBusy||!w||w.status!=="ACTIVE"||!format.test(repo);
+ $("public-github-preview").disabled=publicGithubBusy||!w||w.status!=="ACTIVE"||!format.test(repo)||!allowedPublicSources.has(repo.toLowerCase());
 };
 const invalidatePublicGithub=message=>{
  publicGithubRevision++;publicGithubSnapshot=null;
@@ -617,15 +638,71 @@ $("public-github-commit").addEventListener("click",async()=>{
   $("local-run-choice").disabled=false;refreshPublicGithubButton();
  }
 });
+const refreshOperatorSources=async()=>{
+ try{
+  const response=await appFetch("/api/local-github-sources");
+  if(!response.ok)throw Error("source_permissions_unavailable");
+  const data=await response.json();
+  allowedPublicSources=new Set(data.allowed||[]);
+  $("source-permission-list").textContent=data.allowed.length?data.allowed.join("\n"):"No approved sources";
+  refreshPublicGithubButton();
+ }catch(error){
+  allowedPublicSources=new Set();
+  $("source-permission-list").textContent="Cannot verify permissions; all public reads blocked.";
+  refreshPublicGithubButton();
+ }
+};
+const changeSourcePermission=async operation=>{
+ const repo=$("source-permission-repo").value.trim();
+ const current_password=$("source-permission-password").value;
+ const status=$("source-permission-status");
+ try{
+  const data=await localPost("/api/local-github-source-"+operation,
+   {repo,current_password});
+  status.textContent=data.status+" · "+data.allowed.length+" permitted source(s)";
+  $("source-permission-password").value="";
+  invalidatePublicGithub("Source permissions changed. Preview again.");
+  await refreshOperatorSources();
+ }catch(error){
+  status.textContent="Permission change rejected: "+error.message;
+  $("source-permission-password").value="";
+ }
+};
+$("source-permission-grant").addEventListener("click",()=>changeSourcePermission("grant"));
+$("source-permission-revoke").addEventListener("click",()=>changeSourcePermission("revoke"));
+$("owner-rotation-form").addEventListener("submit",async event=>{
+ event.preventDefault();
+ const button=$("rotate-password-button");
+ button.disabled=true;
+ const current_password=$("rotate-old-password").value;
+ const new_password=$("rotate-new-password").value;
+ try{
+  const response=await appFetch("/api/operator-rotate",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({current_password,new_password})});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"owner_rotation_failed");
+  $("rotate-password-status").textContent="Password changed. All sessions revoked.";
+  lockOperatorUI("Password changed. Sign in with your new password.");
+ }catch(error){
+  $("rotate-password-status").textContent="Rotation rejected: "+error.message;
+ }finally{
+  $("rotate-old-password").value="";
+  $("rotate-new-password").value="";
+  button.disabled=false;
+ }
+});
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
  $("operator-logout").hidden=false;
  loadGallery();
  refreshLocalWorkflows();
+ refreshOperatorSources();
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ allowedPublicSources=new Set();
  $("operator-gate").style.display="flex";
  $("operator-login-status").textContent=message||"Local session locked. Log in to continue.";
  $("operator-logout").hidden=true;
