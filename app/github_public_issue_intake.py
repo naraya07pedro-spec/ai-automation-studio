@@ -210,9 +210,13 @@ class PublicGitHubReadOnlyIntake:
             return code, assessed
         snapshot_id = secrets.token_urlsafe(24)
         with self._lock:
+            if self.policy is not None and not self.policy.is_allowed(repo, policy_epoch):
+                return _error("public_source_permission_changed", 409)
             self._prune()
             self._snapshots[snapshot_id] = {
                 "workflow_id": wid,
+                "source_repo": repo,
+                "source_policy_epoch": policy_epoch,
                 "csv_text": csv_text,
                 "expected_version": assessed["workflow_version"],
                 "preview_token": assessed["preview_token"],
