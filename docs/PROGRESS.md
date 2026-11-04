@@ -1111,3 +1111,12 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - To preserve the previously merged browser async response guards and the new local workflow core, the feature was transplanted onto a fresh branch from updated `main`, preserving all 4 Slice 36 delayed-response browser tests and both new Slice 37 local-core browser tests. Expected integrated browser suite **16 cases**, Python suite **424 methods per interpreter**; those totals are *not* claims until integrated CI completes.
 - PR #41 remains an independently green feature branch and will be superseded by an integrated clean PR from the new branch once that PR passes exact-head CI. Do not merge both versions of the feature.
 
+
+**Slice 37 FINAL MERGED & VERIFIED · 2026-11-04**
+- Reconciliation PR [#42](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/42), exact verified PR HEAD `d86d9dbab3b1725f50657bdb819e2d0e730819bf`, successfully **squash-merged** to `main` at `0c30bcf194ea42872e0e16e6fc97f8aefcdf2864`. All eight intended feature/test/documentation files were preserved, and the previously merged Slice 36 UI guards were retained.
+- [Integrated Chromium CI run 41825812176](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41825812176) on exact PR HEAD completed **success, 16/16 browser tests** (14 existing including Slice 36 + 2 new local core).
+- [Integrated Python CI run 41825812082](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41825812082) on exact PR HEAD completed **success, 424/424 tests each on Python 3.11, 3.12, and 3.13** (1,272 unittest method executions); zero reported failures. The final CI proof was also recorded as a permanent PR conversation comment without changing the verified PR HEAD.
+- Original PR [#41](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/41) was explicitly **closed unmerged** after #42 merged; this avoids losing Slice 36 changes or duplicating core changes.
+- The local SQLite engine persists user-created *categorical* rule configurations and pseudonymous event outcomes across restarts. No public deployment, actual AI reasoning, authenticated operator identity, live intake connector, external send, or secure PII processing was completed. These remain meaningful product gaps, not just documentation checkboxes.
+- This final post-merge progress note is **documentation-only**, added after the reviewed code merge. The substantive implementation remains the exact-head tested, merged PR #42.
+
