@@ -1071,3 +1071,11 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - No external sends, authenticated approval, persistence, model usage, cloud hosting or production capability.
 - Follow-on: inspect Lead Inquiry event input/review async races, real screenshot visual review, then design a safe public demo that does not publish the loopback-only server.
 
+
+**CI evidence for initial implementation + first documentation head**
+- PR [#39](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/39), head `7f51e5580057c5fc78848cad4cd4f95aca45c0df`, was checked with a four-file scoped diff and no unrelated changes.
+- [Real-browser run 41820163455](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41820163455) completed **success**: **14 Chromium tests, zero failures**, including all four new delayed real HTTP response races and the previous ten tests.
+- [Python matrix run 41820163434](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41820163434) completed **success**: **402 unittest methods, zero failures** per Python interpreter 3.11, 3.12 and 3.13 (**1,206 Python executions total**); fixture checks were retained.
+- Updated `docs/BROWSER_QA_GATE.md` to reflect the actual 14-test browser suite and distinguish automated DOM tests from independent visual/accessibility review.
+- **Latest-head caveat:** documenting these results changed the PR head; the final head needs a fresh **browser + three-version Python matrix success** before merge. No real external integration or production rollout was tested.
+
