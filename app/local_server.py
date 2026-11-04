@@ -10,6 +10,7 @@ from pathlib import Path
 import argparse
 import getpass
 import json
+import socket
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
@@ -405,12 +406,62 @@ def start_local_server(port=8765):
         core.close()
 
 
+def _lock_recovery_to_offline_port():
+    """Own the default local server port during one-time recovery.
+
+    This prevents a normal local server running concurrently on 8765, which
+    would otherwise retain old sessions/owner credentials in memory.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 8765))
+        sock.listen(1)
+        return sock
+    except OSError:
+        sock.close()
+        raise OperatorConfigurationError("stop_local_server_before_recovery") from None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Local-only workflow server with offline owner provisioning.")
-    parser.add_argument("--init-owner", action="store_true",
-                        help="Provision a single operator password offline.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--init-owner", action="store_true",
+                       help="Provision a single operator password offline.")
+    group.add_argument("--enable-recovery", action="store_true",
+                       help="Create/rotate a high-entropy offline recovery code.")
+    group.add_argument("--recover-owner", action="store_true",
+                       help="Use a one-time code to reset lost owner password offline.")
     args = parser.parse_args(argv)
+    home = Path.home() / ".ai-automation-studio"
+    if args.enable_recovery or args.recover_owner:
+        # Hold port ownership until on-disk verifier is fully replaced.
+        with _lock_recovery_to_offline_port():
+            try:
+                owner = LocalOperatorAuth.load(home / "operator.json")
+            except OperatorConfigurationError as exc:
+                raise SystemExit("Recovery blocked: " + str(exc)) from None
+            if args.enable_recovery:
+                current = getpass.getpass("Current owner password: ")
+                status, result = owner.setup_recovery(current)
+                if status != 200:
+                    raise SystemExit("Recovery setup blocked: " + result["error"])
+                print("SAVE THIS CODE OFFLINE. IT IS SHOWN ONLY ONCE:")
+                print(result["recovery_code"])
+                print("One-time code enabled. Keep it outside the computer.")
+                return
+            code = getpass.getpass("One-time offline recovery code: ")
+            fresh = getpass.getpass("New local operator password: ")
+            confirm = getpass.getpass("Confirm new password: ")
+            if fresh != confirm:
+                raise SystemExit("Recovery blocked: new passwords did not match.")
+            status, result = owner.recover_with_code(code, fresh)
+            if status != 200:
+                raise SystemExit("Recovery blocked: " + result["error"])
+            print("Owner recovered. Recovery code consumed permanently.")
+            print("Start the server and sign in with the new password.")
+            print("Re-enable offline recovery with --enable-recovery.")
+            return
     if args.init_owner:
         password = getpass.getpass("New local operator password (12+ characters): ")
         confirm = getpass.getpass("Confirm password: ")
