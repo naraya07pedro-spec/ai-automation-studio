@@ -239,6 +239,14 @@ class OfflineRecoveryCLITests(unittest.TestCase):
                 local_server._lock_recovery_to_offline_port()
         self.assertTrue(fake.close.called)
         getpass_mock.assert_not_called()
+        with patch("local_server._lock_recovery_to_offline_port",
+                   side_effect=OperatorConfigurationError(
+                       "stop_local_server_before_recovery")), \
+             patch("local_server.getpass.getpass") as prompt_mock:
+            with self.assertRaises(SystemExit) as caught:
+                local_server.main(["--recover-owner"])
+        self.assertIn("stop_local_server_before_recovery",str(caught.exception))
+        prompt_mock.assert_not_called()
 
     def test_cli_recovery_flags_are_mutually_exclusive(self):
         with redirect_stdout(io.StringIO()),self.assertRaises(SystemExit) as caught:
