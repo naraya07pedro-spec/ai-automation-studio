@@ -13,6 +13,7 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
 from lead_inquiry_flow import MockInquiryFlow
+from lead_inquiry_demo_review import LocalMockReview, execution_timeline
 
 MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
@@ -30,6 +31,7 @@ def create_handler(flow=None):
     """Return an isolated handler class for tests or local app instantiation."""
     workflow = flow if flow is not None else MockInquiryFlow()
     lock = threading.Lock()
+    review = LocalMockReview()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -58,8 +60,22 @@ def create_handler(flow=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path != "/api/mock-run":
+            if self.path not in ("/api/mock-run", "/api/mock-review"):
                 self._send(404, {"error": "not_found"})
+                return
+            # Reject cross-origin mutation attempts. This is still a local
+            # development demo, not an authentication or public CSRF solution.
+            host = self.headers.get("Host", "")
+            if host not in ("127.0.0.1", "localhost",
+                            f"127.0.0.1:{self.server.server_port}",
+                            f"localhost:{self.server.server_port}"):
+                self._send(403, {"error": "local_host_required"})
+                return
+            origin = self.headers.get("Origin")
+            if origin is not None and origin not in (
+                    f"http://127.0.0.1:{self.server.server_port}",
+                    f"http://localhost:{self.server.server_port}"):
+                self._send(403, {"error": "same_origin_required"})
                 return
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                 self._send(415, {"error": "json_required"})
@@ -77,6 +93,15 @@ def create_handler(flow=None):
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
                 return
+            if self.path == "/api/mock-review":
+                if (type(data) is not dict or set(data) != {"review_token", "decision"}):
+                    self._send(422, {"error": "invalid_review_request"})
+                    return
+                with lock:
+                    result = review.decide(data["review_token"], data["decision"])
+                self._send(200, {"mode": "MOCK_ONLY", "review": result,
+                                 "external_dispatch_count": 0})
+                return
             if (type(data) is not dict
                     or set(data) != {"event_id", "service_requested",
                                      "budget_range", "timeline"}
@@ -92,7 +117,10 @@ def create_handler(flow=None):
             # Shared process-local store must not be accessed simultaneously.
             with lock:
                 result = workflow.process(_CONFIGURATION, event, _REQUIRED)
+                offer = review.offer(result)
             self._send(200, {"mode": "MOCK_ONLY", "result": result,
+                             "timeline": execution_timeline(result),
+                             "review_offer": offer,
                              "external_dispatch_count": 0})
 
     return Handler
