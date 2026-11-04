@@ -2,12 +2,13 @@
 # Does not read file contents or modify permissions; no admin rights required.
 # Exit codes: 0 no broad-read ACL detected, 2 exposure, 3 incomplete check,
 # 4 not Windows. Output is file names and SID classification, never secrets.
+param([string]$Root)
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') {
     Write-Output 'NOT_WINDOWS: this check only supports Windows ACLs.'
     exit 4
 }
-$folder = Join-Path $HOME '.ai-automation-studio'
+$folder = if ($Root) { $Root } else { Join-Path $HOME '.ai-automation-studio' }
 $paths = @(
     $folder,
     (Join-Path $folder 'operator.json'),
