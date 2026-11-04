@@ -149,13 +149,13 @@ class CRMHandoffHTTPTests(unittest.TestCase):
         self.assertEqual(403, code)
         self.assertEqual("same_origin_required", out["error"])
 
-    def test_catalog_four_executable_and_one_preview(self):
+    def test_catalog_five_executable_and_zero_preview(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port)
         conn.request("GET", "/api/templates")
         catalog = json.loads(conn.getresponse().read())
         conn.close()
-        self.assertEqual(4, catalog["executable_count"])
-        self.assertEqual(1, catalog["preview_count"])
+        self.assertEqual(5, catalog["executable_count"])
+        self.assertEqual(0, catalog["preview_count"])
         row = next(x for x in catalog["templates"] if x["id"] == "crm-handoff")
         self.assertEqual("EXECUTABLE_MOCK", row["status"])
         self.assertEqual("MOCK_ONLY", row["mode"])

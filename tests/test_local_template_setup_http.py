@@ -39,13 +39,13 @@ class LocalTemplateSetupHTTPTests(unittest.TestCase):
         return {"event_id": "fixture-a", "service_requested": "Mock automation",
                 "budget_range": "Mock budget", "timeline": "Next month", **changes}
 
-    def test_catalog_four_executable_one_preview(self):
+    def test_catalog_five_executable_zero_preview(self):
         status, catalog = self.request("GET", "/api/templates")
         self.assertEqual(200, status)
-        self.assertEqual(4, catalog["executable_count"])
-        self.assertEqual(1, catalog["preview_count"])
+        self.assertEqual(5, catalog["executable_count"])
+        self.assertEqual(0, catalog["preview_count"])
         self.assertEqual(5, len(catalog["templates"]))
-        self.assertEqual(["EXECUTABLE_MOCK", "EXECUTABLE_MOCK", "EXECUTABLE_MOCK", "EXECUTABLE_MOCK", "PREVIEW_NOT_EXECUTABLE"],
+        self.assertEqual(["EXECUTABLE_MOCK"] * 5,
                          [v["status"] for v in catalog["templates"]])
 
     def test_catalog_returns_detached_metadata(self):

@@ -968,3 +968,34 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Logs confirm **382 tests per interpreter, zero failures** (363 previous + 19 CRM handoff acceptance tests), **1146 executions across three jobs**. All also pass pinned fixture runtime drift, evidence registry reporting and fixture contract.
 - Verified only process-local synthetic record preview; no live CRM write, valid independent approval/authentication or public deployment was exercised.
 - This documentation evidence update creates a new PR HEAD and must pass all three matrix jobs again before claiming final-head success.
+
+
+## Slice 33 · 2026-11-04 · Fifth executable mock: Knowledge & Document Routing
+
+**Goal:** Implement the fifth genuine sandbox-executable user-facing workflow while retaining a strict no-document/no-dispatch boundary and the previous four workflow regressions.
+
+**Completed**
+- Verified PR #34 exact-head CI [run 41809686075](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41809686075) succeeded for all three Python matrix jobs (382 tests each), squash-merged to main and branched `feat/knowledge-document-routing-mock-slice-33`.
+- Added `prototype/knowledge_document_routing_flow.py`: strict allowlisted synthetic metadata schema, document kind to mock destination policy, restricted-label unconditional refusal, internal-label mock review acknowledgement, bounded process-local dedup, no user content returned, explicit never-uploaded/never-transferred evidence.
+- Updated `prototype/lead_inquiry_template_catalog.py`: fifth `EXECUTABLE_MOCK` entry, now **5 executable mock / 0 preview** cards (not 45 templates).
+- Updated `app/local_server.py`: new POST `/api/mock-knowledge-routing` via existing loopback, host/origin, JSON, body-size and process-local lock boundaries.
+- Updated `web/index.html`: fifth interactive synthetic metadata form, explicit no-upload status, route-preview and server-generated timeline, gallery navigation.
+- Updated prior catalog tests in `tests/test_local_template_setup_http.py`, `tests/test_support_triage_http.py`, `tests/test_appointment_followup_http.py` and `tests/test_crm_handoff_http.py` to expect honest 5/0 status.
+- Added `tests/test_knowledge_routing_http.py`: **20 HTTP and engine tests** for fixed routing, restricted/internal policy refusals, unsupported fields, dedup/conflict, bounded capacity, independent registers, timeline and UI.
+- Added `docs/KNOWLEDGE_ROUTING_FIFTH_VERTICAL.md` with actual behavior and non-production limits.
+
+**Verification gate**
+- Read back modified files from GitHub, create PR and verify all three CI jobs against exact PR head. Record actual results, failures and repairs if needed.
+
+**Open risks**
+- Five workflows are **local, deterministic mock-only** demos. No persistent user sessions, real connectors/AI, trusted human approval, public deployment, full 45-scenario catalog or production behavior.
+- No file bytes or content are ingested, extracted or transferred. Caller review is **not** verified identity.
+- Next work: browser interaction audit, public portfolio demo approach, UI refinement and realistic end-to-end product flows.
+
+
+**Verified CI evidence (initial code + feature documentation head)**
+- PR #35 head `415c4e5490a19b8f553dfa15a6de53e7b8b4e26a`: [Actions run 41812119015](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41812119015) completed **success**.
+- Python **3.11, 3.12 and 3.13** each executed **402 unittest methods, zero failures**, total **1206 unittest executions** across all three jobs (382 previous + 20 new Knowledge Routing tests).
+- The mock fixture drift check, historical runtime evidence reporting, fixture contract, and full standard-library test suite succeeded in all three matrix legs.
+- This confirms only the deterministic synthetic metadata-only routing contract and prior four mock workflows under test; **not** real document handling, file ingestion, browser visual QA, live provider behavior or production release.
+- Adding these CI evidence notes creates a new PR HEAD SHA and requires a new successful exact-head CI run before latest-head green is claimed.

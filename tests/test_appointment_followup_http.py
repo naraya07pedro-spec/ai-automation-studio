@@ -164,8 +164,8 @@ class AppointmentFollowupHTTPTests(unittest.TestCase):
         response = client.getresponse()
         catalog = json.loads(response.read())
         client.close()
-        self.assertEqual(4, catalog["executable_count"])
-        self.assertEqual(1, catalog["preview_count"])
+        self.assertEqual(5, catalog["executable_count"])
+        self.assertEqual(0, catalog["preview_count"])
         row = next(x for x in catalog["templates"] if x["id"] == "appointment-followup")
         self.assertEqual("EXECUTABLE_MOCK", row["status"])
 
