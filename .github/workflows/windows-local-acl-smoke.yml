@@ -1,0 +1,65 @@
+name: Windows local ACL diagnostic verification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-local-acl-smoke.yml"
+      - "scripts/check_windows_local_acl.ps1"
+      - "docs/LOCAL_SECURITY_DURABILITY_AUDIT_V1.md"
+      - "docs/PROGRESS.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-acl-readonly-smoke:
+    name: PowerShell ACL diagnostic on disposable Windows files
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Missing operator directory is INCOMPLETE, never secure
+        shell: pwsh
+        run: |
+          # Nonzero status is the EXPECTED diagnostic result, not a job crash.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $missing = Join-Path $env:RUNNER_TEMP "aas_missing_${{ github.run_id }}"
+          $result = Start-Process -FilePath "pwsh" -ArgumentList @(
+            "-NoProfile", "-File", ".\scripts\check_windows_local_acl.ps1",
+            "-Root", $missing
+          ) -Wait -PassThru -NoNewWindow
+          if ($result.ExitCode -ne 3) {
+            throw "Expected INCOMPLETE exit 3 for nonexistent folder; got $($result.ExitCode)"
+          }
+      - name: Broad Everyone permission on test file is detected
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $fixture = Join-Path $env:RUNNER_TEMP "aas_acl_fixture_${{ github.run_id }}"
+          New-Item -ItemType Directory -Path $fixture -Force | Out-Null
+          $file = Join-Path $fixture "operator.json"
+          Set-Content -LiteralPath $file -Value '{"synthetic":true}' -Encoding utf8
+          $acl = Get-Acl -LiteralPath $file
+          $everyone = [System.Security.Principal.SecurityIdentifier]::new("S-1-1-0")
+          $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+            $everyone,
+            [System.Security.AccessControl.FileSystemRights]::Read,
+            [System.Security.AccessControl.AccessControlType]::Allow
+          )
+          $acl.AddAccessRule($rule)
+          Set-Acl -LiteralPath $file -AclObject $acl
+          $result = Start-Process -FilePath "pwsh" -ArgumentList @(
+            "-NoProfile", "-File", ".\scripts\check_windows_local_acl.ps1",
+            "-Root", $fixture
+          ) -Wait -PassThru -NoNewWindow
+          if ($result.ExitCode -ne 2) {
+            throw "Expected RISK exit 2 on synthetic broad ACL; got $($result.ExitCode)"
+          }
+      - name: Scope and cleanup
+        shell: pwsh
+        run: |
+          Write-Output "No real user files were inspected or modified."
+          Write-Output "This verifies runtime diagnostics, NOT security of the user's PC."

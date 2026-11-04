@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
+from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 
@@ -44,7 +45,7 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
-                   operator_auth=None, source_policy=None):
+                   operator_auth=None, source_policy=None, security_audit=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -138,6 +139,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 return False
             return True
 
+        def _audit_event(self, action, outcome, repo=None):
+            if security_audit is None:
+                return True
+            try:
+                security_audit.record(action, outcome, repo)
+                return True
+            except SecurityAuditError:
+                return False
+
         def do_GET(self):
             route = urlsplit(self.path)
             denied = self._local_allowed()
@@ -158,6 +168,32 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path != "/" and route.path != "/api/health":
                 if not self._operator_authorized():
                     return
+            if route.path == "/api/operator-audit":
+                params = parse_qs(route.query, keep_blank_values=True)
+                if not route.query:
+                    count = 40
+                elif set(params) == {"limit"} and len(params["limit"]) == 1:
+                    try:
+                        count = int(params["limit"][0])
+                    except ValueError:
+                        self._send(422, {"error": "invalid_audit_limit"})
+                        return
+                else:
+                    self._send(422, {"error": "invalid_audit_query"})
+                    return
+                if security_audit is None:
+                    self._send(200, {"events": [], "test_only": True})
+                    return
+                try:
+                    events = security_audit.recent(count)
+                except ValueError:
+                    self._send(422, {"error": "invalid_audit_limit"})
+                    return
+                except SecurityAuditError:
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                self._send(200, {"events": events})
+                return
             if route.path == "/api/local-github-sources" and not route.query:
                 if source_policy is None:
                     self._send(200, {"allowed": [], "epoch": 0, "test_only": True})
@@ -206,6 +242,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if self.path != "/api/operator-login":
                 if not self._operator_authorized(mutation=True):
                     return
+            if (security_audit is not None and not security_audit.ready()
+                    and self.path != "/api/operator-logout"):
+                self._send(503, {"error": "security_audit_restart_required"})
+                return
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                 self._send(415, {"error": "json_required"})
                 return
@@ -229,10 +269,20 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if type(data) is not dict or set(data) != {"password"}:
                     self._send(422, {"error": "invalid_login_fields"})
                     return
+                if security_audit is not None and not security_audit.ready():
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
                 status, session = operator_auth.login(data["password"])
+                if not self._audit_event("OPERATOR_LOGIN",
+                                         "SUCCESS" if status == 200 else "DENIED"):
+                    if status == 200:
+                        operator_auth.logout(session["cookie_token"])
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
                 if status != 200:
                     self._send(status, {"error": (
-                        "operator_login_locked" if status == 429
+                        "operator_restart_required" if status == 503
+                        else "operator_login_locked" if status == 429
                         else "invalid_operator_credentials")})
                     return
                 self._send(200, {"authenticated": True,
@@ -248,8 +298,19 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if operator_auth is None:
                     self._send(403, {"error": "auth_fixture_only"})
                     return
+                if not self._audit_event("OWNER_ROTATE", "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
                 code, outcome = operator_auth.rotate_password(
                     data["current_password"], data["new_password"])
+                final = ("SUCCESS" if code == 200 else
+                         "UNCERTAIN" if outcome.get("error") ==
+                         "operator_restart_required" else
+                         "DENIED" if code in (401, 403, 422, 429) else "FAILED")
+                if not self._audit_event("OWNER_ROTATE", final):
+                    self._send(503, {"error": "security_audit_restart_required"},
+                               cookie_header=self._no_cookie() if code == 200 else None)
+                    return
                 self._send(code, outcome,
                            cookie_header=self._no_cookie() if code == 200 else None)
                 return
@@ -262,16 +323,31 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if source_policy is None or operator_auth is None:
                     self._send(403, {"error": "source_policy_unavailable"})
                     return
+                action = ("PUBLIC_SOURCE_GRANT" if self.path.endswith("grant")
+                          else "PUBLIC_SOURCE_REVOKE")
+                if not self._audit_event(action, "ATTEMPT", data["repo"]):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
                 approved = operator_auth.confirm_current_password(
                     data["current_password"])
                 if approved != 200:
+                    self._audit_event(action, "DENIED", data["repo"])
                     self._send(approved, {"error": (
-                        "operator_login_locked" if approved == 429
+                        "operator_restart_required" if approved == 503
+                        else "operator_login_locked" if approved == 429
                         else "invalid_operator_credentials")})
                     return
                 operation = (source_policy.grant if self.path.endswith("grant")
                              else source_policy.revoke)
                 code, outcome = operation(data["repo"])
+                final = ("SUCCESS" if code == 200 else
+                         "UNCERTAIN" if outcome.get("error") ==
+                         "source_policy_restart_required" else
+                         "DENIED" if code in (401, 403, 404, 409, 422)
+                         else "FAILED")
+                if not self._audit_event(action, final, data["repo"]):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
                 self._send(code, outcome)
                 return
             if self.path == "/api/operator-logout":
@@ -280,6 +356,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return
                 if operator_auth is not None:
                     operator_auth.logout(self._operator_token())
+                # Logout must revoke even if an audit write fails.
+                self._audit_event("OPERATOR_LOGOUT", "SUCCESS")
                 self._send(200, {"authenticated": False},
                            cookie_header=self._no_cookie())
                 return
@@ -391,12 +469,17 @@ def start_local_server(port=8765):
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
     source_policy = LocalPublicSourcePolicy(home / "public-github-sources.json")
-    core = LocalWorkflowCore(home / "local-workflows.sqlite3")
+    audit = LocalSecurityAudit(home / "security-audit.sqlite3")
+    try:
+        core = LocalWorkflowCore(home / "local-workflows.sqlite3")
+    except BaseException:
+        audit.close()
+        raise
     try:
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
-                           source_policy=source_policy))
+                           source_policy=source_policy, security_audit=audit))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
@@ -404,6 +487,7 @@ def start_local_server(port=8765):
             server.server_close()
     finally:
         core.close()
+        audit.close()
 
 
 def _lock_recovery_to_offline_port():
@@ -441,31 +525,45 @@ def main(argv=None):
         except OperatorConfigurationError as exc:
             raise SystemExit("Recovery blocked: " + str(exc)) from None
         with recovery_lock:
+            audit = LocalSecurityAudit(home / "security-audit.sqlite3")
             try:
-                owner = LocalOperatorAuth.load(home / "operator.json")
-            except OperatorConfigurationError as exc:
-                raise SystemExit("Recovery blocked: " + str(exc)) from None
-            if args.enable_recovery:
-                current = getpass.getpass("Current owner password: ")
-                status, result = owner.setup_recovery(current)
+                try:
+                    owner = LocalOperatorAuth.load(home / "operator.json")
+                except OperatorConfigurationError as exc:
+                    raise SystemExit("Recovery blocked: " + str(exc)) from None
+                if args.enable_recovery:
+                    audit.record("RECOVERY_ENROLL", "ATTEMPT")
+                    current = getpass.getpass("Current owner password: ")
+                    status, result = owner.setup_recovery(current)
+                    audit.record("RECOVERY_ENROLL", (
+                        "SUCCESS" if status == 200 else
+                        "UNCERTAIN" if result.get("error") == "operator_restart_required"
+                        else "DENIED" if status in (401, 403, 422, 429) else "FAILED"))
+                    if status != 200:
+                        raise SystemExit("Recovery setup blocked: " + result["error"])
+                    print("SAVE THIS CODE OFFLINE. IT IS SHOWN ONLY ONCE:")
+                    print(result["recovery_code"])
+                    print("One-time code enabled. Keep it outside the computer.")
+                    return
+                audit.record("RECOVERY_RESET", "ATTEMPT")
+                code = getpass.getpass("One-time offline recovery code: ")
+                fresh = getpass.getpass("New local operator password: ")
+                confirm = getpass.getpass("Confirm new password: ")
+                if fresh != confirm:
+                    raise SystemExit("Recovery blocked: new passwords did not match.")
+                status, result = owner.recover_with_code(code, fresh)
+                audit.record("RECOVERY_RESET", (
+                    "SUCCESS" if status == 200 else
+                    "UNCERTAIN" if result.get("error") == "operator_restart_required"
+                    else "DENIED" if status in (401, 403, 422, 429) else "FAILED"))
                 if status != 200:
-                    raise SystemExit("Recovery setup blocked: " + result["error"])
-                print("SAVE THIS CODE OFFLINE. IT IS SHOWN ONLY ONCE:")
-                print(result["recovery_code"])
-                print("One-time code enabled. Keep it outside the computer.")
+                    raise SystemExit("Recovery blocked: " + result["error"])
+                print("Owner recovered. Recovery code consumed permanently.")
+                print("Start the server and sign in with the new password.")
+                print("Re-enable offline recovery with --enable-recovery.")
                 return
-            code = getpass.getpass("One-time offline recovery code: ")
-            fresh = getpass.getpass("New local operator password: ")
-            confirm = getpass.getpass("Confirm new password: ")
-            if fresh != confirm:
-                raise SystemExit("Recovery blocked: new passwords did not match.")
-            status, result = owner.recover_with_code(code, fresh)
-            if status != 200:
-                raise SystemExit("Recovery blocked: " + result["error"])
-            print("Owner recovered. Recovery code consumed permanently.")
-            print("Start the server and sign in with the new password.")
-            print("Re-enable offline recovery with --enable-recovery.")
-            return
+            finally:
+                audit.close()
     if args.init_owner:
         password = getpass.getpass("New local operator password (12+ characters): ")
         confirm = getpass.getpass("Confirm password: ")
@@ -482,7 +580,7 @@ def main(argv=None):
         return
     try:
         start_local_server()
-    except (OperatorConfigurationError, SourcePolicyError) as exc:
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 

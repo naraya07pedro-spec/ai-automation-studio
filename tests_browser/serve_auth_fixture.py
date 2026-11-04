@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from local_operator_auth import LocalOperatorAuth
 from local_source_policy import LocalPublicSourcePolicy
+from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_server import create_handler
 
@@ -25,16 +26,18 @@ def main():
     # Only the test fixture grants a sample public repository on startup.
     # Shipping server starts with no grants.
     policy.grant("Octocat/Hello-World")
+    audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
-                       source_policy=policy))
+                       source_policy=policy, security_audit=audit))
     try:
         server.serve_forever()
     finally:
         server.server_close()
         core.close()
+        audit.close()
         home.cleanup()
 
 

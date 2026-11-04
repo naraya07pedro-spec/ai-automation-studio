@@ -569,6 +569,17 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#operator-login-button").click()
         expect(self.page.locator("#operator-gate")).to_be_hidden()
 
+    def test_authenticated_security_audit_is_visible_and_redacted(self):
+        self.page.locator("#operator-audit-refresh").click()
+        expect(self.page.locator("#operator-audit-list")).to_contain_text(
+            "OPERATOR_LOGIN")
+        raw=self.page.locator("#operator-audit-list").inner_text()
+        self.assertNotIn("ci_only_fixture_password_1234",raw)
+        self.assertNotIn("aas_session",raw)
+        self.assertNotIn("csrf_token",raw)
+        self.assertNotIn("recovery_code",raw)
+        self.assertIn('"source_fingerprint"',raw)
+
     def test_mobile_375px_five_cards_and_workflows(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assertEqual(5, self.page.locator(".template-card").count())

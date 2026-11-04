@@ -17,6 +17,20 @@ The first command prompts securely for a **12–128-character password** and con
 
 The server binds only to `127.0.0.1`. Sessions are one-hour, short-lived process-memory tokens in HttpOnly, SameSite=Strict cookies; every mutation requires the matching session CSRF token, including old mock APIs and GitHub source preview. No real user accounts, cloud provider credentials, outside identity provider or GitHub login are created. Do not expose this unauthenticated-at-the-network-layer local HTTP service using public proxies or port forwarding. It remains unsuitable for real customer data or a compromised local PC.
 
+## Security audit and uncertain-write containment (Slice 46)
+
+The local server now stores a **redacted, bounded SQLite security event log** at `~/.ai-automation-studio/security-audit.sqlite3`. Sign in and open **Recent security events**, or use authenticated `GET /api/operator-audit?limit=40`. Entries show event type, result, UTC timestamp and at most a hashed public-source fingerprint. **No passwords, recovery codes, cookie values, raw repository names, GitHub issue text or customer data** go into the ledger. Failed audit storage blocks subsequent sensitive actions rather than silently losing evidence. It is not tamper-proof against the same Windows/OS account.
+
+Sensitive owner and public-source file changes now distinguish **pre-rename failures** (old file intact) from **post-rename directory-sync failures** (new on-disk state may already be visible). A post-rename failure **revokes the current operator sessions** or **denies all public-source permissions** and requires restarting the local server to reload the actual on-disk state. Neither the old nor new password/source grant should be assumed to have persisted after a 503 restart-required error.
+
+On Windows, use the optional **read-only** ACL inspection from the cloned project:
+
+```powershell
+powershell -NoProfile -File .\scripts\check_windows_local_acl.ps1
+```
+
+This reports broad file/directory access without reading file contents or changing permissions; it has not yet been verified on a real Windows installation. See [local security durability and audit contract](docs/LOCAL_SECURITY_DURABILITY_AUDIT_V1.md). The app is still localhost-only and **not approved for real customer PII or public hosting**.
+
 ## Optional one-time offline owner recovery (Slice 45)
 
 A forgotten local owner password cannot be reset through the web UI. If you still know the current password, **stop the server** and generate a high-entropy, one-time recovery code in the local terminal:
