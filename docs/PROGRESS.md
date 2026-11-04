@@ -623,3 +623,33 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Fixture contract validation and full standard-library Python unittest suite succeeded; job log reports **212 tests, 0 failures**, including the 10 new fault-injection and alias regression tests.
 - Existing Node.js 20 deprecation warning remains for older GitHub Actions dependencies, not a failed test.
 - This docs-only change must pass GitHub Actions on its own latest PR-head SHA before declaring final HEAD verified.
+
+
+## Slice 22 · 2026-11-04 · Disposable recovery workspace and deterministic aggregate manifest
+
+**Goal:** Remove arbitrary caller paths from the preferred synthetic recovery experiment and return a verifiable but privacy-preserving report, while keeping the source/backup/restore process isolated in a throwaway temporary directory.
+
+**Completed**
+- Verified PR #23 final-head CI succeeded (212/212 tests) and squash-merged it into main; created `feat/disposable-recovery-workspace-slice-22`.
+- Added `prototype/lead_inquiry_disposable_recovery.py`: `run_disposable_recovery(schema=...)` accepts only one of two synthetic schema labels; creates its own temporary workspace and fixed SQLite fixtures, runs the existing recovery rehearsal, and checks source/backup/restore integrity, schema, aggregate counts, logical SHA-256 fingerprints, and unchanged source bytes before emitting a manifest.
+- The workspace is cleaned up on both normal completion and handled failures. Unrecognized schema, operational errors, and mismatched artifacts return redacted failure status with no success manifest. No arbitrary path/verifier/clock parameters.
+- Added `tests/test_lead_inquiry_disposable_recovery.py` with **15 tests**, including both schemas, manifest determinism, path-injection refusal, workspace cleanup after success/failure, mismatched artifact rejection, error sanitization, and zero external dispatch.
+- Added `docs/DISPOSABLE_RECOVERY_WORKSPACE.md` describing contracts, reproduction, limits and why this creates **no persistent recovery backup**.
+
+**Evidence gate**
+- Read all new files and progress log back from branch, count test methods, verify the GitHub Actions fixture contract and full stdlib unittest suite at exact PR-head commit before claiming green CI.
+
+**Important limitations**
+- TemporaryDirectory is not secure OS isolation against privileged/adversarial code; the synthetic marker is not trusted provenance and no cryptographic signature or external attestation exists.
+- The returned digest only proves logical equality of fixed local synthetic data in the tested run. The files are deleted at exit, so this is not durable, encrypted or offsite backup custody.
+- Fault-injection tests in prior slice are in-process only; no power-loss, disk corruption, distributed guarantees, historical migration or production run.
+- Existing path-based low-level synthetic recovery API remains available as a documented test-only helper. The new pathless API is recommended for future test harnesses but not an enforced security boundary.
+
+**Next smallest slice (proposed):** Validate independent manifest verification against expected fixed synthetic fixtures, test concurrent disposable workspace runs, and review test-suite coverage of artifact mutations without presenting local checks as production recovery guarantees.
+
+
+**Verified GitHub Actions evidence**
+- PR #24 revision `c55794b5427f5bbf25a24c9174388dc1b5d5d9fc`: [run 41786419485](https://github.com/naraya07pedro-spec/ai-automation-studio/actions/runs/41786419485), completed **success**.
+- Synthetic fixture contract validation and full Python standard-library unittest steps both passed. CI logs report **227 tests, 0 failures** (previous 212 plus 15 disposable-workspace tests).
+- GitHub Actions still emits a non-blocking Node.js 20 deprecation warning for older action dependencies.
+- This docs-only commit changes the PR head; verify its own CI run before reporting latest-head success.
