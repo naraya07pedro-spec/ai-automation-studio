@@ -683,3 +683,26 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Synthetic fixture contract validator and complete stdlib unittest suite both passed. CI job log reports **242 tests, 0 failures** (227 prior + 15 independent manifest and concurrency regressions).
 - GitHub Actions still reports an unrelated, non-blocking Node.js 20 deprecation warning for older Actions dependencies.
 - This documentation-only commit creates a new PR head SHA; confirm a separate green GitHub Actions run on that exact commit before declaring final-head CI verified.
+
+
+## Slice 24 · 2026-11-04 · Python/SQLite runtime contract and independent OS-process recovery validation
+
+**Goal:** Make the Python/SQLite CI baseline visible and verify fixed-fixture recovery independently in multiple Python interpreter processes without claiming universal portability or production durability.
+
+**Completed**
+- Verified PR #25 exact-head CI completed successfully, squash-merged it into `main`, and branched `feat/runtime-multiprocess-validation-slice-24`.
+- Added `prototype/lead_inquiry_runtime_contract.py`: sanitized Python/SQLite version probe, strict tuple typing, informative statuses for Python 3.11 with SQLite >=3.35, untested Python minor versions, or older SQLite. The minimum is a **screening policy only**, not proof of vendor support or minimum SQLite dependency.
+- Added `tests/test_lead_inquiry_runtime_multiprocess.py` with **13 tests** for runtime status/invalid-version redaction, independent worker processes for both fixed fixtures, child/parent manifest verification, eight concurrent Python subprocess recoveries, mixed invalid and valid workers, and no sensitive path or identity exposure.
+- Updated `.github/workflows/mock-prototype-tests.yml` to record actual Python/SQLite versions on GitHub Actions before fixture validation and full tests.
+- Added `docs/RUNTIME_MULTIPROCESS_CONTRACT.md` explaining the tested configuration and important remaining limitations.
+
+**Verification gate**
+- Read back new source/test/workflow/docs from branch and require complete GitHub Actions fixture validation and full Python unittest suite on exact PR HEAD; no green claim before that evidence.
+
+**Limits**
+- Single CI Python minor version (3.11), one OS runner family; no multi-version or multi-OS compatibility matrix. Python subprocesses share OS/filesystem but not Python process memory.
+- SQLite SQL dump fingerprint checks remain potentially version-sensitive. The pinned local references are not independently signed evidence or production provenance.
+- Test-only isolated synthetic data, no real external provider effects, original historical DB migration, off-host backup custody, production authorization or permanent architecture choice.
+- Node.js 20 deprecation warnings from older GitHub Actions dependencies remain a separate maintenance issue.
+
+**Next smallest slice:** Add an explicit compatibility matrix and process-isolation failure cases only where reproducible; preserve fixed references and do not silently accept unexpected SQLite dump changes.
