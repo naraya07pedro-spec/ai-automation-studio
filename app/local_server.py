@@ -12,6 +12,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_csv_batch import LocalCSVBatchIntake
+from github_public_issue_intake import PublicGitHubReadOnlyIntake
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -36,7 +37,7 @@ _CONFIGURATION = {
 _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 
-def create_handler(flow=None, local_core=None):
+def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None):
     """Return an isolated handler class for tests or local app instantiation."""
     workflow = flow if flow is not None else MockInquiryFlow()
     lock = threading.Lock()
@@ -47,6 +48,9 @@ def create_handler(flow=None, local_core=None):
     knowledge = MockKnowledgeRouting()
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
+    public_github = PublicGitHubReadOnlyIntake(core, batch,
+                                               fetcher=github_fetcher,
+                                               clock=github_clock)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -111,7 +115,7 @@ def create_handler(flow=None, local_core=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -135,6 +139,12 @@ def create_handler(flow=None, local_core=None):
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/local-github-preview", "/api/local-github-commit"):
+                method = (public_github.preview if self.path == "/api/local-github-preview"
+                          else public_github.commit)
+                code, result = method(data)
+                self._send(code, result)
                 return
             if self.path in ("/api/local-batch-preview", "/api/local-batch-commit"):
                 method = (batch.preview if self.path == "/api/local-batch-preview"
