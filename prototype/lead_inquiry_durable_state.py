@@ -7,6 +7,7 @@ PENDING records are *not* replayed automatically after a crash. On reopening,
 the caller must reconcile/inspect them before deciding what happens next.
 """
 import hashlib
+from contextlib import contextmanager
 import json
 import sqlite3
 from pathlib import Path
@@ -29,10 +30,14 @@ class DurableMockEventStore:
                 "PRIMARY KEY(source, event_id))"
             )
 
+    @contextmanager
     def _connect(self):
         conn = sqlite3.connect(self.path, timeout=5, isolation_level=None)
-        conn.execute("PRAGMA busy_timeout=5000")
-        return conn
+        try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            yield conn
+        finally:
+            conn.close()
 
     @staticmethod
     def _out(status):
