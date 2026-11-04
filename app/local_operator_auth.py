@@ -56,6 +56,7 @@ class LocalOperatorAuth:
         self._sessions = {}
         self._failures = 0
         self._locked_until = 0
+        self._requires_restart = False
 
     @staticmethod
     def _validate_password(password):
@@ -152,6 +153,8 @@ class LocalOperatorAuth:
 
     def _confirm_locked(self, password):
         """Shared failure counter for login, source changes and rotation."""
+        if self._requires_restart:
+            return 503
         if type(password) is not str or len(password) > MAX_PASSWORD:
             return 401
         now = self._clock()
@@ -186,19 +189,25 @@ class LocalOperatorAuth:
             confirmed = self._confirm_locked(current_password)
             if confirmed != 200:
                 return confirmed, {"error": (
-                    "operator_login_locked" if confirmed == 429
+                    "operator_restart_required" if confirmed == 503
+                    else "operator_login_locked" if confirmed == 429
                     else "invalid_operator_credentials")}
             if hmac.compare_digest(current_password, new_password):
                 return 422, {"error": "operator_password_unchanged"}
             salt = secrets.token_bytes(16)
             digest = self._derive(new_password, salt)
             # Existing sessions must remain active if disk persistence fails.
-            from local_source_policy import secure_replace_json
+            from local_source_policy import (
+                secure_replace_json, PostReplaceDurabilityError)
             try:
                 secure_replace_json(self._owner_path, {
                     "version": FILE_VERSION,
                     "salt": salt.hex(),
                     "scrypt_hash": digest.hex()})
+            except PostReplaceDurabilityError:
+                self._requires_restart = True
+                self._sessions.clear()
+                return 503, {"error": "operator_restart_required"}
             except (OSError, RuntimeError):
                 return 503, {"error": "owner_rotation_storage_failed"}
             self._salt, self._hash = salt, digest
@@ -225,12 +234,14 @@ class LocalOperatorAuth:
             accepted = self._confirm_locked(current_password)
             if accepted != 200:
                 return accepted, {"error": (
-                    "operator_login_locked" if accepted == 429
+                    "operator_restart_required" if accepted == 503
+                    else "operator_login_locked" if accepted == 429
                     else "invalid_operator_credentials")}
             code = secrets.token_urlsafe(32)
             rsalt = secrets.token_bytes(16)
             digest = self._recovery_digest(code, rsalt)
-            from local_source_policy import secure_replace_json
+            from local_source_policy import (
+                secure_replace_json, PostReplaceDurabilityError)
             try:
                 secure_replace_json(self._owner_path, {
                     "version": RECOVERY_VERSION,
@@ -238,6 +249,10 @@ class LocalOperatorAuth:
                     "scrypt_hash": self._hash.hex(),
                     "recovery_salt": rsalt.hex(),
                     "recovery_hash": digest.hex()})
+            except PostReplaceDurabilityError:
+                self._requires_restart = True
+                self._sessions.clear()
+                return 503, {"error": "operator_restart_required"}
             except (OSError, RuntimeError):
                 return 503, {"error": "recovery_setup_storage_failed"}
             self._recovery_salt, self._recovery_hash = rsalt, digest
@@ -260,6 +275,8 @@ class LocalOperatorAuth:
         if type(code) is not str or len(code) != 43 or not code.isascii():
             return 403, {"error": "invalid_recovery_proof"}
         with self._lock:
+            if self._requires_restart:
+                return 503, {"error": "operator_restart_required"}
             if self._recovery_salt is None or self._recovery_hash is None:
                 return 403, {"error": "recovery_not_enabled"}
             trial = self._recovery_digest(code, self._recovery_salt)
@@ -267,12 +284,17 @@ class LocalOperatorAuth:
                 return 403, {"error": "invalid_recovery_proof"}
             new_salt = secrets.token_bytes(16)
             new_hash = self._derive(new_password, new_salt)
-            from local_source_policy import secure_replace_json
+            from local_source_policy import (
+                secure_replace_json, PostReplaceDurabilityError)
             try:
                 secure_replace_json(self._owner_path, {
                     "version": FILE_VERSION,
                     "salt": new_salt.hex(),
                     "scrypt_hash": new_hash.hex()})
+            except PostReplaceDurabilityError:
+                self._requires_restart = True
+                self._sessions.clear()
+                return 503, {"error": "operator_restart_required"}
             except (OSError, RuntimeError):
                 return 503, {"error": "recovery_storage_failed"}
             self._salt, self._hash = new_salt, new_hash
@@ -315,6 +337,8 @@ class LocalOperatorAuth:
 
     def inspect(self, token):
         with self._lock:
+            if self._requires_restart:
+                return None
             entry = self._lookup(token)
             if entry is None:
                 return None
@@ -323,6 +347,8 @@ class LocalOperatorAuth:
 
     def authorize(self, token, csrf):
         with self._lock:
+            if self._requires_restart:
+                return False
             entry = self._lookup(token)
             return (entry is not None and type(csrf) is str
                     and hmac.compare_digest(entry["csrf"], csrf))
