@@ -11,6 +11,7 @@ import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
+from local_csv_batch import LocalCSVBatchIntake
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -45,6 +46,7 @@ def create_handler(flow=None, local_core=None):
     crm = MockCRMHandoff()
     knowledge = MockKnowledgeRouting()
     core = local_core if local_core is not None else LocalWorkflowCore()
+    batch = LocalCSVBatchIntake(core)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -107,7 +109,7 @@ def create_handler(flow=None, local_core=None):
                 self._send(404, {"error": "not_found"})
 
         def do_POST(self):
-            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run"):
+            if self.path not in ("/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts. This is still a local
@@ -131,6 +133,12 @@ def create_handler(flow=None, local_core=None):
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/local-batch-preview", "/api/local-batch-commit"):
+                method = (batch.preview if self.path == "/api/local-batch-preview"
+                          else batch.commit)
+                code, result = method(data)
+                self._send(code, result)
                 return
             if self.path in ("/api/local-create", "/api/local-activate", "/api/local-run"):
                 # SQLite workbench methods serialize their own writes. Nothing
