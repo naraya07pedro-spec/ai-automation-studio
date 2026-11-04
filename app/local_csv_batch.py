@@ -58,12 +58,13 @@ class LocalCSVBatchIntake:
         return events
 
     @staticmethod
-    def _digest(workflow_id, version, ledger_count, csv_text):
+    def _digest(workflow_id, version, control_epoch, ledger_count, csv_text):
         # Consistency token, NOT authorization: there is no authenticated
         # identity on this localhost-only prototype.
         snapshot = {
             "workflow_id": workflow_id,
             "version": version,
+            "control_epoch": control_epoch,
             "ledger_count": ledger_count,
             "csv_sha256": hashlib.sha256(csv_text.encode("utf-8")).hexdigest(),
         }
@@ -74,11 +75,11 @@ class LocalCSVBatchIntake:
     def _assess_locked(self, wid, events):
         core = self.core
         row = core.db.execute("""SELECT service_filter,min_budget_tier,
-            followup_policy,version,status FROM local_workflows
+            followup_policy,version,status,control_epoch FROM local_workflows
             WHERE workflow_id=?""", (wid,)).fetchone()
         if row is None:
             return _error("workflow_not_found", 404)
-        service_filter, min_budget, policy, version, status = row
+        service_filter, min_budget, policy, version, status, epoch = row
         if status != "ACTIVE":
             return _error("workflow_not_active", 409)
         count = core.db.execute(
@@ -112,7 +113,7 @@ class LocalCSVBatchIntake:
             })
         if count + new_count > MAX_RUNS_PER_WORKFLOW:
             return _error("run_capacity_reached", 409)
-        return 200, {"version": version, "count": count,
+        return 200, {"version": version, "epoch": epoch, "count": count,
                      "planned": planned, "new_count": new_count,
                      "replay_count": len(planned) - new_count}
 
@@ -130,7 +131,7 @@ class LocalCSVBatchIntake:
             code, report = self._assess_locked(wid, events)
             if code != 200:
                 return code, report
-            digest = self._digest(wid, report["version"], report["count"], csv_text)
+            digest = self._digest(wid, report["version"], report["epoch"], report["count"], csv_text)
             return 200, {
                 "status": "PREVIEW_READY", "workflow_id": wid,
                 "workflow_version": report["version"],
@@ -167,7 +168,7 @@ class LocalCSVBatchIntake:
                 return code, report
             if version != report["version"]:
                 return _error("workflow_version_conflict", 409)
-            if token != self._digest(wid, version, report["count"], csv_text):
+            if token != self._digest(wid, version, report["epoch"], report["count"], csv_text):
                 return _error("stale_batch_preview", 409)
             # All rows were validated and checked before the first write.
             # One transaction commits all new rows; a failure rolls back all.
