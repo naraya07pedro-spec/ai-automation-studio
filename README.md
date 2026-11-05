@@ -109,6 +109,16 @@ python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL
 
 The smoke uses harmless built-in text samples and requires an **exact quoted fact from the correct second file**, or reports `BLOCKED`. It also measures elapsed time and available system RAM (which is **not** model-specific RAM usage). GitHub CI uses fake model fixtures, so it cannot establish actual model performance on your hardware. [Multi-document limits, evidence rules and device acceptance instructions](docs/LOCAL_MULTI_DOCUMENT_RETRIEVAL_V1.md).
 
+## Improved multi-document retrieval and transparent offline evaluation (Slice 58)
+
+The local multi-document agent now uses **overlapping 450-character source windows (96-character overlap)** instead of nonoverlapping chunks, with limited plural/`-nya` normalization for Indonesian and English question words. It keeps exact file-bound citation validation, but now also shows **why each retrieved passage was chosen** (matched words, original filename, chunk position, bounded source preview). Matched words and quote presence are **not** model confidence or verified factual accuracy.
+
+```powershell
+python app/local_retrieval_eval.py
+```
+
+This fully offline command compares historical Slice 57 retrieval to Slice 58 over the same **curated synthetic cases** (including an old chunk-boundary failure). Its success means the specified spans were found in the correct file. It is not a real-world benchmark, and it does not prove Ollama is installed on your computer. For the separate Windows **real-model** test continue using `python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL`. [Read the v2 retrieval trace, measurable comparison and limits](docs/LOCAL_RETRIEVAL_V2_EVALUATION.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.
