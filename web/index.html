@@ -353,6 +353,18 @@ aas:timeline:urgent
 <div id="local-multidoc-status" class="setup-msg" role="status" aria-live="polite">Disabled. Start with --enable-local-agent --enable-multi-documents.</div>
 <pre id="local-multidoc-result" class="trace" aria-label="Multi-document evidence and local answer">No multi-document answer yet.</pre>
 </section>
+<section class="panel" id="device-acceptance-panel" aria-label="Real Ollama device acceptance" style="margin:22px 0">
+<div class="kicker">REAL DEVICE ACCEPTANCE · ONE LOCAL INFERENCE</div>
+<h2>Verify the installed model on this computer</h2>
+<p class="muted">Run one real Ollama check using two built-in harmless text samples. The model must answer 18:30 WIB and quote that exact fact from schedule.md. This tests a real local request, source binding, response time and available system RAM. It does not measure model-specific peak RAM or prove all answers will be correct.</p>
+<p class="muted">Use the installed model selected in the Ask your local AI agent panel. This check requires --enable-local-agent --enable-multi-documents. It does not read your chosen files or save an evaluation history.</p>
+<div class="core-actions">
+<button id="device-acceptance-run" type="button" class="primary" disabled>Run real Ollama acceptance on this PC</button>
+<button id="device-acceptance-clear" type="button" class="secondary">Clear device result</button>
+</div>
+<div id="device-acceptance-status" class="setup-msg" role="status" aria-live="polite">Device acceptance disabled. Start with --enable-local-agent --enable-multi-documents.</div>
+<pre id="device-acceptance-result" class="trace" aria-label="Actual local model acceptance evidence">No device acceptance attempted on this server.</pre>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -958,6 +970,11 @@ const refreshLocalAgent=async()=>{
   localAgentEnabled=response.ok&&data.enabled===true;
   localDocumentsEnabled=localAgentEnabled&&data.documents===true;
   multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
+  deviceAcceptanceEnabled=localAgentEnabled&&data.device_acceptance===true;
+  deviceAcceptanceStatus.textContent=deviceAcceptanceEnabled
+    ?"Ready. This button will execute one actual local Ollama inference."
+    :"Disabled. Start with --enable-local-agent --enable-multi-documents.";
+  refreshDeviceAcceptance();
   multiFiles.disabled=!multiDocumentsEnabled;
   multiStatus.textContent=multiDocumentsEnabled
     ?"Ready. Choose 2–3 distinct UTF-8 text files."
@@ -1412,6 +1429,82 @@ multiButton.addEventListener("click",async()=>{
  }
 });
 
+
+// Slice 59: acceptance is a real user-triggered local model test in production.
+// Fixture transport is explicitly labeled as synthetic in CI results.
+let deviceAcceptanceEnabled=false;
+let deviceAcceptanceBusy=false;
+let deviceAcceptanceRevision=0;
+const deviceAcceptanceRun=$("device-acceptance-run");
+const deviceAcceptanceStatus=$("device-acceptance-status");
+const deviceAcceptanceResult=$("device-acceptance-result");
+const refreshDeviceAcceptance=()=>{
+ deviceAcceptanceRun.disabled=!operatorCsrf||!deviceAcceptanceEnabled
+   ||deviceAcceptanceBusy||!$("local-agent-model").value.trim();
+};
+const invalidateDeviceAcceptance=()=>{
+ deviceAcceptanceRevision++;
+ deviceAcceptanceResult.textContent="No result for this selected model.";
+ refreshDeviceAcceptance();
+};
+$("local-agent-model").addEventListener("input",invalidateDeviceAcceptance);
+$("device-acceptance-clear").addEventListener("click",()=>{
+ deviceAcceptanceRevision++;
+ deviceAcceptanceResult.textContent="Result cleared; no persistent local evidence stored.";
+ deviceAcceptanceStatus.textContent="No model acceptance result displayed.";
+ refreshDeviceAcceptance();
+});
+deviceAcceptanceRun.addEventListener("click",async()=>{
+ const model=$("local-agent-model").value.trim();
+ if(!deviceAcceptanceEnabled||deviceAcceptanceBusy||!operatorCsrf||!model)return;
+ const revision=++deviceAcceptanceRevision;
+ deviceAcceptanceBusy=true;
+ refreshDeviceAcceptance();
+ deviceAcceptanceStatus.textContent="Checking installed Ollama model and running one real local inference…";
+ deviceAcceptanceResult.textContent="Acceptance in progress; no success claimed.";
+ try{
+  const response=await appFetch("/api/local-agent-device-acceptance",{
+   method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model})});
+  const result=await response.json();
+  if(revision!==deviceAcceptanceRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(result.error||"local_device_acceptance_unavailable");
+  const live=result.status==="REAL_LOCAL_MULTI_DOCUMENT_SMOKE_PASSED"
+    &&result.inference_source==="LIVE_LOCAL_OLLAMA";
+  const lines=[
+   live?"REAL LOCAL OLLAMA ACCEPTANCE: PASSED":"SYNTHETIC FIXTURE: NOT REAL OLLAMA",
+   "Source: "+result.inference_source,
+   "Model: "+result.model,
+   "UTC: "+result.checked_at_utc,
+   "One inference elapsed: "+result.elapsed_ms+" ms",
+   "Available system RAM before/after: "+
+     (result.available_ram_before_mb??"not available")+" / "+
+     (result.available_ram_after_mb??"not available")+" MB",
+   result.memory_note,
+   "Model calls: "+result.model_calls,
+   "Selected passages: "+result.selected_passages,
+   "Verified fact from schedule.md: "+result.source_evidence_verified,
+   "Exact source evidence:"
+  ];
+  for(const cite of result.citations||[]){
+   lines.push(cite.filename+" ["+cite.chunk_id+"] characters "+
+    cite.start_char+"–"+cite.end_char+": "+cite.quote);
+  }
+  lines.push("No private files, disk report, history, or external writes.");
+  deviceAcceptanceResult.textContent=lines.join("\n");
+  deviceAcceptanceStatus.textContent=live
+    ?"Real model ran successfully on this localhost. This does not validate general accuracy."
+    :"CI/test fixture only. This result is NOT hardware acceptance.";
+ }catch(error){
+  if(revision===deviceAcceptanceRevision&&operatorCsrf){
+   deviceAcceptanceStatus.textContent="Acceptance BLOCKED: "+error.message;
+   deviceAcceptanceResult.textContent="No successful device acceptance. Check Ollama and the installed model.";
+  }
+ }finally{
+  deviceAcceptanceBusy=false;
+  refreshDeviceAcceptance();
+ }
+});
+
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
@@ -1424,6 +1517,12 @@ const operatorReady=()=>{
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ deviceAcceptanceEnabled=false;
+ deviceAcceptanceBusy=false;
+ deviceAcceptanceRevision++;
+ deviceAcceptanceResult.textContent="Session locked; device evidence cleared.";
+ deviceAcceptanceStatus.textContent="Session locked; model verification disabled.";
+ refreshDeviceAcceptance();
  multiDocumentsEnabled=false;
  multiDocumentsBusy=false;
  multiDocumentsRevision++;
