@@ -614,6 +614,40 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-run-remaining")).to_be_disabled()
         expect(self.page.locator("#agent-plan-stop-run")).to_be_disabled()
 
+    def test_server_owned_reviewed_batch_completes_after_navigation(self):
+        """Browser may leave; server saves each preapproved read-only step."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill("Run calculation and UTC server-side")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_enabled()
+        self.page.once("dialog", lambda dialog: dialog.dismiss())
+        self.page.locator("#agent-plan-run-remaining").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#agent-plan-run-remaining").click()
+        pid = self.page.locator("#agent-plan-id").input_value()
+        self.assertEqual(24, len(pid))
+        # The owner can navigate away and return. The server, not browser JS,
+        # owns the remaining sequence and preserves its result in SQLite.
+        self.page.goto(URL, wait_until="networkidle")
+        if self.page.locator("#operator-gate").is_visible():
+            self.page.locator("#operator-password").fill(
+                "ci_only_fixture_password_1234")
+            self.page.locator("#operator-login-button").click()
+            expect(self.page.locator("#operator-gate")).to_be_hidden()
+        self.page.locator("#agent-plan-id").fill(pid)
+        expect(self.page.locator("#agent-plan-load")).to_be_enabled()
+        self.page.locator("#agent-plan-load").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"batch_run_status": "COMPLETED"', timeout=10000)
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "56"')
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_disabled()
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
