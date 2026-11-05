@@ -975,6 +975,8 @@ const refreshLocalAgent=async()=>{
   multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
   deviceAcceptanceEnabled=localAgentEnabled&&data.device_acceptance===true;
   devicePreflightEnabled=localAgentEnabled&&data.device_preflight===true;
+  devicePreflightRevision++;
+  devicePreflightResult.textContent="No host preflight yet. This check does not run any model.";
   devicePreflightStatus.textContent=devicePreflightEnabled
     ?"Preflight ready; click to check localhost Ollama and system RAM without inference."
     :"Preflight disabled. Start with --enable-local-agent --enable-multi-documents.";
