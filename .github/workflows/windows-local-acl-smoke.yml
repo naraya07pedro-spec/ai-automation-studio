@@ -14,6 +14,9 @@ on:
       - "app/local_csv_profile.py"
       - "app/local_agent_task_plans.py"
       - "tests/test_local_agent_csv_profile.py"
+      - "app/local_agent_handoffs.py"
+      - "tests/test_local_agent_csv_handoffs.py"
+      - "docs/CSV_TYPED_HANDOFFS_V1.md"
       - "docs/OWNER_SELECTED_CSV_PROFILE_V1.md"
   workflow_dispatch:
 
@@ -77,6 +80,10 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_local_agent_csv_profile.py -v
+      - name: Verified CSV count and sum handoffs on disposable Windows storage
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_local_agent_csv_handoffs.py -v
       - name: Scope and cleanup
         shell: pwsh
         run: |
