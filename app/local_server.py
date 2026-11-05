@@ -97,6 +97,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def _send(self, code, payload, content_type="application/json; charset=utf-8",
                   cookie_header=None):
+            # Fully commit completion and release inference gate BEFORE the
+            # client observes the response. A next sequential call must not
+            # race a slow SQLite fsync from the previous finished request.
+            if getattr(self, "_agent_gate_acquired", False):
+                if not self._leave_agent_gate():
+                    code, payload = 503, {"error": "model_safety_storage_unavailable"}
             body = (payload.encode("utf-8") if isinstance(payload, str)
                     else json.dumps(payload, sort_keys=True).encode("utf-8"))
             self.send_response(code)
@@ -167,10 +173,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def _enter_agent_gate(self, *, allow_uncertain=False):
             self._model_checkpoint_started = False
+            self._agent_gate_acquired = False
             with agent_state_lock:
                 if not agent_gate.acquire(blocking=False):
                     self._send(429, {"error": "local_agent_busy"})
                     return False
+                self._agent_gate_acquired = True
                 if allow_uncertain:
                     return True
                 try:
@@ -180,6 +188,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._model_checkpoint_started = True
                     return True
                 except ModelSafetyError as exc:
+                    self._agent_gate_acquired = False
                     agent_gate.release()
                     self._send(423 if str(exc) == "model_safety_quarantined"
                                else 503,
@@ -189,15 +198,21 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return False
 
         def _leave_agent_gate(self):
+            if not getattr(self, "_agent_gate_acquired", False):
+                return True
+            self._agent_gate_acquired = False
+            checkpoint_ok = True
             try:
                 if getattr(self, "_model_checkpoint_started", False):
                     # If marked UNCERTAIN, finish never clears it.
                     model_safety.finish()
             except ModelSafetyError:
-                # Further model dispatch fails closed; never guess safe state.
-                pass
+                # Do not send HTTP 200 if final checkpoint commit failed.
+                # Further model dispatch also fails closed.
+                checkpoint_ok = False
             finally:
                 agent_gate.release()
+            return checkpoint_ok
 
         @staticmethod
         def _mark_model_timeout(exc):
