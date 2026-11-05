@@ -19,6 +19,7 @@ from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_document_analysis import analyze_local_document
 from local_multi_document_analysis import analyze_multiple_documents
+from local_multi_doc_smoke import smoke as device_smoke
 from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_server import create_handler
 
@@ -103,6 +104,16 @@ def main():
                 '"citations":[{"chunk_id":"F2C1",'
                 '"quote":"meeting starts at 18:30 WIB"}]}'}})
 
+    def fixture_device_acceptance(model):
+        return device_smoke(
+            model, catalog=lambda:["fixture:model"],
+            transport=lambda _:{"message":{"content":
+                '{"answer":"Maintenance review meeting starts at 18:30 WIB.",'
+                '"insufficient_evidence":false,'
+                '"citations":[{"chunk_id":"F2C1",'
+                '"quote":"Maintenance review meeting starts at 18:30 WIB"}]}' }},
+            memory=lambda:None)
+
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
@@ -114,7 +125,8 @@ def main():
                        local_agent_planner=fixture_planner,
                        local_agent_plan_store=plans,
                        local_document_analyzer=fixture_document,
-                       local_multi_document_analyzer=fixture_multi_document))
+                       local_multi_document_analyzer=fixture_multi_document,
+                       local_device_acceptance=fixture_device_acceptance))
     try:
         server.serve_forever()
     finally:
