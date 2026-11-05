@@ -94,7 +94,11 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
         class PartialBody(DummyResponse):
             def read(self,_limit):
                 raise IncompleteRead(b"partial response", 28)
-        opener=DummyOpener(PartialBody(b"unused"))
+        class ReadFailsOpener(DummyOpener):
+            def open(self,request,timeout):
+                self.calls.append((request,timeout))
+                return PartialBody(b"unused")
+        opener=ReadFailsOpener(b"unused")
         with self.assertRaisesRegex(AgentError,"^local_model_transport_uncertain$"):
             ollama_transport({"model":"fixture:model"},opener=opener)
         self.assertEqual(1,len(opener.calls))
