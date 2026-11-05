@@ -21,6 +21,8 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
+from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
+                                    propose_readonly_plan)
 from local_ollama_readiness import installed_models, probe_model
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
@@ -51,7 +53,8 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
                    operator_auth=None, source_policy=None, security_audit=None,
                    local_agent_runner=None, agent_conversation=None,
-                   local_agent_models=None, local_agent_probe=None):
+                   local_agent_models=None, local_agent_probe=None,
+                   local_agent_planner=None, local_agent_plan_store=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -180,8 +183,33 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
+                                 "planning": (local_agent_planner is not None
+                                              and local_agent_plan_store is not None),
                                  "readiness": (local_agent_models is not None
                                                and local_agent_probe is not None)})
+                return
+            if route.path in ("/api/local-agent-plans", "/api/local-agent-plan"):
+                if local_agent_planner is None or local_agent_plan_store is None:
+                    self._send(403, {"error": "agent_planning_disabled"})
+                    return
+                try:
+                    if route.path == "/api/local-agent-plans":
+                        if route.query:
+                            self._send(422, {"error": "invalid_plan_query"})
+                        else:
+                            self._send(200, {"plans": local_agent_plan_store.list(),
+                                             "capacity": MAX_PLANS})
+                        return
+                    params = parse_qs(route.query, keep_blank_values=True)
+                    if (set(params) != {"plan_id"}
+                            or len(params["plan_id"]) != 1):
+                        self._send(422, {"error": "invalid_plan_query"})
+                        return
+                    self._send(200, local_agent_plan_store.get(params["plan_id"][0]))
+                except PlanError as exc:
+                    code = (422 if str(exc).startswith("invalid_") else
+                            404 if str(exc) == "plan_not_found" else 503)
+                    self._send(code, {"error": str(exc)})
                 return
             if route.path == "/api/local-agent-models" and not route.query:
                 if local_agent_runner is None or local_agent_models is None:
@@ -293,7 +321,13 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
                                  "/api/local-agent-run", "/api/local-agent-clear",
-                                 "/api/local-agent-probe"):
+                                 "/api/local-agent-probe",
+                                 "/api/local-agent-plan-create",
+                                 "/api/local-agent-plan-approve",
+                                 "/api/local-agent-plan-next",
+                                 "/api/local-agent-plan-cancel",
+                                 "/api/local-agent-plan-resume",
+                                 "/api/local-agent-plan-delete"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -324,6 +358,53 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path.startswith("/api/local-agent-plan-"):
+                if local_agent_planner is None or local_agent_plan_store is None:
+                    self._send(403, {"error": "agent_planning_disabled"})
+                    return
+                creating = self.path == "/api/local-agent-plan-create"
+                if (type(data) is not dict or
+                    (creating and (set(data) != {"goal", "model"}
+                        or type(data["goal"]) is not str
+                        or type(data["model"]) is not str)) or
+                    (not creating and (set(data) != {"plan_id"}
+                        or type(data["plan_id"]) is not str))):
+                    self._send(422, {"error": "invalid_plan_request"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    try:
+                        if creating:
+                            if len(local_agent_plan_store.list()) >= MAX_PLANS:
+                                raise PlanError("plan_capacity_reached")
+                            proposal = local_agent_planner(data["goal"], data["model"])
+                            outcome = local_agent_plan_store.create(proposal)
+                        else:
+                            action = {
+                                "/api/local-agent-plan-approve": local_agent_plan_store.approve,
+                                "/api/local-agent-plan-next": local_agent_plan_store.advance,
+                                "/api/local-agent-plan-cancel": local_agent_plan_store.cancel,
+                                "/api/local-agent-plan-resume": local_agent_plan_store.resume_interrupted,
+                                "/api/local-agent-plan-delete": local_agent_plan_store.delete,
+                            }[self.path]
+                            outcome = action(data["plan_id"])
+                        self._send(200, outcome)
+                    except PlanError as exc:
+                        err = str(exc)
+                        code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
+                                else 404 if err == "plan_not_found"
+                                else 409 if err in ("plan_state_conflict", "plan_capacity_reached")
+                                else 503)
+                        self._send(code, {"error": err})
+                    except AgentError as exc:
+                        self._send(503, {"error": str(exc)})
+                    except Exception:
+                        self._send(503, {"error": "agent_plan_unavailable"})
+                finally:
+                    agent_gate.release()
                 return
             if self.path == "/api/local-agent-probe":
                 if local_agent_runner is None or local_agent_probe is None:
@@ -647,7 +728,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
 
 def start_local_server(port=8765, enable_local_agent=False,
-                       enable_agent_history=False):
+                       enable_agent_history=False, enable_agent_plans=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -658,7 +739,12 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_agent_plans and not enable_local_agent:
+        raise ValueError("agent_plans_require_local_agent")
     conversation = None
+    plan_store = None
+    if enable_agent_plans:
+        plan_store = LocalAgentPlanStore(home / "agent-task-plans.sqlite3")
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     try:
@@ -669,13 +755,17 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_runner=run_agent if enable_local_agent else None,
                            agent_conversation=conversation,
                            local_agent_models=installed_models if enable_local_agent else None,
-                           local_agent_probe=probe_model if enable_local_agent else None))
+                           local_agent_probe=probe_model if enable_local_agent else None,
+                           local_agent_planner=propose_readonly_plan if enable_agent_plans else None,
+                           local_agent_plan_store=plan_store))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if plan_store is not None:
+            plan_store.close()
         if conversation is not None:
             conversation.close()
         core.close()
@@ -712,7 +802,11 @@ def main(argv=None):
                         help="Explicitly enable authenticated Ollama calls in browser.")
     parser.add_argument("--enable-agent-history", action="store_true",
                         help="Explicit opt-in local plaintext transcript storage.")
+    parser.add_argument("--enable-agent-plans", action="store_true",
+                        help="Opt in to persistent, human-approved read-only task plans.")
     args = parser.parse_args(argv)
+    if args.enable_agent_plans and not args.enable_local_agent:
+        parser.error("--enable-agent-plans requires --enable-local-agent")
     if args.enable_agent_history and not args.enable_local_agent:
         parser.error("--enable-agent-history also requires --enable-local-agent")
     home = Path.home() / ".ai-automation-studio"
@@ -778,7 +872,8 @@ def main(argv=None):
         return
     try:
         start_local_server(enable_local_agent=args.enable_local_agent,
-                           enable_agent_history=args.enable_agent_history)
+                           enable_agent_history=args.enable_agent_history,
+                           enable_agent_plans=args.enable_agent_plans)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
