@@ -140,6 +140,10 @@ class SelectedDocumentTests(unittest.TestCase):
         self.assertTrue(unsupported_numeric_claims("Change is -5%.", ["change +5%."]))
         self.assertFalse(unsupported_numeric_claims("Starts at 18:30.", ["at 18:30."]))
         self.assertFalse(unsupported_numeric_claims("Review required.", ["Review required."]))
+        self.assertTrue(unsupported_numeric_claims("Weight is 7kg.", ["Weight is 5kg."]))
+        self.assertTrue(unsupported_numeric_claims("RAM 16GB.", ["RAM 8GB."]))
+        self.assertTrue(unsupported_numeric_claims("Latency 3.5ms.", ["Latency 2.5ms."]))
+        self.assertFalse(unsupported_numeric_claims("Weight 5kg.", ["Weight 5kg."]))
 
 
 if __name__=="__main__":
