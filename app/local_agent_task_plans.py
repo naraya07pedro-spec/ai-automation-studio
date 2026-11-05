@@ -30,6 +30,7 @@ MAX_STEPS = 3
 MAX_PLANS = 12
 MAX_GOAL = 1200
 LOCAL_DOCUMENT_TOOL = "local_document_question"
+MAX_PLAN_DOC_BYTES = 3500
 ID_PATTERN = re.compile(r"[0-9a-f]{24}\Z")
 GITHUB_PLANNING_ADDENDUM = (
     ' Additional allowed read-only tool when explicitly enabled: '
@@ -118,7 +119,7 @@ def propose_readonly_plan(goal, model, transport=None, allow_github=False,
                 or type(document_context["filename"]) is not str
                 or NAME_PATTERN.fullmatch(document_context["filename"]) is None
                 or type(document_context["source_bytes"]) is not int
-                or not 1 <= document_context["source_bytes"] <= MAX_TEXT_BYTES
+                or not 1 <= document_context["source_bytes"] <= MAX_PLAN_DOC_BYTES
                 or type(document_context["sha256"]) is not str
                 or re.fullmatch(r"[0-9a-f]{64}", document_context["sha256"]) is None):
             raise PlanError("invalid_plan_document")
@@ -190,6 +191,8 @@ def validated_document_snapshot(snapshot, model):
     except LocalDocumentError:
         raise PlanError("invalid_plan_document") from None
     content = snapshot["content"]
+    if len(content.encode("utf-8")) > MAX_PLAN_DOC_BYTES:
+        raise PlanError("plan_document_too_large")
     return {"filename": snapshot["filename"], "content": content,
             "sha256": sha256(content.encode("utf-8")).hexdigest()}
 
