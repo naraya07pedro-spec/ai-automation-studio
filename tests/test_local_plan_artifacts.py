@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "app"))
 from local_agent_plan_reports import _sources, validate_report_result
 from local_agent_task_plans import LocalAgentPlanStore
 from local_operator_auth import LocalOperatorAuth
+from local_security_audit import LocalSecurityAudit
 from local_plan_artifacts import (
     LocalPlanArtifactExporter, PlanArtifactError, render_saved_report)
 from local_server import create_handler
@@ -97,14 +98,16 @@ class ArtifactExportTests(unittest.TestCase):
         self.assertEqual("OWNER CHANGED THIS FILE", target.read_text())
         target.unlink()
         secret = self.home / "unrelated.txt"
-        secret.write_text("preserve", encoding="utf-8")
+        # A symlink must be rejected even when the linked file happens to
+        # contain the exact expected artifact bytes.
+        secret.write_bytes(render_saved_report(done))
         try:
             target.symlink_to(secret)
         except (OSError, NotImplementedError):
             self.skipTest("Symlinks unavailable on this runner")
         with self.assertRaisesRegex(PlanArtifactError, "artifact_target_conflict"):
             self.exporter.export(done)
-        self.assertEqual("preserve", secret.read_text())
+        self.assertEqual(render_saved_report(done), secret.read_bytes())
 
     def test_workspace_symlink_and_report_tampering_fail_closed(self):
         done = self.completed()
@@ -143,10 +146,13 @@ class ArtifactExportHTTPTests(unittest.TestCase):
                      "interpretation": "Output is 56"}]}, _sources(plan)))
         self.addCleanup(self.store.close)
         self.exporter = LocalPlanArtifactExporter(self.home / "exports")
+        self.audit = LocalSecurityAudit(self.home / "security-audit.sqlite3")
+        self.addCleanup(self.audit.close)
         self.auth = LocalOperatorAuth.ephemeral_for_tests(
             "only_for_fixture_owner_export_password")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(
-            operator_auth=self.auth, local_agent_runner=lambda *_: None,
+            operator_auth=self.auth, security_audit=self.audit,
+            local_agent_runner=lambda *_: None,
             local_agent_planner=lambda *_: make_proposal(),
             local_agent_plan_store=self.store,
             plan_artifact_exporter=self.exporter))
@@ -196,6 +202,25 @@ class ArtifactExportHTTPTests(unittest.TestCase):
         self.assertEqual("CREATED", receipt["status"])
         self.assertEqual(200, self.post({"plan_id": self.pid})[0])
         self.assertEqual(1, len(list(self.exporter.root.glob("*.md"))))
+        events = self.audit.recent(30)
+        self.assertTrue(any(event["action"] == "LOCAL_ARTIFACT_EXPORT"
+                            and event["outcome"] == "ATTEMPT"
+                            for event in events))
+        self.assertTrue(any(event["action"] == "LOCAL_ARTIFACT_EXPORT"
+                            and event["outcome"] == "SUCCESS"
+                            for event in events))
+        self.assertTrue(all(event["source_fingerprint"] == ""
+                            for event in events))
+
+    def test_audit_unavailable_blocks_new_export_before_file_write(self):
+        self.store.approve(self.pid)
+        self.store.advance(self.pid)
+        self.store.synthesize_report(self.pid)
+        self.audit._blocked = True  # CI-only injected security-ledger failure.
+        status, body = self.post({"plan_id": self.pid})
+        self.assertEqual(503, status)
+        self.assertEqual("security_audit_restart_required", body["error"])
+        self.assertFalse(self.exporter.root.exists())
 
 
 if __name__ == "__main__":
