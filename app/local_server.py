@@ -21,7 +21,8 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
-from local_document_analysis import analyze_local_document, LocalDocumentError
+from local_document_analysis import (analyze_local_document, LocalDocumentError,
+                                     validate_document)
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan)
 from local_agent_github_reader import AllowedGitHubIssuesReader
@@ -376,6 +377,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         or set(data) != {"filename", "content", "question", "model"}
                         or any(type(data[key]) is not str for key in data)):
                     self._send(422, {"error": "invalid_local_document_request"})
+                    return
+                # Preflight before any model callback (including test adapters).
+                try:
+                    validate_document(data["filename"], data["content"],
+                                      data["question"], data["model"])
+                except LocalDocumentError as exc:
+                    err = str(exc)
+                    self._send(413 if err == "local_document_too_large" else 422,
+                               {"error": err})
                     return
                 if not agent_gate.acquire(blocking=False):
                     self._send(429, {"error": "local_agent_busy"})
