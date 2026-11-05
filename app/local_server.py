@@ -744,8 +744,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                     selected_memory_ids)
                                 context = [{"id": c["id"], "text": c["text"]}
                                            for c in cards]
-                                refs = [{"id": c["id"], "revision": c["revision"]}
-                                        for c in cards]
+                                refs = [{"id": c["id"], "revision": c["revision"],
+                                         "digest": c["digest"]} for c in cards]
                                 proposal = local_agent_planner(
                                     data["goal"], data["model"], memory_context=context)
                                 outcome = local_agent_plan_store.create(
