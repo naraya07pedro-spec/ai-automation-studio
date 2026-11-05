@@ -6,6 +6,7 @@ business actions, no credentials, no transcript persistence. Standard library.
 import argparse
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+import errno
 import json
 import sys
 from urllib.error import HTTPError, URLError
@@ -95,6 +96,13 @@ def execute_tool(name, args):
     raise AgentError("tool_not_allowed")
 
 
+def _connection_refused(error):
+    """Distinguish definite connect refusal from uncertain midstream failure."""
+    return (isinstance(error, ConnectionRefusedError)
+            or (isinstance(error, OSError)
+                and getattr(error, "errno", None) == errno.ECONNREFUSED))
+
+
 def ollama_transport(payload, *, timeout_seconds=25, opener=None):
     """Fixed loopback, bounded timeout, no redirects/proxies or retries.
 
@@ -120,13 +128,21 @@ def ollama_transport(payload, *, timeout_seconds=25, opener=None):
         # Includes rejected redirects: do not follow or expose their URLs.
         raise AgentError("local_model_unavailable") from None
     except URLError as exc:
-        if isinstance(getattr(exc, "reason", None), TimeoutError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, TimeoutError):
             raise AgentError("local_model_timeout") from None
-        raise AgentError("local_model_unavailable") from None
+        if _connection_refused(reason):
+            # The loopback TCP connection was refused before HTTP dispatch.
+            raise AgentError("local_model_unavailable") from None
+        # A reset, aborted stream, broken pipe or otherwise unknown URL
+        # failure might occur AFTER the model began processing its POST.
+        raise AgentError("local_model_transport_uncertain") from None
     except TimeoutError:
         raise AgentError("local_model_timeout") from None
-    except OSError:
-        raise AgentError("local_model_unavailable") from None
+    except OSError as exc:
+        if _connection_refused(exc):
+            raise AgentError("local_model_unavailable") from None
+        raise AgentError("local_model_transport_uncertain") from None
     if len(raw) > MAX_RESPONSE_BYTES:
         raise AgentError("model_response_too_large")
     try:
