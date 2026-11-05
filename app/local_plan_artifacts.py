@@ -143,6 +143,11 @@ class LocalPlanArtifactExporter:
 
     @staticmethod
     def _matching_existing(path, expected):
+        # On Windows O_NOFOLLOW may be unavailable: explicitly inspect the
+        # directory entry too, never accept a symlink as an identical output.
+        # This supplements O_NOFOLLOW on platforms that support it.
+        if path.is_symlink():
+            raise PlanArtifactError("artifact_target_conflict")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             fd = os.open(str(path), flags)
