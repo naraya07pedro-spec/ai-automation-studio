@@ -573,8 +573,8 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "Profile exactly the two columns from this synthetic selected CSV")
         self.page.locator("#agent-plan-csv-file").set_input_files({
             "name": "synthetic-ledger.csv", "mimeType": "text/csv",
-            "buffer": (b"revenue,stage\\n10,SYNTHETIC_PERSON_1\\n"
-                       b"20,SYNTHETIC_PERSON_2\\n,SYNTHETIC_PERSON_3\\n")
+            "buffer": (b"revenue,stage\n10,SYNTHETIC_PERSON_1\n"
+                       b"20,SYNTHETIC_PERSON_2\n,SYNTHETIC_PERSON_3\n")
         })
         self.page.locator("#agent-plan-propose").click()
         expect(self.page.locator("#agent-plan-status")).to_contain_text(
@@ -593,10 +593,11 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "APPROVED"')
         self.page.locator("#agent-plan-next").click()
-        expect(self.page.locator("#agent-plan-details")).to_contain_text(
-            '"status": "COMPLETED"')
-        expect(self.page.locator("#agent-plan-details")).to_contain_text(
-            '\\\"sum\\\": \\"30\\\"')
+        saved_profile = self.page.evaluate(
+            "() => JSON.parse(JSON.parse(document.querySelector("
+            + "'#agent-plan-details').textContent).completed_steps[0].output)")
+        self.assertEqual("30",
+                         saved_profile["column_stats"][0]["numeric_summary"]["sum"])
         self.assertNotIn("SYNTHETIC_PERSON_2",
                          self.page.locator("#agent-plan-details").inner_text())
         self.page.locator("#agent-plan-load").click()
