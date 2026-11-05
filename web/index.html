@@ -1525,7 +1525,7 @@ const readTimeoutStatus=async()=>{
   timeoutGuardUnresolved=report.timeout_unresolved===true;
   const inflight=report.checkpoint_state==="IN_FLIGHT";
   timeoutGuardMessage.textContent=timeoutGuardUnresolved
-   ?"Inference QUARANTINED after an Ollama timeout or interrupted request, including across server restarts. Inspect Ollama before acknowledging; no backend completion is verified."
+   ?"Inference QUARANTINED after an Ollama timeout, uncertain connection failure, or interrupted request, including across server restarts. Inspect Ollama before acknowledging; no backend completion is verified."
    :inflight
    ?"A model request is IN_FLIGHT. This durable checkpoint is not proof of completion; wait before further requests."
    :"No unresolved local timeout or model checkpoint is recorded by this server. This is NOT proof Ollama is idle.";
@@ -1622,6 +1622,7 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
    const guidance={
     "local_model_timeout":"The acceptance request exceeded 90 seconds. The model may still be loading or running; do not immediately repeat. Close memory-heavy programs, inspect Ollama locally, then retry manually.",
     "local_model_unavailable":"Check that Ollama is running and reachable at 127.0.0.1:11434. No cloud fallback exists.",
+    "local_model_transport_uncertain":"The Ollama connection was interrupted; the backend may still be processing. Inspect Ollama, then explicitly acknowledge before starting another inference.",
     "model_not_installed":"Use Find installed models and choose an exact installed model name.",
     "local_model_endpoint_missing":"The local Ollama endpoint or selected model was not found. Check the Ollama installation and model catalog.",
     "local_model_server_error":"Ollama returned a server error. Check its local logs and available RAM; resource exhaustion is only one possible cause.",
@@ -1638,7 +1639,7 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
    deviceAcceptanceStatus.textContent="Acceptance BLOCKED: "+code;
    deviceAcceptanceResult.textContent="No successful device acceptance. "+
      (guidance[code]||"Inspect the error code and the local Ollama process.");
-   if(code==="local_model_timeout"||code==="local_ollama_timeout_unresolved")readTimeoutStatus();
+   if(code==="local_model_timeout"||code==="local_model_transport_uncertain"||code==="local_ollama_timeout_unresolved")readTimeoutStatus();
   }
  }finally{
   deviceAcceptanceBusy=false;
