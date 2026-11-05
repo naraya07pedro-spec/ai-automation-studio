@@ -21,6 +21,7 @@ _GUIDANCE = {
     "model_catalog_too_large": "The local model catalog exceeded its size limit.",
     "model_not_installed": "Select an exact installed model name; no model is downloaded.",
     "local_model_timeout": "The model request timed out. Do not retry immediately; check whether Ollama is still running.",
+    "local_model_transport_uncertain": "The Ollama connection failed after its dispatch status became uncertain. Inspect the backend before another inference; do not retry automatically.",
     "local_model_endpoint_missing": "Inspect the local Ollama API and the selected model name.",
     "local_model_server_error": "Inspect local Ollama logs. This error alone does not establish RAM exhaustion.",
     "smoke_source_evidence_not_verified": "The model did not answer and cite the fixed evidence correctly.",
