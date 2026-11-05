@@ -26,6 +26,7 @@ from local_document_analysis import (analyze_local_document, LocalDocumentError,
 from local_multi_document_analysis import (analyze_multiple_documents,
                                            validate_multiple_documents)
 from local_agent_batch_runner import LocalAgentBatchRunner
+from local_plan_artifacts import LocalPlanArtifactExporter, PlanArtifactError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
                                     document_source_metadata, validated_document_set_snapshot,
@@ -72,7 +73,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_multi_document_analyzer=None,
                    local_device_acceptance=None,
                    local_device_preflight=None, model_safety_state=None,
-                   agent_memory_store=None):
+                   agent_memory_store=None, plan_artifact_exporter=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -300,6 +301,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                          and local_agent_planner is not None),
                                  "plan_handoffs": (local_agent_planner is not None
                                                    and local_agent_plan_store is not None),
+                                 "plan_artifact_export": (local_agent_planner is not None
+                                                          and local_agent_plan_store is not None
+                                                          and plan_artifact_exporter is not None),
                                  "plan_reports": (local_agent_planner is not None
                                                   and local_agent_plan_store is not None),
                                  "plan_documents": (local_agent_planner is not None
@@ -515,7 +519,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-cancel",
                                  "/api/local-agent-plan-resume",
                                  "/api/local-agent-plan-delete",
-                                 "/api/local-agent-plan-report"):
+                                 "/api/local-agent-plan-report",
+                                 "/api/local-agent-plan-export"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -792,6 +797,36 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except PlanError as exc:
                         self._send(422, {"error": str(exc)})
                         return
+                if self.path == "/api/local-agent-plan-export":
+                    if plan_artifact_exporter is None:
+                        self._send(403, {"error": "plan_artifact_export_disabled"})
+                        return
+                    if not self._audit_event("LOCAL_ARTIFACT_EXPORT", "ATTEMPT"):
+                        self._send(503, {"error": "security_audit_restart_required"})
+                        return
+                    try:
+                        snapshot = local_agent_plan_store.get(data["plan_id"])
+                        # Never accept a filename, directory or report body
+                        # through HTTP. The server owns both the source and sink.
+                        result = plan_artifact_exporter.export(snapshot)
+                        if not self._audit_event("LOCAL_ARTIFACT_EXPORT", "SUCCESS"):
+                            # File may exist. A retry is idempotent, never overwrite.
+                            self._send(503, {"error": "artifact_write_outcome_uncertain"})
+                        else:
+                            self._send(200, result)
+                    except PlanError as exc:
+                        self._send(404 if str(exc) == "plan_not_found" else
+                                   422 if str(exc).startswith("invalid_") else 503,
+                                   {"error": str(exc)})
+                    except PlanArtifactError as exc:
+                        err = str(exc)
+                        self._send(409 if err in ("artifact_requires_completed_plan",
+                                                  "artifact_requires_saved_report",
+                                                  "artifact_target_conflict",
+                                                  "artifact_report_invalid") else
+                                   422 if err == "artifact_too_large" else 503,
+                                   {"error": err})
+                    return
                 if self.path in ("/api/local-agent-plan-batch-start",
                                  "/api/local-agent-plan-batch-stop"):
                     try:
@@ -1227,7 +1262,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_agent_github_read=False,
                        enable_local_documents=False,
                        enable_multi_documents=False,
-                       enable_agent_memory=False):
+                       enable_agent_memory=False,
+                       enable_plan_artifacts=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1248,6 +1284,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("agent_plans_require_local_agent")
     if enable_agent_github_read and not enable_agent_plans:
         raise ValueError("github_plan_read_requires_agent_plans")
+    if enable_plan_artifacts and not enable_agent_plans:
+        raise ValueError("plan_artifacts_require_agent_plans")
     conversation = None
     plan_store = None
     memory_store = None
@@ -1295,7 +1333,10 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_device_preflight=(
                                check_local_device_preflight if enable_multi_documents else None),
                            model_safety_state=model_safety,
-                           agent_memory_store=memory_store))
+                           agent_memory_store=memory_store,
+                           plan_artifact_exporter=(
+                               LocalPlanArtifactExporter(home / "exports")
+                               if enable_plan_artifacts else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
@@ -1352,6 +1393,8 @@ def main(argv=None):
                         help="Opt in to 2-3 manually selected text files with bounded retrieval.")
     parser.add_argument("--enable-local-documents", action="store_true",
                         help="Separately opt into owner-selected, in-memory text file analysis.")
+    parser.add_argument("--enable-plan-artifacts", action="store_true",
+                        help="Allow explicit, write-once Markdown report export to the local owner workspace.")
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
@@ -1365,6 +1408,8 @@ def main(argv=None):
         parser.error("--enable-agent-plans requires --enable-local-agent")
     if args.enable_agent_github_read and not args.enable_agent_plans:
         parser.error("--enable-agent-github-read requires --enable-agent-plans")
+    if args.enable_plan_artifacts and not args.enable_agent_plans:
+        parser.error("--enable-plan-artifacts requires --enable-agent-plans")
     if args.enable_agent_history and not args.enable_local_agent:
         parser.error("--enable-agent-history also requires --enable-local-agent")
     home = Path.home() / ".ai-automation-studio"
@@ -1435,7 +1480,8 @@ def main(argv=None):
                            enable_agent_plans=args.enable_agent_plans,
                            enable_agent_github_read=args.enable_agent_github_read,
                            enable_local_documents=args.enable_local_documents,
-                           enable_multi_documents=args.enable_multi_documents)
+                           enable_multi_documents=args.enable_multi_documents,
+                           enable_plan_artifacts=args.enable_plan_artifacts)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")

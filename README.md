@@ -3,6 +3,12 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Owner-approved local task deliverable files (Slice 74)
+
+After an explicitly approved read-only plan has completed and the owner has separately generated its evidence-linked report, the workbench can save that **existing report** to an actual local Markdown file without re-invoking a model. Start with `--enable-local-agent --enable-agent-plans --enable-plan-artifacts`, then use **Save .md into local workspace** and accept the exact write destination in the new native confirmation.
+
+The only writable destination is the server's fixed `~/.ai-automation-studio/exports/local-agent-report-<plan-id>.md` workspace. The browser supplies only the saved plan ID; the server validates the report's quoted evidence, escapes untrusted Markdown, writes once without overwriting existing files, and returns an SHA-256 receipt. Identical export repeats are read-only/idempotent. The security audit records export attempt/success without report contents. There is no arbitrary file writing, automatic export, model-directed file path, cloud upload, email, or OS service. **Files are plaintext, and model interpretations are unverified**. Windows/Ollama owner-device acceptance remains deferred. [Full workflow and security contract](docs/LOCAL_PLAN_ARTIFACT_EXPORT_V1.md).
+
 ## Server-owned execution of reviewed plans (Slice 73)
 
 After reviewing and explicitly approving a bounded, read-only 1–3-step task plan, the owner can click **Run reviewed steps on local server** and confirm the exact remaining tool names and arguments. One server worker executes steps sequentially using the existing model gate, records each result in the SQLite ledger, and continues while the **local server remains alive even if the browser closes**. Reload the plan ID for live saved status or use **Request server stop after current step** to prevent later steps.

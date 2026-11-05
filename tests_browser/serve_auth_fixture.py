@@ -18,6 +18,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_memory import LocalAgentMemory
 from local_agent_task_plans import LocalAgentPlanStore
+from local_plan_artifacts import LocalPlanArtifactExporter
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_agent import AgentError
 from local_document_analysis import analyze_local_document
@@ -182,6 +183,8 @@ def main():
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
                        local_agent_plan_store=plans,
+                       plan_artifact_exporter=LocalPlanArtifactExporter(
+                           Path(home.name) / "exports"),
                        local_document_analyzer=fixture_document,
                        local_multi_document_analyzer=fixture_multi_document,
                        local_device_acceptance=fixture_device_acceptance,
