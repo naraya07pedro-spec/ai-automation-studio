@@ -545,6 +545,48 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "Session locked")
         expect(self.page.locator("#agent-plan-report-download")).to_be_disabled()
 
+    def test_cross_step_numeric_handoff_requires_click_and_reloads_lineage(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Handoff: multiply 7 by 8, then double the stored result")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"from_step": 1')
+        self.assertNotIn('"output": "112"',
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"verified_numeric_handoff_lineage": []')
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("NEXT_READY")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "56"')
+        self.assertNotIn('"output": "112"',
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("COMPLETED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "112"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"source_sha256"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"value": "56"')
+        self.page.locator("#agent-plan-load").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "112"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"source_tool": "calculate"')
+        self.page.locator("#agent-plan-report-generate").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "## Audited numeric handoffs")
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "step 1 calculate.output = 56")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "Session locked")
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")

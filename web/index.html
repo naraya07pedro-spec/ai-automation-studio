@@ -318,6 +318,7 @@ aas:timeline:urgent
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
 <p class="muted">The local model can propose at most three read-only steps. Nothing executes when a plan is created or approved. Review every tool argument, then trigger execution one step at a time.</p>
+<p class="muted">Typed cross-step handoffs: a later calculator can reference the saved numeric result of an earlier calculator, or a numeric count from an explicitly authorized public GitHub issue triage. Example goal: “Multiply 7 by 8, then multiply the saved result by 2.” Each reference must point backward; the exact resolved numbers and source fingerprints are shown in the plan audit. No arbitrary text or document content is passed as a command.</p>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
 <p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
@@ -1286,6 +1287,19 @@ const buildPlanReportMarkdown=plan=>{
    "> "+f.quote.replace(/\n/g,"\n> "),
    "AI interpretation (unverified): "+f.interpretation,"");
  }
+ if((plan.handoffs||[]).length){
+  lines.push("## Audited numeric handoffs");
+  for(const entry of plan.handoffs){
+   lines.push("Step "+entry.step_index+" resolved calculator args: "+
+    JSON.stringify(entry.resolved_args));
+   for(const binding of entry.bindings){
+    lines.push("  "+binding.operand+" ← step "+binding.from_step+" "+
+      binding.source_tool+"."+binding.field+" = "+binding.value+
+      " (source SHA-256 "+binding.source_sha256+")");
+   }
+  }
+  lines.push("");
+ }
  lines.push("## Limits",report.limits,
   "The report is from already stored step outputs; no new tools or external fetches.");
  return lines.join("\n");
@@ -1303,6 +1317,7 @@ const renderPlan=plan=>{
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
+  verified_numeric_handoff_lineage:plan.handoffs||[],
   selected_memory_refs:plan.memory_refs||[],
   selected_document:plan.document_source||null,
   selected_document_set:plan.document_set_sources||[],
@@ -1440,6 +1455,8 @@ const planRequest=async(path,body)=>{
   if(rev===agentPlanRevision&&operatorCsrf)
    planStatus.textContent=error.message==="memory_context_changed"
     ?"Memory note changed or was deleted since proposal. Cancel this plan and create a new plan using current notes; old approvals are not reusable."
+    :error.message==="plan_handoff_invalid_source"
+    ?"Previous numeric source is missing, malformed or outside calculator limits. No next step was executed. Cancel the plan or review the saved source outputs before replanning."
     :"Plan request failed: "+error.message;
  }finally{
   if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}

@@ -94,6 +94,14 @@ def main():
             return {"model": model, "goal": goal,
                     "steps": [{"tool":"local_document_question",
                                "args":{"question":"When does the service desk open?"}}]}
+        if "handoff" in goal.lower():
+            return {"model": model, "goal": goal,
+                    "steps": [
+                        {"tool":"calculate", "args":{
+                            "a":"7","b":"8","operation":"multiply"}},
+                        {"tool":"calculate", "args":{
+                            "a":{"from_step":1,"field":"output"},
+                            "b":"2","operation":"multiply"}}]}
         if "analy" in goal.lower():
             return {"model": model, "goal": goal,
                     "steps": [{"tool": "github_issue_analysis",

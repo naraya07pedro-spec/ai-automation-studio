@@ -292,6 +292,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                      and local_device_preflight is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
+                                 "plan_handoffs": (local_agent_planner is not None
+                                                   and local_agent_plan_store is not None),
                                  "plan_reports": (local_agent_planner is not None
                                                   and local_agent_plan_store is not None),
                                  "plan_documents": (local_agent_planner is not None
@@ -843,7 +845,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 else 409 if err in ("plan_state_conflict", "plan_capacity_reached",
                                                      "public_source_permission_changed",
                                                      "memory_context_changed",
-                                                     "plan_report_requires_completed")
+                                                     "plan_report_requires_completed",
+                                                     "plan_handoff_invalid_source")
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:
