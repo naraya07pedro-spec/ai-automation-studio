@@ -5,6 +5,7 @@ These tests do NOT run Ollama. They verify the exact durability boundary.
 import http.client
 from http.server import ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -86,8 +87,16 @@ class ModelSafetyPersistenceTests(unittest.TestCase):
 
     def test_failure_to_open_corrupt_or_unsafe_state_never_resets(self):
         self.filename.write_bytes(b"not SQLite")
+        if os.name == "posix":
+            # The corrupt-file case must pass the independent permission gate.
+            self.filename.chmod(0o600)
         with self.assertRaisesRegex(ModelSafetyError, "model_safety_storage_unavailable"):
             LocalModelSafetyState(self.filename)
+        if os.name == "posix":
+            self.filename.chmod(0o644)
+            with self.assertRaisesRegex(ModelSafetyError,
+                                        "insecure_model_safety_permissions"):
+                LocalModelSafetyState(self.filename)
         self.filename.unlink()
         actual = self.filename.with_name("actual.sqlite3")
         actual.write_text("not a database")
