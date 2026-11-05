@@ -801,12 +801,19 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     if plan_artifact_exporter is None:
                         self._send(403, {"error": "plan_artifact_export_disabled"})
                         return
+                    if not self._audit_event("LOCAL_ARTIFACT_EXPORT", "ATTEMPT"):
+                        self._send(503, {"error": "security_audit_restart_required"})
+                        return
                     try:
                         snapshot = local_agent_plan_store.get(data["plan_id"])
                         # Never accept a filename, directory or report body
                         # through HTTP. The server owns both the source and sink.
                         result = plan_artifact_exporter.export(snapshot)
-                        self._send(200, result)
+                        if not self._audit_event("LOCAL_ARTIFACT_EXPORT", "SUCCESS"):
+                            # File may exist. A retry is idempotent, never overwrite.
+                            self._send(503, {"error": "artifact_write_outcome_uncertain"})
+                        else:
+                            self._send(200, result)
                     except PlanError as exc:
                         self._send(404 if str(exc) == "plan_not_found" else
                                    422 if str(exc).startswith("invalid_") else 503,
