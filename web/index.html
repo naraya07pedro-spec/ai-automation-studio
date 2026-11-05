@@ -322,6 +322,9 @@ aas:timeline:urgent
 <p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
 <textarea id="agent-plan-goal" maxlength="1200" rows="3" style="width:100%;min-height:90px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="For example, calculate 75 × 28, then tell me the current UTC time."></textarea></div>
+<div class="field"><label for="agent-plan-memory-ids">Memory IDs for THIS proposed task plan (optional, max 3, comma-separated)</label>
+<input id="agent-plan-memory-ids" maxlength="105" autocomplete="off" placeholder="e.g. project_goal,working_rules" disabled>
+<div class="muted">The owner-selected notes are unverified context for proposing steps, not new permissions. The reviewed plan freezes their IDs, versions and content fingerprints. Changed/deleted notes block later approval and step execution.</div></div>
 <div class="core-actions" style="margin:12px 0">
 <button id="agent-plan-propose" type="button" class="primary" disabled>Propose a plan (no execution)</button>
 <button id="agent-plan-list" type="button" class="secondary" disabled>List saved plans</button>
@@ -852,14 +855,15 @@ const memoryButtons=["local-memory-list-button","local-memory-load-button",
  "local-memory-save-button","local-memory-delete-button"];
 const memoryIdValid=id=>/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id);
 const memoryRevisionFor=id=>localMemoryCards.find(c=>c.id===id)?.revision||0;
-const selectedMemoryIds=()=>{
- const raw=memoryUseField.value.trim();
+const parseMemoryIds=raw=>{
+ raw=raw.trim();
  if(!raw)return [];
  const ids=raw.split(",").map(x=>x.trim());
  if(ids.length>3||new Set(ids).size!==ids.length||ids.some(x=>!memoryIdValid(x)))
   throw Error("invalid_memory_selection");
  return ids;
 };
+const selectedMemoryIds=()=>parseMemoryIds(memoryUseField.value);
 const refreshMemoryButtons=()=>{
  const on=localAgentMemoryEnabled&&!!operatorCsrf&&!memoryBusy;
  for(const id of memoryButtons)$(id).disabled=!on;
@@ -1135,6 +1139,8 @@ const refreshLocalAgent=async()=>{
     :"Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.";
   refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
+  // Plan memory only when both owner-curated memory and task planning are opted in.
+  planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
    ?"GitHub read-only tool enabled. Only operator-allowed public repositories can be used; each plan still needs approval and a separate next-step click."
    :"GitHub agent reads disabled. Start with --enable-agent-github-read and allow the repository under Public Source Permissions.";
@@ -1221,6 +1227,7 @@ let agentPlanBusy=false;
 let agentPlanRevision=0;
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
+const planMemoryField=$("agent-plan-memory-ids");
 const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
@@ -1234,7 +1241,9 @@ const renderPlan=plan=>{
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,goal:plan.goal,model:plan.model,
-  steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index
+  steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
+  selected_memory_refs:plan.memory_refs||[],
+  memory_policy:"OWNER_CURATED_UNVERIFIED · subject to revision and content checks"
  },null,2):"No selected plan.";
  const reports=[];
  for(const item of (plan?.results||[])){
@@ -1298,6 +1307,7 @@ const renderPlan=plan=>{
 };
 const refreshPlanButtons=()=>{
  const ready=agentPlanEnabled&&operatorCsrf&&!agentPlanBusy;
+ planMemoryField.disabled=!ready||!localAgentMemoryEnabled;
  const id=planIdInput.value.trim();
  const same=selectedPlan&&selectedPlan.plan_id===id;
  const status=same?selectedPlan.status:null;
@@ -1341,7 +1351,9 @@ const planRequest=async(path,body)=>{
    :"Plan status: "+result.status+". No background execution.";
  }catch(error){
   if(rev===agentPlanRevision&&operatorCsrf)
-   planStatus.textContent="Plan request failed: "+error.message;
+   planStatus.textContent=error.message==="memory_context_changed"
+    ?"Memory note changed or was deleted since proposal. Cancel this plan and create a new plan using current notes; old approvals are not reusable."
+    :"Plan request failed: "+error.message;
  }finally{
   if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
  }
@@ -1353,7 +1365,17 @@ $("agent-plan-propose").addEventListener("click",()=>{
   planStatus.textContent="Enter a goal (max 1,200 characters) and an installed model above.";
   return;
  }
- planRequest("/api/local-agent-plan-create",{goal,model});
+ let selectedIds=[];
+ try{selectedIds=parseMemoryIds(planMemoryField.value);}catch(error){
+  planStatus.textContent="Invalid plan memory IDs. Use 1-3 distinct lowercase IDs.";
+  return;
+ }
+ if(selectedIds.length&&!localAgentMemoryEnabled){
+  planStatus.textContent="Selected memory is not enabled for this task plan.";
+  return;
+ }
+ planRequest("/api/local-agent-plan-create",{goal,model,
+  ...(selectedIds.length?{memory_ids:selectedIds}:{})});
 });
 $("agent-plan-list").addEventListener("click",async()=>{
  if(!agentPlanEnabled||agentPlanBusy||!operatorCsrf)return;
@@ -1853,6 +1875,8 @@ const lockOperatorUI=message=>{
  $("local-memory-id-list").replaceChildren();
  refreshMemoryButtons();
  agentPlanEnabled=false;
+ planMemoryField.value="";
+ planMemoryField.disabled=true;
  agentPlanBusy=false;
  agentPlanRevision++;
  planIdInput.value="";
