@@ -95,15 +95,37 @@ def execute_tool(name, args):
     raise AgentError("tool_not_allowed")
 
 
-def ollama_transport(payload):
-    """Fixed loopback only. Bypass environment proxy; cap response memory and time."""
-    opener = safe_local_opener()
+def ollama_transport(payload, *, timeout_seconds=25, opener=None):
+    """Fixed loopback, bounded timeout, no redirects/proxies or retries.
+
+    Do not automatically retry chat POST: an inference may still be running
+    when the client times out. Explicit user action is required to try again.
+    """
+    if (type(timeout_seconds) is not int
+            or not 5 <= timeout_seconds <= 90):
+        raise AgentError("invalid_local_model_timeout")
+    client = opener if opener is not None else safe_local_opener()
     req = Request(OLLAMA_URL, data=json.dumps(payload).encode("utf-8"),
                   headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with opener.open(req, timeout=25) as resp:
+        with client.open(req, timeout=timeout_seconds) as resp:
             raw = resp.read(MAX_RESPONSE_BYTES + 1)
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+    except HTTPError as exc:
+        if exc.code in (408, 504):
+            raise AgentError("local_model_timeout") from None
+        if exc.code == 404:
+            raise AgentError("local_model_endpoint_missing") from None
+        if 500 <= exc.code <= 599:
+            raise AgentError("local_model_server_error") from None
+        # Includes rejected redirects: do not follow or expose their URLs.
+        raise AgentError("local_model_unavailable") from None
+    except URLError as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise AgentError("local_model_timeout") from None
+        raise AgentError("local_model_unavailable") from None
+    except TimeoutError:
+        raise AgentError("local_model_timeout") from None
+    except OSError:
         raise AgentError("local_model_unavailable") from None
     if len(raw) > MAX_RESPONSE_BYTES:
         raise AgentError("model_response_too_large")
