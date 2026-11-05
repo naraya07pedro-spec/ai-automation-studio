@@ -788,6 +788,14 @@ class LocalAgentPlanStore:
                             raise PlanError("public_source_permission_changed") from None
                 snapshot = None
                 document_set = None
+                selected_csv = None
+                if step["tool"] == CSV_PROFILE_TOOL:
+                    if self.csv_profiler is None or old["csv_source"] is None:
+                        raise PlanError("plan_csv_unavailable")
+                    selected_csv = self._stored_csv(plan_id)
+                    if any(col not in selected_csv["headers"]
+                           for col in step["args"]["columns"]):
+                        raise PlanError("plan_csv_columns_unavailable")
                 if step["tool"] == MULTI_DOCUMENT_TOOL:
                     if (self.multi_document_analyzer is None
                             or not old["document_set_sources"]):
@@ -809,7 +817,23 @@ class LocalAgentPlanStore:
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                if step["tool"] == MULTI_DOCUMENT_TOOL:
+                if step["tool"] == CSV_PROFILE_TOOL:
+                    result = self.csv_profiler(selected_csv, step["args"]["columns"])
+                    if (type(result) is not dict
+                            or result.get("status") != "CSV_PROFILE_READ_ONLY"
+                            or result.get("source") != "OWNER_SELECTED_CSV_SNAPSHOT"
+                            or result.get("filename") != selected_csv["filename"]
+                            or result.get("sha256") != selected_csv["sha256"]
+                            or result.get("row_count") != len(selected_csv["rows"])
+                            or result.get("external_write_count") != 0
+                            or result.get("model_calls") != 0
+                            or type(result.get("column_stats")) is not list
+                            or [s.get("column") for s in result["column_stats"]
+                                if type(s) is dict] != step["args"]["columns"]):
+                        raise PlanError("plan_csv_result_invalid")
+                    output = json.dumps(result, ensure_ascii=False,
+                                        separators=(",", ":"))
+                elif step["tool"] == MULTI_DOCUMENT_TOOL:
                     selected = [{"filename": item["filename"],
                                  "content": item["content"]}
                                 for item in document_set]
