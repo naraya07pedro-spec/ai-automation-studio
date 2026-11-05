@@ -185,5 +185,43 @@ class MultiDocumentTests(unittest.TestCase):
                   transport=no_time,memory=lambda:None)
 
 
+    def test_wrong_time_cannot_hide_behind_valid_quote(self):
+        def incorrect(payload):
+            return {"message":{"content":json.dumps({
+                "answer":"The meeting begins at 19:15 WIB.",
+                "insufficient_evidence":False,
+                "citations":[{"chunk_id":"F2C1","quote":QUOTE}]
+            })}}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "multi_document_numeric_evidence_missing"):
+            analyze_multiple_documents(DOCUMENTS,QUESTION,"fixture:model",
+                                       transport=incorrect)
+
+    def test_uncited_number_is_rejected_even_if_elsewhere_in_selected_passage(self):
+        def cite_words_only(payload):
+            return {"message":{"content":json.dumps({
+                "answer":"The meeting starts at 18:30 WIB.",
+                "insufficient_evidence":False,
+                "citations":[{"chunk_id":"F2C1",
+                              "quote":"Maintenance review meeting"}]
+            })}}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "multi_document_numeric_evidence_missing"):
+            analyze_multiple_documents(DOCUMENTS,QUESTION,"fixture:model",
+                                       transport=cite_words_only)
+
+    def test_extra_unsupported_time_in_otherwise_correct_answer_rejected(self):
+        def mixed(payload):
+            return {"message":{"content":json.dumps({
+                "answer":"Starts at 18:30 WIB, or possibly 09:00 WIB.",
+                "insufficient_evidence":False,
+                "citations":[{"chunk_id":"F2C1","quote":QUOTE}]
+            })}}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "multi_document_numeric_evidence_missing"):
+            analyze_multiple_documents(DOCUMENTS,QUESTION,"fixture:model",
+                                       transport=mixed)
+
+
 if __name__=="__main__":
     unittest.main()
