@@ -136,13 +136,17 @@ def validate_memory_refs(refs):
     if refs is None or refs == []:
         return []
     if (type(refs) is not list or not 1 <= len(refs) <= MAX_SELECTED_MEMORY
-            or any(type(r) is not dict or set(r) != {"id", "revision"}
+            or any(type(r) is not dict or set(r) != {"id", "revision", "digest"}
                    or not valid_memory_id(r["id"])
                    or type(r["revision"]) is not int
-                   or not 1 <= r["revision"] <= 1000001 for r in refs)
+                   or not 1 <= r["revision"] <= 1000001
+                   or type(r["digest"]) is not str
+                   or re.fullmatch(r"[0-9a-f]{64}", r["digest"]) is None
+                   for r in refs)
             or len({r["id"] for r in refs}) != len(refs)):
         raise PlanError("invalid_plan_memory_refs")
-    return [{"id": r["id"], "revision": r["revision"]} for r in refs]
+    return [{"id": r["id"], "revision": r["revision"],
+             "digest": r["digest"]} for r in refs]
 
 
 def _require_id(value):
