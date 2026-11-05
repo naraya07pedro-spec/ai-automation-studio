@@ -341,7 +341,7 @@ aas:timeline:urgent
 <section class="panel" id="local-multidoc-panel" aria-label="Selected multi-document research" style="margin:22px 0">
 <div class="kicker">MULTIPLE LOCAL DOCUMENTS · EXPLICIT SELECTION</div>
 <h2>Ask across 2–3 selected documents</h2>
-<p class="muted">Choose two or three UTF-8 .txt/.md files, each up to 2,500 bytes and 6,000 bytes total. The server selects up to five short passages by matching question words; only those passages are sent to local Ollama. No folders are scanned, indexed, or saved.</p>
+<p class="muted">Choose two or three UTF-8 .txt/.md files, each up to 2,500 bytes and 6,000 bytes total. The server selects up to five overlapping passages using normalized question words, and displays why each was selected. Only selected passages are sent to local Ollama. Keyword overlap is not semantic confidence. No folders are scanned, indexed, or saved.</p>
 <div class="field"><label for="local-multidoc-files">Selected source documents (2–3)</label>
 <input id="local-multidoc-files" type="file" accept=".txt,.md,text/plain,text/markdown" multiple disabled></div>
 <div class="field"><label for="local-multidoc-question">Question about the selected documents</label>
@@ -1381,6 +1381,7 @@ multiButton.addEventListener("click",async()=>{
    "Source files: "+(result.selected_files||[]).join(", "),
    "Retrieval: "+result.retrieval+"; selected passages: "+result.selected_passages,
    "Local model calls: "+result.model_calls,
+   "Retrieval limits: "+(result.retrieval_limitations||"Lexical selection only."),
    "Answer (interpretation NOT independently verified): "+result.answer,
    "Insufficient evidence: "+(result.insufficient_evidence?"yes":"no"),
    "Exact source quotes:"
@@ -1388,6 +1389,15 @@ multiButton.addEventListener("click",async()=>{
   for(const c of result.citations||[]){
    lines.push(c.filename+" ["+c.chunk_id+"] chars "+
      c.start_char+"–"+c.end_char+": "+c.quote);
+  }
+  lines.push("", "Why these passages were selected (lexical match only):");
+  if(!(result.retrieval_evidence||[]).length)
+   lines.push("No keyword-matched passages. This does not prove the answer is absent.");
+  for(const hit of result.retrieval_evidence||[]){
+   lines.push(hit.filename+" ["+hit.chunk_id+"] chars "+
+     hit.start_char+"–"+hit.end_char+
+     " | matched words: "+(hit.matched_terms||[]).join(", "));
+   lines.push("Source preview: "+hit.source_preview);
   }
   lines.push("No application document history or external writes.");
   multiResult.textContent=lines.join("\n");
