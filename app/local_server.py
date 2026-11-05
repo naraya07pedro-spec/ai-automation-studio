@@ -25,6 +25,7 @@ from local_document_analysis import (analyze_local_document, LocalDocumentError,
                                      validate_document)
 from local_multi_document_analysis import (analyze_multiple_documents,
                                            validate_multiple_documents)
+from local_agent_batch_runner import LocalAgentBatchRunner
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
                                     document_source_metadata, validated_document_set_snapshot,
@@ -90,6 +91,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
     agent_state_lock = threading.Lock()
+    batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
+                                        agent_gate, agent_state_lock)
+                    if local_agent_plan_store is not None else None)
     public_github = PublicGitHubReadOnlyIntake(core, batch,
                                                fetcher=github_fetcher,
                                                clock=github_clock,
@@ -292,6 +296,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                      and local_device_preflight is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
+                                 "plan_server_batches": (batch_runner is not None
+                                                         and local_agent_planner is not None),
                                  "plan_handoffs": (local_agent_planner is not None
                                                    and local_agent_plan_store is not None),
                                  "plan_reports": (local_agent_planner is not None
@@ -504,6 +510,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-create",
                                  "/api/local-agent-plan-approve",
                                  "/api/local-agent-plan-next",
+                                 "/api/local-agent-plan-batch-start",
+                                 "/api/local-agent-plan-batch-stop",
                                  "/api/local-agent-plan-cancel",
                                  "/api/local-agent-plan-resume",
                                  "/api/local-agent-plan-delete",
@@ -784,6 +792,23 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except PlanError as exc:
                         self._send(422, {"error": str(exc)})
                         return
+                if self.path in ("/api/local-agent-plan-batch-start",
+                                 "/api/local-agent-plan-batch-stop"):
+                    try:
+                        outcome = (batch_runner.start(data["plan_id"])
+                                   if self.path.endswith("batch-start")
+                                   else batch_runner.stop(data["plan_id"]))
+                        self._send(200, outcome)
+                    except PlanError as exc:
+                        err = str(exc)
+                        self._send(429 if err == "local_agent_busy" else
+                                   422 if err.startswith("invalid_") else
+                                   404 if err == "plan_not_found" else
+                                   409 if err in ("plan_state_conflict",
+                                                  "memory_context_changed",
+                                                  "plan_batch_active") else 503,
+                                   {"error": err})
+                    return
                 if not self._enter_agent_gate(allow_uncertain=(not creating and
                         self.path not in ("/api/local-agent-plan-next",
                                           "/api/local-agent-plan-report"))):
