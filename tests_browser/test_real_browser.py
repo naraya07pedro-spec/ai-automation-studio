@@ -90,6 +90,33 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_agent_conversations_are_isolated_and_selectively_deleted(self):
+        expect(self.page.locator("#local-agent-conversation")).to_be_enabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-agent-remember").check()
+        self.page.locator("#local-agent-conversation").fill("work-50")
+        self.page.locator("#local-agent-prompt").fill("WORK50 synthetic prompt")
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-status")).to_contain_text("Tools: calculate")
+        self.page.locator("#local-agent-conversation").fill("personal-50")
+        self.page.locator("#local-agent-prompt").fill("PERSONAL50 synthetic prompt")
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-status")).to_contain_text("Tools: calculate")
+        self.page.locator("#local-agent-conversation").fill("work-50")
+        self.page.locator("#local-agent-history-refresh").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "WORK50 synthetic prompt")
+        self.assertNotIn("PERSONAL50",self.page.locator(
+            "#local-agent-history-display").inner_text())
+        self.page.locator("#local-agent-history-clear").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "No saved turns")
+        self.page.locator("#local-agent-conversation").fill("personal-50")
+        self.page.locator("#local-agent-history-refresh").click()
+        expect(self.page.locator("#local-agent-history-display")).to_contain_text(
+            "PERSONAL50 synthetic prompt")
+        self.page.locator("#local-agent-history-clear").click()
+
     def test_agent_history_opt_in_visible_and_deletable(self):
         expect(self.page.locator("#local-agent-remember")).to_be_enabled()
         self.page.locator("#local-agent-history-clear").click()
