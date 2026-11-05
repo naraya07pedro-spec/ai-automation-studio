@@ -1528,7 +1528,7 @@ const readTimeoutStatus=async()=>{
    ?"Inference QUARANTINED after an Ollama timeout or interrupted request, including across server restarts. Inspect Ollama before acknowledging; no backend completion is verified."
    :inflight
    ?"A model request is IN_FLIGHT. This durable checkpoint is not proof of completion; wait before further requests."
-   :"No unresolved model checkpoint is recorded by this server. This is NOT proof Ollama is idle.";
+   :"No unresolved local timeout or model checkpoint is recorded by this server. This is NOT proof Ollama is idle.";
  }catch(error){
   if(revision===timeoutGuardRevision&&operatorCsrf){
    timeoutGuardMessage.textContent="Timeout safety status unavailable: "+error.message;
