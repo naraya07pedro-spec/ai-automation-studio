@@ -1478,7 +1478,7 @@ $("agent-plan-propose").addEventListener("click",async()=>{
   const total=multiChoice.reduce((n,f)=>n+f.size,0);
   if(multiChoice.length<2||multiChoice.length>3||total>6000||
      multiChoice.some(f=>f.size===0||f.size>2500||
-       !/^[\\w.() -]{1,80}\\.(txt|md)$/i.test(f.name)||
+       !/^[\w.() -]{1,80}\.(txt|md)$/i.test(f.name)||
        names.has(f.name.toLowerCase())||!names.add(f.name.toLowerCase()))){
    planStatus.textContent="Select 2–3 distinct nonempty .txt/.md files, maximum 2,500 bytes each and 6,000 bytes total.";
    return;
