@@ -329,6 +329,10 @@ aas:timeline:urgent
 <input id="agent-plan-document-file" type="file" accept=".txt,.md,text/plain,text/markdown" disabled>
 <div class="muted">Only the file you select in this browser is read; no folder scanning. The full selected snapshot is persisted in your local plaintext task-plan SQLite until the plan is deleted. Avoid passwords, private records and customer data.</div></div>
 <div class="field"><label><input id="agent-plan-document-consent" type="checkbox" disabled> I explicitly authorize storing this selected document text in this task plan for reviewed read-only analysis.</label></div>
+<div class="field"><label for="agent-plan-multi-files">Or select 2–3 short documents to compare in THIS task plan (.txt/.md, up to 2,500 bytes each; 6,000 bytes total)</label>
+<input id="agent-plan-multi-files" type="file" multiple accept=".txt,.md,text/plain,text/markdown" disabled>
+<div class="muted">Choose either ONE document above OR 2–3 documents here, never both. These snapshots are stored as plaintext local SQLite only after explicit consent and a relevant reviewed plan step. No folder scanning, PDF reading, cloud upload or automatic execution.</div></div>
+<div class="field"><label><input id="agent-plan-multi-consent" type="checkbox" disabled> I explicitly authorize storing all selected comparison files in this local task plan.</label></div>
 <div class="core-actions" style="margin:12px 0">
 <button id="agent-plan-propose" type="button" class="primary" disabled>Propose a plan (no execution)</button>
 <button id="agent-plan-list" type="button" class="secondary" disabled>List saved plans</button>
@@ -1152,6 +1156,7 @@ const refreshLocalAgent=async()=>{
   refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
   agentPlanDocumentsEnabled=agentPlanEnabled&&data.plan_documents===true;
+  agentPlanMultiDocumentsEnabled=agentPlanEnabled&&data.plan_multi_documents===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
@@ -1237,6 +1242,7 @@ localAgentSend.addEventListener("click",async()=>{
 // Slice 52: every effectful transition requires its own owner-authorized button.
 let agentPlanEnabled=false;
 let agentPlanDocumentsEnabled=false;
+let agentPlanMultiDocumentsEnabled=false;
 let agentPlanBusy=false;
 let agentPlanRevision=0;
 let selectedPlan=null;
@@ -1244,6 +1250,8 @@ const planStatus=$("agent-plan-status");
 const planMemoryField=$("agent-plan-memory-ids");
 const planDocumentField=$("agent-plan-document-file");
 const planDocumentConsent=$("agent-plan-document-consent");
+const planMultiFiles=$("agent-plan-multi-files");
+const planMultiConsent=$("agent-plan-multi-consent");
 const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
@@ -1297,6 +1305,7 @@ const renderPlan=plan=>{
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
   selected_memory_refs:plan.memory_refs||[],
   selected_document:plan.document_source||null,
+  selected_document_set:plan.document_set_sources||[],
   memory_policy:"OWNER_CURATED_UNVERIFIED · subject to revision and content checks"
  },null,2):"No selected plan.";
  const reports=[];
@@ -1364,6 +1373,8 @@ const refreshPlanButtons=()=>{
  planMemoryField.disabled=!ready||!localAgentMemoryEnabled;
  planDocumentField.disabled=!ready||!agentPlanDocumentsEnabled;
  planDocumentConsent.disabled=!ready||!agentPlanDocumentsEnabled;
+ planMultiFiles.disabled=!ready||!agentPlanMultiDocumentsEnabled;
+ planMultiConsent.disabled=!ready||!agentPlanMultiDocumentsEnabled;
  const id=planIdInput.value.trim();
  const same=selectedPlan&&selectedPlan.plan_id===id;
  const status=same?selectedPlan.status:null;
@@ -1407,10 +1418,14 @@ const planRequest=async(path,body)=>{
   if(path==="/api/local-agent-plan-create"&&result.status==="PREPARED"){
    planDocumentField.value="";
    planDocumentConsent.checked=false;
+   planMultiFiles.value="";
+   planMultiConsent.checked=false;
   }
   planStatus.textContent=result.status==="PREPARED"
    ?(result.document_source
      ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
+     :(result.document_set_sources||[]).length
+     ?"Plan proposed. Review every selected comparison source and question before approval. File snapshots are plaintext local SQLite."
      :"Plan proposed. Review every tool and argument before approving.")
    :result.status==="APPROVED"
    ?"Approved. Nothing executed yet. Click Execute next step."
@@ -1448,7 +1463,40 @@ $("agent-plan-propose").addEventListener("click",async()=>{
   return;
  }
  const payload={goal,model,...(selectedIds.length?{memory_ids:selectedIds}:{})};
+ const multiChoice=[...(planMultiFiles.files||[])];
  const file=planDocumentField.files?.[0];
+ if(file&&multiChoice.length){
+  planStatus.textContent="Select either one document or a comparison set, not both.";
+  return;
+ }
+ if(multiChoice.length){
+  if(!agentPlanMultiDocumentsEnabled||!planMultiConsent.checked){
+   planStatus.textContent="Explicit comparison-file storage consent is required.";
+   return;
+  }
+  const names=new Set();
+  const total=multiChoice.reduce((n,f)=>n+f.size,0);
+  if(multiChoice.length<2||multiChoice.length>3||total>6000||
+     multiChoice.some(f=>f.size===0||f.size>2500||
+       !/^[\\w.() -]{1,80}\\.(txt|md)$/i.test(f.name)||
+       names.has(f.name.toLowerCase())||!names.add(f.name.toLowerCase()))){
+   planStatus.textContent="Select 2–3 distinct nonempty .txt/.md files, maximum 2,500 bytes each and 6,000 bytes total.";
+   return;
+  }
+  try{
+   payload.documents=await Promise.all(multiChoice.map(async f=>({
+    filename:f.name,
+    content:new TextDecoder("utf-8",{fatal:true}).decode(await f.arrayBuffer())
+   })));
+   if(!operatorCsrf)return;
+  }catch(error){
+   planStatus.textContent="Could not read the selected comparison files as UTF-8.";
+   return;
+  }
+ }else if(planMultiConsent.checked){
+  planStatus.textContent="Choose 2–3 comparison files or untick comparison consent.";
+  return;
+ }
  if(file){
   if(!agentPlanDocumentsEnabled||!planDocumentConsent.checked){
    planStatus.textContent="Explicit document-storage consent is required for the selected task file.";
@@ -1470,6 +1518,10 @@ $("agent-plan-propose").addEventListener("click",async()=>{
   }
  }else if(planDocumentConsent.checked){
   planStatus.textContent="Choose a document file or untick document-storage consent.";
+  return;
+ }
+ if(new TextEncoder().encode(JSON.stringify(payload)).length>8192){
+  planStatus.textContent="Selected content is too large for the local request envelope; choose shorter files or goal.";
   return;
  }
  planRequest("/api/local-agent-plan-create",payload);
@@ -1997,6 +2049,11 @@ const lockOperatorUI=message=>{
  refreshMemoryButtons();
  agentPlanEnabled=false;
  agentPlanDocumentsEnabled=false;
+ agentPlanMultiDocumentsEnabled=false;
+ planMultiFiles.value="";
+ planMultiConsent.checked=false;
+ planMultiFiles.disabled=true;
+ planMultiConsent.disabled=true;
  planDocumentField.value="";
  planDocumentConsent.checked=false;
  planDocumentField.disabled=true;
