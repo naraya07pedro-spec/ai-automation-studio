@@ -536,6 +536,27 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-status")).to_contain_text(
             "Markdown report download requested")
 
+        # New opt-in server-owned local file output (no model, no filename input).
+        expect(self.page.locator("#agent-plan-report-export")).to_be_enabled()
+        self.page.once("dialog", lambda dialog: dialog.dismiss())
+        self.page.locator("#agent-plan-report-export").click()
+        expect(self.page.locator("#agent-plan-export-result")).to_contain_text(
+            "No file saved")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    "/api/local-agent-plan-export")) as captured:
+            self.page.locator("#agent-plan-report-export").click()
+        self.assertEqual(200, captured.value.status)
+        expect(self.page.locator("#agent-plan-export-result")).to_contain_text(
+            "CREATED")
+        expect(self.page.locator("#agent-plan-export-result")).to_contain_text(
+            "SHA-256")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#agent-plan-report-export").click()
+        expect(self.page.locator("#agent-plan-export-result")).to_contain_text(
+            "EXISTS_IDENTICAL")
+
         # Reload from durable server-side plan storage, no model rerun needed.
         self.page.locator("#agent-plan-load").click()
         expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
