@@ -124,7 +124,8 @@ def analyze_public_issue_metadata(reader, repo, approved_epoch, model, goal="",
         # Preserve ONLY the bounded timeout code, so a model request that may
         # still be running quarantines the shared gate. Hide other details.
         raise IssueAnalysisError(
-            "local_model_timeout" if str(exc) == "local_model_timeout"
+            str(exc) if str(exc) in ("local_model_timeout",
+                                  "local_model_transport_uncertain")
             else "local_issue_analysis_unavailable") from None
     except Exception as exc:
         # Do not disclose local model internals or potentially sensitive text.
