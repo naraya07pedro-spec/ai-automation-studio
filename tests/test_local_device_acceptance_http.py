@@ -40,12 +40,28 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
             if self.pause:self.release.wait(3)
             return smoke(model,catalog=lambda:["fixture:model"],
                          transport=fixture_model,memory=lambda:None)
+        self.preflights=[]
+        def fake_preflight():
+            self.preflights.append(True)
+            return {"status":"MODEL_SELECTION_REQUIRED",
+                    "source":"LOCAL_OLLAMA_HOST_PREFLIGHT",
+                    "host_os":"Windows","python_version":"3.12.0",
+                    "selected_model":None,"ollama_reachable":True,
+                    "installed_models":["fixture:model"],"installed_model_count":1,
+                    "selected_model_installed":False,
+                    "system_ram":{"total_ram_mb":8192,
+                                  "available_ram_mb":1520,"memory_load_pct":80},
+                    "memory_note":"System-wide RAM snapshot, not model usage.",
+                    "next_action":"Choose an installed model",
+                    "live_model_inference_attempted":False,
+                    "history_saved":False,"external_write_count":0}
         self.server=ThreadingHTTPServer(("127.0.0.1",0),
             create_handler(operator_auth=self.auth,
                 local_agent_runner=lambda prompt,model:{
                     "mode":"LOCAL_MODEL","answer":"fixture",
                     "tools_used":[],"external_dispatch_count":0},
-                local_device_acceptance=acceptance))
+                local_device_acceptance=acceptance,
+                local_device_preflight=fake_preflight))
         self.worker=threading.Thread(target=self.server.serve_forever,daemon=True)
         self.worker.start()
         self.addCleanup(self.release.set)
@@ -69,6 +85,25 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
         result=(response.status,json.loads(response.read()))
         conn.close()
         return result
+
+    def test_host_preflight_is_authenticated_read_only_and_no_model_call(self):
+        path="/api/local-agent-device-preflight"
+        self.assertEqual(401,self.request("GET",path,auth=False)[0])
+        self.assertEqual([],self.preflights)
+        self.assertEqual(422,self.request("GET",path+"?dump=secret")[0])
+        self.assertEqual([],self.preflights)
+        # Read-only GET does not require CSRF, but always requires owner login.
+        code,result=self.request("GET",path,csrf=False)
+        self.assertEqual(200,code)
+        self.assertEqual("MODEL_SELECTION_REQUIRED",result["status"])
+        self.assertEqual(["fixture:model"],result["installed_models"])
+        self.assertEqual(1520,result["system_ram"]["available_ram_mb"])
+        self.assertFalse(result["live_model_inference_attempted"])
+        self.assertEqual(0,result["external_write_count"])
+        self.assertEqual([],self.calls)
+        self.assertEqual([True],self.preflights)
+        self.assertTrue(self.request("GET","/api/local-agent-capabilities")[1][
+            "device_preflight"])
 
     def test_owner_csrf_origin_then_explicit_synthetic_result(self):
         url="/api/local-agent-device-acceptance"
