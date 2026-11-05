@@ -11,6 +11,10 @@ on:
       - "app/local_server.py"
       - "tests/test_local_plan_artifacts.py"
       - "docs/LOCAL_PLAN_ARTIFACT_EXPORT_V1.md"
+      - "app/local_csv_profile.py"
+      - "app/local_agent_task_plans.py"
+      - "tests/test_local_agent_csv_profile.py"
+      - "docs/OWNER_SELECTED_CSV_PROFILE_V1.md"
   workflow_dispatch:
 
 permissions:
@@ -69,6 +73,10 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_local_plan_artifacts.py -v
+      - name: Bounded owner-selected CSV profile contract on synthetic Windows data
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_local_agent_csv_profile.py -v
       - name: Scope and cleanup
         shell: pwsh
         run: |

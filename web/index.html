@@ -317,7 +317,7 @@ aas:timeline:urgent
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
-<p class="muted">The local model proposes up to three reviewed read-only steps. Nothing executes at creation or approval. Execute one step at a time, or explicitly confirm a bounded one-click run of the remaining approved read-only steps. Stop prevents the next step, not a request already in flight. No background worker or write tools.</p>
+<p class="muted">The local model proposes up to three reviewed read-only steps. Nothing executes at creation or approval. Execute one step at a time, or explicitly authorize a server-owned bounded run while the local server is alive. Stop prevents the next step, not a request already in flight. A separate owner-confirmed file export is available only after a final report.</p>
 <p class="muted">Typed cross-step handoffs: a later calculator can reference the saved numeric result of an earlier calculator, or a numeric count from an explicitly authorized public GitHub issue triage. Example goal: “Multiply 7 by 8, then multiply the saved result by 2.” Each reference must point backward; the exact resolved numbers and source fingerprints are shown in the plan audit. No arbitrary text or document content is passed as a command.</p>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
 <p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
@@ -334,6 +334,10 @@ aas:timeline:urgent
 <input id="agent-plan-multi-files" type="file" multiple accept=".txt,.md,text/plain,text/markdown" disabled>
 <div class="muted">Choose either ONE document above OR 2–3 documents here, never both. These snapshots are stored as plaintext local SQLite only after explicit consent and a relevant reviewed plan step. No folder scanning, PDF reading, cloud upload or automatic execution.</div></div>
 <div class="field"><label><input id="agent-plan-multi-consent" type="checkbox" disabled> I explicitly authorize storing all selected comparison files in this local task plan.</label></div>
+<div class="field"><label for="agent-plan-csv-file">Or choose ONE CSV for deterministic column profiling (max 6,000 UTF-8 bytes, 100 data rows, 8 columns)</label>
+<input id="agent-plan-csv-file" type="file" accept=".csv,text/csv" disabled>
+<div class="muted">Use CSV headers containing only letters, digits and underscores, starting with a letter. This option is mutually exclusive with documents. At proposal time the model sees only column names and SHA-256/row-count metadata, NOT cell values. Execution computes missing, distinct and numeric summaries without echoing individual records.</div></div>
+<div class="field"><label><input id="agent-plan-csv-consent" type="checkbox" disabled> I explicitly consent to storing the entire selected CSV in this plan's LOCAL PLAINTEXT SQLite ledger. Do not use secrets or confidential records.</label></div>
 <div class="core-actions" style="margin:12px 0">
 <button id="agent-plan-propose" type="button" class="primary" disabled>Propose a plan (no execution)</button>
 <button id="agent-plan-list" type="button" class="secondary" disabled>List saved plans</button>
@@ -1163,6 +1167,7 @@ const refreshLocalAgent=async()=>{
   agentPlanArtifactsEnabled=agentPlanEnabled&&data.plan_artifact_export===true;
   agentPlanDocumentsEnabled=agentPlanEnabled&&data.plan_documents===true;
   agentPlanMultiDocumentsEnabled=agentPlanEnabled&&data.plan_multi_documents===true;
+  agentPlanCsvEnabled=agentPlanEnabled&&data.plan_csv===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
@@ -1250,6 +1255,7 @@ let agentPlanEnabled=false;
 let agentPlanArtifactsEnabled=false;
 let agentPlanDocumentsEnabled=false;
 let agentPlanMultiDocumentsEnabled=false;
+let agentPlanCsvEnabled=false;
 let agentPlanBusy=false;
 let agentPlanRevision=0;
 let planBatchRunning=false;
@@ -1281,7 +1287,7 @@ function scheduleServerBatchPoll(){
 // Deliberate closed allowlist: future write-capable tools cannot enter this flow automatically.
 const approvedBatchReadTools=new Set(["calculate","utc_now","github_public_issues",
  "github_issue_triage","github_issue_analysis","local_document_question",
- "local_multi_document_question"]);
+ "local_multi_document_question","local_csv_profile"]);
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planMemoryField=$("agent-plan-memory-ids");
@@ -1289,6 +1295,8 @@ const planDocumentField=$("agent-plan-document-file");
 const planDocumentConsent=$("agent-plan-document-consent");
 const planMultiFiles=$("agent-plan-multi-files");
 const planMultiConsent=$("agent-plan-multi-consent");
+const planCsvFile=$("agent-plan-csv-file");
+const planCsvConsent=$("agent-plan-csv-consent");
 const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
@@ -1360,6 +1368,7 @@ const renderPlan=plan=>{
   selected_memory_refs:plan.memory_refs||[],
   selected_document:plan.document_source||null,
   selected_document_set:plan.document_set_sources||[],
+  selected_csv:plan.csv_source||null,
   memory_policy:"OWNER_CURATED_UNVERIFIED · subject to revision and content checks"
  },null,2):"No selected plan.";
  const reports=[];
@@ -1430,6 +1439,8 @@ const refreshPlanButtons=()=>{
  planDocumentConsent.disabled=!ready||!agentPlanDocumentsEnabled;
  planMultiFiles.disabled=!ready||!agentPlanMultiDocumentsEnabled;
  planMultiConsent.disabled=!ready||!agentPlanMultiDocumentsEnabled;
+ planCsvFile.disabled=!ready||!agentPlanCsvEnabled;
+ planCsvConsent.disabled=!ready||!agentPlanCsvEnabled;
  const id=planIdInput.value.trim();
  const same=selectedPlan&&selectedPlan.plan_id===id;
  const status=same?selectedPlan.status:null;
@@ -1487,13 +1498,17 @@ const planRequest=async(path,body)=>{
    planDocumentConsent.checked=false;
    planMultiFiles.value="";
    planMultiConsent.checked=false;
+   planCsvFile.value="";
+   planCsvConsent.checked=false;
   }
   planStatus.textContent=result.batch_run_status==="RUNNING"
    ?"Server accepted the reviewed steps. You may close this browser; leave the local server running."
    :result.batch_run_status==="STOPPING"
    ?"Server stop requested. The current step may finish; later steps are blocked."
    :result.status==="PREPARED"
-   ?(result.document_source
+   ?(result.csv_source
+     ?"CSV plan proposed. Inspect the frozen filename, SHA-256, row count and exact selected columns before approving. Raw CSV is stored in LOCAL PLAINTEXT SQLite."
+     :result.document_source
      ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
      :(result.document_set_sources||[]).length
      ?"Plan proposed. Review every selected comparison source and question before approval. File snapshots are plaintext local SQLite."
@@ -1542,8 +1557,9 @@ $("agent-plan-propose").addEventListener("click",async()=>{
  const payload={goal,model,...(selectedIds.length?{memory_ids:selectedIds}:{})};
  const multiChoice=[...(planMultiFiles.files||[])];
  const file=planDocumentField.files?.[0];
- if(file&&multiChoice.length){
-  planStatus.textContent="Select either one document or a comparison set, not both.";
+ const csvFile=planCsvFile.files?.[0];
+ if([Boolean(file),multiChoice.length>0,Boolean(csvFile)].filter(Boolean).length>1){
+  planStatus.textContent="Choose one document, one comparison set, OR one CSV, never multiple sources.";
   return;
  }
  if(multiChoice.length){
@@ -1595,6 +1611,28 @@ $("agent-plan-propose").addEventListener("click",async()=>{
   }
  }else if(planDocumentConsent.checked){
   planStatus.textContent="Choose a document file or untick document-storage consent.";
+  return;
+ }
+ if(csvFile){
+  if(!agentPlanCsvEnabled||!planCsvConsent.checked){
+   planStatus.textContent="Explicit plaintext CSV snapshot storage consent is required.";
+   return;
+  }
+  if(!/^[A-Za-z0-9][A-Za-z0-9 _.()\-]{0,74}\.csv$/i.test(csvFile.name)||
+     csvFile.size===0||csvFile.size>6000){
+   planStatus.textContent="Choose one short UTF-8 .csv (1–6,000 bytes).";
+   return;
+  }
+  try{
+   payload.csv={filename:csvFile.name,
+    content:new TextDecoder("utf-8",{fatal:true}).decode(await csvFile.arrayBuffer())};
+   if(!operatorCsrf)return;
+  }catch(error){
+   planStatus.textContent="CSV must be valid UTF-8. Could not decode selected file.";
+   return;
+  }
+ }else if(planCsvConsent.checked){
+  planStatus.textContent="Choose a CSV or untick CSV storage consent.";
   return;
  }
  if(new TextEncoder().encode(JSON.stringify(payload)).length>8192){
@@ -2199,6 +2237,11 @@ const lockOperatorUI=message=>{
  agentPlanEnabled=false;
  agentPlanDocumentsEnabled=false;
  agentPlanMultiDocumentsEnabled=false;
+ agentPlanCsvEnabled=false;
+ planCsvFile.value="";
+ planCsvConsent.checked=false;
+ planCsvFile.disabled=true;
+ planCsvConsent.disabled=true;
  planMultiFiles.value="";
  planMultiConsent.checked=false;
  planMultiFiles.disabled=true;
