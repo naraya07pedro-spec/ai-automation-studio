@@ -102,7 +102,8 @@ def analyze_local_document(filename, content, question, model, transport=None):
         # Preserve the one timeout signal needed for the global inference
         # quarantine; do not expose any raw model/server response details.
         raise LocalDocumentError(
-            "local_model_timeout" if str(exc) == "local_model_timeout"
+            str(exc) if str(exc) in ("local_model_timeout",
+                                  "local_model_transport_uncertain")
             else "local_document_model_unavailable") from None
     except Exception:
         raise LocalDocumentError("local_document_model_unavailable") from None
