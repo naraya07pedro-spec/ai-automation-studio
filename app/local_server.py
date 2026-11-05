@@ -773,12 +773,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 source_set_metadata = None
                 csv_snapshot = None
                 csv_metadata = None
-                if (creating and sum(key in data
-                     for key in ("document", "documents", "csv")) > 1):
-                    self._send(422, {"error": "invalid_plan_source_selection"})
-                    return
                 if creating and "documents" in data and "document" in data:
                     self._send(422, {"error": "invalid_plan_document_selection"})
+                    return
+                if creating and "csv" in data and (
+                        "document" in data or "documents" in data):
+                    self._send(422, {"error": "invalid_plan_source_selection"})
                     return
                 if creating and "documents" in data:
                     if (local_multi_document_analyzer is None
