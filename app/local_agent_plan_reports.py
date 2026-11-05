@@ -22,7 +22,7 @@ REPORT_SYSTEM = (
     "'summary' is a concise, clearly unverified interpretation (max 700 chars). "
     "'findings' is an array of 1 to 3 objects with EXACT keys "
     "'step_index', 'quote', 'interpretation'. step_index is a ONE-based "
-    "recorded step number. 'quote' MUST be copied verbatim as 3-180 "
+    "recorded step number. 'quote' MUST be copied verbatim as 1-180 "
     "characters from that step's supplied output_excerpt. "
     "'interpretation' is a cautious unverified observation (max 240 chars). "
     "Do not assert that a quote proves an interpretation. No markdown fences."
@@ -70,7 +70,7 @@ def validate_report_result(data, sources):
                 or type(f["step_index"]) is not int
                 or f["step_index"] not in source_map
                 or type(f["quote"]) is not str
-                or not 3 <= len(f["quote"]) <= MAX_QUOTE
+                or not 1 <= len(f["quote"]) <= MAX_QUOTE
                 or type(f["interpretation"]) is not str
                 or not 1 <= len(f["interpretation"].strip()) <= MAX_INTERPRETATION):
             raise PlanReportError("invalid_plan_report")
