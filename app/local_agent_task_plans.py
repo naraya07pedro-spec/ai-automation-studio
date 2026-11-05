@@ -543,6 +543,10 @@ class LocalAgentPlanStore:
                 if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
                     if self.document_analyzer is None or old["document_source"] is None:
                         raise PlanError("plan_document_unavailable")
+                if any(step["tool"] == MULTI_DOCUMENT_TOOL for step in old["steps"]):
+                    if (self.multi_document_analyzer is None
+                            or not old["document_set_sources"]):
+                        raise PlanError("plan_document_set_unavailable")
                 epoch = None
                 if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in old["steps"]):
                     if self.github_reader is None:
@@ -571,6 +575,10 @@ class LocalAgentPlanStore:
                 if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
                     if self.document_analyzer is None or old["document_source"] is None:
                         raise PlanError("plan_document_unavailable")
+                if any(step["tool"] == MULTI_DOCUMENT_TOOL for step in old["steps"]):
+                    if (self.multi_document_analyzer is None
+                            or not old["document_set_sources"]):
+                        raise PlanError("plan_document_set_unavailable")
                 new_status = "APPROVED" if old["next_index"] == 0 else "NEXT_READY"
                 self.db.execute("UPDATE agent_task_plans SET status=? WHERE plan_id=?",
                                 (new_status, plan_id))
@@ -591,6 +599,12 @@ class LocalAgentPlanStore:
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
                 snapshot = None
+                document_set = None
+                if step["tool"] == MULTI_DOCUMENT_TOOL:
+                    if (self.multi_document_analyzer is None
+                            or not old["document_set_sources"]):
+                        raise PlanError("plan_document_set_unavailable")
+                    document_set = self._stored_document_set(plan_id, old["model"])
                 if step["tool"] == LOCAL_DOCUMENT_TOOL:
                     if self.document_analyzer is None or old["document_source"] is None:
                         raise PlanError("plan_document_unavailable")
@@ -607,7 +621,25 @@ class LocalAgentPlanStore:
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                if step["tool"] == LOCAL_DOCUMENT_TOOL:
+                if step["tool"] == MULTI_DOCUMENT_TOOL:
+                    selected = [{"filename": item["filename"],
+                                 "content": item["content"]}
+                                for item in document_set]
+                    result = self.multi_document_analyzer(
+                        selected, step["args"]["question"], old["model"])
+                    if (type(result) is not dict
+                            or result.get("status") != "MULTI_DOCUMENT_ANALYZED_LOCAL"
+                            or result.get("selected_files") !=
+                               [item["filename"] for item in selected]
+                            or result.get("source_scope") !=
+                               "OPERATOR_SELECTED_TEXT_FILES_ONLY"
+                            or result.get("external_write_count") != 0
+                            or result.get("interpretation_verified") is not False
+                            or result.get("model_calls") not in (0, 1)):
+                        raise PlanError("plan_document_set_result_invalid")
+                    output = json.dumps(result, ensure_ascii=False,
+                                        separators=(",", ":"))
+                elif step["tool"] == LOCAL_DOCUMENT_TOOL:
                     result = self.document_analyzer(
                         snapshot["filename"], snapshot["content"],
                         step["args"]["question"], old["model"])
