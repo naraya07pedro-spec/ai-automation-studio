@@ -118,9 +118,19 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "exceeded 90 seconds")
         expect(self.page.locator("#device-acceptance-result")).not_to_contain_text(
             "REAL LOCAL OLLAMA ACCEPTANCE: PASSED")
+        expect(self.page.locator("#local-timeout-state")).to_contain_text("QUARANTINED")
+        expect(self.page.locator("#local-timeout-ack")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
         expect(self.page.locator("#device-acceptance-result")).to_contain_text(
             "No result for this selected model")
+        # Operator explicitly acknowledges after inspecting Ollama; tests
+        # accept the browser confirmation, never silently rearm the backend.
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#local-timeout-ack").click()
+        expect(self.page.locator("#local-timeout-state")).to_contain_text(
+            "No unresolved local timeout")
+        expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
 
     def test_device_acceptance_fixture_is_not_misrepresented_as_real_ollama(self):
         expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
