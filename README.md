@@ -90,6 +90,25 @@ After owner login at `http://127.0.0.1:8765`, enter your installed local model n
 
 This is not PDF support or full-document RAG. GitHub CI uses fake Ollama inference; **a real model and Windows hardware acceptance are still outstanding**. [Read the selected document scope and security/evidence contract](docs/LOCAL_DOCUMENT_ANALYSIS_V1.md).
 
+## Selected multi-document research and real Windows model smoke (Slice 57)
+
+The local-first workbench can now answer a question across **2–3 explicitly selected UTF-8 `.txt`/`.md` documents** without crawling folders, uploading to cloud AI or saving a document index. A deterministic word-overlap retrieval step chooses at most five short source passages for local Ollama. The model returns an answer and exact quotes, which the app verifies against the **correct original filename and character offsets**. The answer's interpretation remains unverified even when quotes match.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-multi-documents
+```
+
+After owner login, select 2–3 distinct small files (each <=2,500 bytes, combined <=6,000 bytes) in **Ask across 2–3 selected documents** and enter your installed Ollama model. This is separate from the original single-file `--enable-local-documents` switch.
+
+For actual model acceptance on your own Windows device, run:
+
+```powershell
+python app/local_ollama_readiness.py
+python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL
+```
+
+The smoke uses harmless built-in text samples and requires an **exact quoted fact from the correct second file**, or reports `BLOCKED`. It also measures elapsed time and available system RAM (which is **not** model-specific RAM usage). GitHub CI uses fake model fixtures, so it cannot establish actual model performance on your hardware. [Multi-document limits, evidence rules and device acceptance instructions](docs/LOCAL_MULTI_DOCUMENT_RETRIEVAL_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.

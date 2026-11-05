@@ -90,6 +90,35 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_selected_multi_documents_cite_correct_filename_and_clear_on_logout(self):
+        expect(self.page.locator("#local-multidoc-files")).to_be_enabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-multidoc-files").set_input_files([
+            {"name":"policy.txt","mimeType":"text/plain",
+             "buffer":b"Operations approval is required for all renewals."},
+            {"name":"schedule.md","mimeType":"text/markdown",
+             "buffer":b"Maintenance review meeting starts at 18:30 WIB every Thursday."}
+        ])
+        self.page.locator("#local-multidoc-question").fill(
+            "What time does the maintenance review meeting start?")
+        expect(self.page.locator("#local-multidoc-analyze")).to_be_enabled()
+        self.page.locator("#local-multidoc-analyze").click()
+        expect(self.page.locator("#local-multidoc-status")).to_contain_text(
+            "quote(s) verified")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "schedule.md [F2C1]")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "meeting starts at 18:30 WIB")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "DETERMINISTIC_LEXICAL_OVERLAP_V1")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        expect(self.page.locator("#local-multidoc-files")).to_be_disabled()
+        expect(self.page.locator("#local-multidoc-analyze")).to_be_disabled()
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "Session locked")
+        self.assertEqual("",self.page.locator("#local-multidoc-question").input_value())
+
     def test_selected_text_file_analysis_verified_quote_and_logout_clears(self):
         expect(self.page.locator("#local-document-file")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
