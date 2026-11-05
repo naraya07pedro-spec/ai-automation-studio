@@ -325,6 +325,19 @@ aas:timeline:urgent
 <pre id="agent-plan-analysis-report" class="trace" aria-label="Local model issue analysis">No AI analysis yet. Approve and execute a github_issue_analysis step.</pre>
 <pre id="agent-plan-list-output" class="trace" aria-label="Saved plans">No plan list loaded.</pre>
 </section>
+<section class="panel" id="local-document-panel" aria-label="Operator-selected local document analysis" style="margin:22px 0">
+<div class="kicker">LOCAL DOCUMENTS · NO DISK ACCESS BY AGENT</div>
+<h2>Ask about a selected text document</h2>
+<p class="muted">Choose a small UTF-8 .txt or .md file from your PC, then ask a question. Only the file you select is sent to the authenticated localhost server and local Ollama. No automatic file search, cloud upload, saved transcript or document database.</p>
+<div class="field"><label for="local-document-file">Selected text file (max 6 KB)</label>
+<input id="local-document-file" type="file" accept=".txt,.md,text/plain,text/markdown" disabled></div>
+<div class="field"><label for="local-document-question">Question (up to 500 characters)</label>
+<textarea id="local-document-question" maxlength="500" rows="3" style="width:100%;min-height:85px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="What does this document say about the next steps?"></textarea></div>
+<div class="core-actions"><button id="local-document-analyze" type="button" class="primary" disabled>Analyze selected file with local Ollama</button>
+<button id="local-document-reset" type="button" class="secondary">Clear selected document and result</button></div>
+<div id="local-document-status" class="setup-msg" role="status" aria-live="polite">Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.</div>
+<pre id="local-document-result" class="trace" aria-label="Verified document citations and local AI answer">No document analyzed yet.</pre>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -928,6 +941,12 @@ const refreshLocalAgent=async()=>{
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
+  localDocumentsEnabled=localAgentEnabled&&data.documents===true;
+  documentFile.disabled=!localDocumentsEnabled;
+  documentStatus.textContent=localDocumentsEnabled
+    ?"Ready. Select a UTF-8 .txt or .md file, then ask a question."
+    :"Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.";
+  refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
    ?"GitHub read-only tool enabled. Only operator-allowed public repositories can be used; each plan still needs approval and a separate next-step click."
@@ -1187,6 +1206,84 @@ for(const [id,endpoint] of [
  });
 }
 
+
+// Slice 56: browser only reads the user-selected file; no arbitrary server file paths.
+let localDocumentsEnabled=false;
+let documentBusy=false;
+let documentRevision=0;
+const documentFile=$("local-document-file");
+const documentQuestion=$("local-document-question");
+const documentAnalyze=$("local-document-analyze");
+const documentResult=$("local-document-result");
+const documentStatus=$("local-document-status");
+const refreshDocumentButton=()=>{
+ documentAnalyze.disabled=!localDocumentsEnabled||!operatorCsrf||documentBusy
+   ||!documentFile.files?.length||!documentQuestion.value.trim();
+};
+const invalidateDocument=()=>{
+ documentRevision++;
+ documentResult.textContent="No result for the current file/question.";
+ refreshDocumentButton();
+};
+documentFile.addEventListener("change",invalidateDocument);
+documentQuestion.addEventListener("input",invalidateDocument);
+$("local-agent-model").addEventListener("input",invalidateDocument);
+$("local-document-reset").addEventListener("click",()=>{
+ documentFile.value="";
+ documentQuestion.value="";
+ documentResult.textContent="No document analyzed yet.";
+ documentStatus.textContent="Selected document and displayed result cleared.";
+ documentRevision++;
+ refreshDocumentButton();
+});
+documentAnalyze.addEventListener("click",async()=>{
+ if(!localDocumentsEnabled||documentBusy||!operatorCsrf)return;
+ const file=documentFile.files?.[0];
+ const question=documentQuestion.value.trim();
+ const model=$("local-agent-model").value.trim();
+ if(!file||!question||!model){
+  documentStatus.textContent="Select a UTF-8 text file, enter a question and select a local model above.";
+  return;
+ }
+ if(!/^[\w.() -]{1,80}\.(txt|md)$/i.test(file.name)||file.size>6000||file.size===0){
+  documentStatus.textContent="Only nonempty .txt/.md files up to 6,000 bytes are supported.";
+  return;
+ }
+ const revision=++documentRevision;
+ documentBusy=true;refreshDocumentButton();
+ documentStatus.textContent="Reading the selected file in your browser…";
+ try{
+  const text=new TextDecoder("utf-8",{fatal:true}).decode(await file.arrayBuffer());
+  if(revision!==documentRevision||!operatorCsrf)return;
+  documentStatus.textContent="Local Ollama is analyzing selected text. No cloud upload.";
+  const response=await appFetch("/api/local-agent-document-analyze",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({filename:file.name,content:text,question,model})});
+  const output=await response.json();
+  if(revision!==documentRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(output.error||"local_document_failed");
+  const lines=["Document: "+output.filename,
+    "Local model: "+output.model,
+    "AI answer (interpretation NOT fact-checked): "+output.answer,
+    "Insufficient evidence: "+(output.insufficient_evidence?"yes":"no"),
+    "Verified exact source quotes:"];
+  for(const citation of output.citations||[]){
+   lines.push("["+citation.chunk_id+"] chars "+
+     citation.start_char+"–"+citation.end_char+": "+citation.quote);
+  }
+  lines.push("No file saved on server; no external writes.");
+  documentResult.textContent=lines.join("\n");
+  documentStatus.textContent="Analysis returned with "+
+     (output.citations||[]).length+" exact-match source citation(s).";
+ }catch(error){
+  if(revision===documentRevision&&operatorCsrf)
+   documentStatus.textContent="Analysis blocked: "+error.message;
+ }finally{
+  documentBusy=false;
+  refreshDocumentButton();
+ }
+});
+
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
@@ -1199,6 +1296,15 @@ const operatorReady=()=>{
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ localDocumentsEnabled=false;
+ documentBusy=false;
+ documentRevision++;
+ documentFile.value="";
+ documentFile.disabled=true;
+ documentQuestion.value="";
+ documentResult.textContent="Session locked; file and answer cleared.";
+ documentStatus.textContent="Session locked; local document analysis disabled.";
+ refreshDocumentButton();
  localAgentEnabled=false;
  localAgentHistoryEnabled=false;
  agentPlanEnabled=false;
