@@ -5,7 +5,7 @@ arbitrary URLs, issue bodies, authors, comments, or external mutations.
 """
 from datetime import datetime, timezone
 import json
-import re
+import unicodedata
 
 from github_public_issue_intake import (_public_issues_http, PublicGitHubFetchError,
                                         PublicGitHubReadOnlyIntake)
@@ -29,7 +29,8 @@ def valid_repo(repo):
 def _short_text(value, limit):
     if type(value) is not str:
         return ""
-    return _SAFE_TEXT.sub(" ", value).strip()[:limit]
+    return "".join(" " if unicodedata.category(char).startswith("C") else char
+                   for char in value).strip()[:limit]
 
 
 class AllowedGitHubIssuesReader:
