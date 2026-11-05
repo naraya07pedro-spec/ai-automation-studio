@@ -480,6 +480,9 @@ class LocalAgentPlanStore:
         except (TypeError, ValueError, PlanError):
 
             raise PlanError("plan_storage_invalid") from None
+        if row[13] not in ("IDLE", "RUNNING", "STOPPING", "STOPPED",
+                            "COMPLETED", "FAILED", "INTERRUPTED"):
+            raise PlanError("plan_storage_invalid")
         if (type(results) is not list or len(results) > MAX_STEPS
                 or type(row[4]) is not int or not 0 <= row[4] <= len(steps)
                 or len(results) != row[4]):
@@ -636,8 +639,8 @@ class LocalAgentPlanStore:
                 if (old["batch_run_status"] in ("RUNNING", "STOPPING")
                         and not from_batch):
                     raise PlanError("plan_batch_active")
-                if from_batch and old["batch_run_status"] not in ("RUNNING", "STOPPING"):
-                    raise PlanError("plan_batch_not_active")
+                if from_batch and old["batch_run_status"] != "RUNNING":
+                    raise PlanError("plan_batch_stop_requested")
                 self._verify_memory_refs(old["memory_refs"])
                 index = old["next_index"]
                 if index >= len(old["steps"]):
