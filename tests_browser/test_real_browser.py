@@ -369,6 +369,49 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             "No selected plan")
 
+    def test_selected_memory_flows_into_reviewed_plan_and_stale_edit_blocks_steps(self):
+        self.page.locator("#local-memory-id").fill("fixture_plan_context")
+        self.page.locator("#local-memory-text").fill(
+            "Calculate only; no emails, no new tool authority.")
+        self.page.locator("#local-memory-save-button").click()
+        expect(self.page.locator("#local-memory-list")).to_contain_text(
+            "fixture_plan_context")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Calculate 7 times 8 and get UTC time")
+        self.page.locator("#agent-plan-memory-ids").fill("fixture_plan_context")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "fixture_plan_context")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"revision": 1')
+        self.assertNotIn("no emails",
+                         self.page.locator("#agent-plan-details").inner_text())
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("NEXT_READY")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "56"')
+        self.page.locator("#local-memory-id").fill("fixture_plan_context")
+        self.page.locator("#local-memory-load-button").click()
+        self.page.locator("#local-memory-text").fill(
+            "Edited note: now use 8 times 8")
+        self.page.once("dialog", lambda dialog:dialog.accept())
+        self.page.locator("#local-memory-save-button").click()
+        expect(self.page.locator("#local-memory-list")).to_contain_text(
+            "Edited note")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "Memory note changed or was deleted")
+        # The failed step is not recorded, and the plan stays manually cancellable.
+        self.assertEqual(1,self.page.locator("#agent-plan-details").inner_text().count(
+            '"output":'))
+        self.page.locator("#agent-plan-cancel").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("CANCELLED")
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
