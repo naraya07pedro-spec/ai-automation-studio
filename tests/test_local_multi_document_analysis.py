@@ -167,8 +167,9 @@ class MultiDocumentTests(unittest.TestCase):
                 "insufficient_evidence":False,
                 "citations":[{"chunk_id":"F2C1",
                     "quote":"Maintenance review meeting starts at 18:30 WIB"}]})}}
+        # The numeric-evidence guard now rejects this before the smoke postcheck.
         with self.assertRaisesRegex(LocalDocumentError,
-                                    "smoke_source_evidence_not_verified"):
+                                    "multi_document_numeric_evidence_missing"):
             smoke("fixture:model",catalog=lambda:["fixture:model"],
                   transport=wrong_answer,memory=lambda:None)
 
