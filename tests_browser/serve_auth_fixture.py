@@ -15,6 +15,7 @@ from local_source_policy import LocalPublicSourcePolicy
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
+from local_agent_memory import LocalAgentMemory
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_agent import AgentError
@@ -38,6 +39,7 @@ def main():
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
     conversation = LocalAgentConversation(":memory:")
+    memory_cards = LocalAgentMemory(":memory:")
     def fixture_github_fetch(repo):
         if repo != "Octocat/Hello-World":
             raise AssertionError("unexpected repository")
@@ -85,8 +87,11 @@ def main():
                 "tool_calling": "OBSERVED", "answer_present": True,
                 "history_saved": False, "external_dispatch_count": 0}
 
-    def fixture_local_agent(prompt, model, history=None):
-        return {"mode": "LOCAL_MODEL", "answer": "Fixture answer: " + str(len(prompt)),
+    def fixture_local_agent(prompt, model, history=None, memory_context=None):
+        ids = [note["id"] for note in memory_context] if memory_context else []
+        return {"mode": "LOCAL_MODEL",
+                "answer": "Fixture answer: " + str(len(prompt))+
+                          (" | selected note IDs: "+",".join(ids) if ids else ""),
                 "tools_used": ["calculate"], "external_dispatch_count": 0}
 
     def fixture_document(filename,content,question,model):
@@ -126,6 +131,7 @@ def main():
                        source_policy=policy, security_audit=audit,
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
+                       agent_memory_store=memory_cards,
                        local_agent_models=fixture_models,
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
@@ -145,6 +151,7 @@ def main():
         server.server_close()
         core.close()
         conversation.close()
+        memory_cards.close()
         plans.close()
         audit.close()
         home.cleanup()

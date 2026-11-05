@@ -32,6 +32,8 @@ from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
 from local_windows_preflight import preflight as check_local_device_preflight
 from local_model_safety import LocalModelSafetyState, ModelSafetyError
+from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
+                                MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
 
@@ -66,7 +68,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_document_analyzer=None,
                    local_multi_document_analyzer=None,
                    local_device_acceptance=None,
-                   local_device_preflight=None, model_safety_state=None):
+                   local_device_preflight=None, model_safety_state=None,
+                   agent_memory_store=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -275,6 +278,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
+                                 "memory_cards": (local_agent_runner is not None
+                                                  and agent_memory_store is not None),
                                  "documents": (local_agent_runner is not None
                                                and local_document_analyzer is not None),
                                  "multi_documents": (local_agent_runner is not None
@@ -357,6 +362,22 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(503, {"error": str(exc)})
                 except Exception:
                     self._send(503, {"error": "local_model_unavailable"})
+                return
+            if route.path == "/api/local-agent-memory":
+                if local_agent_runner is None or agent_memory_store is None:
+                    self._send(403, {"error": "agent_memory_disabled"})
+                elif route.query:
+                    self._send(422, {"error": "invalid_memory_query"})
+                else:
+                    try:
+                        self._send(200, {
+                            "cards": agent_memory_store.list_cards(),
+                            "capacity": MAX_MEMORY_CARDS,
+                            "max_selected": MAX_SELECTED_MEMORY,
+                            "storage": "PLAINTEXT_LOCAL_SQLITE",
+                            "source": "OWNER_CURATED_UNVERIFIED"})
+                    except MemoryCardError:
+                        self._send(503, {"error": "memory_storage_unavailable"})
                 return
             if route.path in ("/api/local-agent-history",
                               "/api/local-agent-conversations"):
@@ -455,6 +476,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
                                  "/api/local-agent-run", "/api/local-agent-clear",
+                                 "/api/local-agent-memory-save",
+                                 "/api/local-agent-memory-delete",
                                  "/api/local-agent-probe",
                                  "/api/local-agent-document-analyze",
                                  "/api/local-agent-multi-document-analyze",
@@ -496,6 +519,30 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/local-agent-memory-save",
+                             "/api/local-agent-memory-delete"):
+                if local_agent_runner is None or agent_memory_store is None:
+                    self._send(403, {"error": "agent_memory_disabled"})
+                    return
+                saving = self.path == "/api/local-agent-memory-save"
+                expected = ({"id", "text", "expected_revision"} if saving
+                            else {"id", "expected_revision"})
+                if type(data) is not dict or set(data) != expected:
+                    self._send(422, {"error": "invalid_memory_request"})
+                    return
+                try:
+                    card = (agent_memory_store.put(
+                        data["id"], data["text"], data["expected_revision"])
+                        if saving else agent_memory_store.delete(
+                            data["id"], data["expected_revision"]))
+                    self._send(200, card)
+                except MemoryCardError as exc:
+                    error = str(exc)
+                    code = (422 if error.startswith("invalid_") else
+                            409 if error in ("memory_capacity_reached",
+                                             "memory_revision_conflict") else 503)
+                    self._send(code, {"error": error})
                 return
             if self.path == "/api/local-agent-timeout-acknowledge":
                 if local_agent_runner is None:
@@ -768,12 +815,20 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if (type(data) is not dict
                         or not {"model", "prompt"}.issubset(data)
                         or not set(data).issubset(
-                            {"model", "prompt", "remember", "conversation_id"})
+                            {"model", "prompt", "remember", "conversation_id", "memory_ids"})
                         or type(data["model"]) is not str or type(data["prompt"]) is not str
                         or ("remember" in data and type(data["remember"]) is not bool)):
 
                     self._send(422, {"error": "invalid_local_agent_request"})
                     return
+                memory_ids = data.get("memory_ids")
+                if "memory_ids" in data:
+                    if not valid_selection(memory_ids):
+                        self._send(422, {"error": "invalid_memory_selection"})
+                        return
+                    if agent_memory_store is None:
+                        self._send(403, {"error": "agent_memory_disabled"})
+                        return
                 remember = data.get("remember", False)
                 conversation_id = data.get("conversation_id", DEFAULT_CONVERSATION)
                 if ("conversation_id" in data and not remember):
@@ -801,11 +856,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 pair["model"] != data["model"] for pair in prior):
                             self._send(409, {"error": "agent_history_model_mismatch"})
                             return
+                        selected_cards = (agent_memory_store.selected(memory_ids)
+                                          if memory_ids is not None else None)
+                        kwargs = {}
                         if remember:
-                            outcome = local_agent_runner(data["prompt"], data["model"],
-                                                         history=prior)
-                        else:
-                            outcome = local_agent_runner(data["prompt"], data["model"])
+                            kwargs["history"] = prior
+                        if selected_cards is not None:
+                            kwargs["memory_context"] = selected_cards
+                        outcome = local_agent_runner(data["prompt"], data["model"], **kwargs)
                         if type(outcome) is not dict or outcome.get("mode") != "LOCAL_MODEL":
                             self._send(502, {"error": "invalid_agent_result"})
                         else:
@@ -815,7 +873,16 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                     conversation_id)
                             self._send(200, {**outcome, "remembered": remember,
                                              "conversation_id": conversation_id
-                                             if remember else None})
+                                             if remember else None,
+                                             "memory_ids_used": memory_ids or [],
+                                             "memory_source": (
+                                                 "OWNER_CURATED_UNVERIFIED"
+                                                 if memory_ids else None)})
+                    except MemoryCardError as exc:
+                        err = str(exc)
+                        self._send(422 if err.startswith("invalid_") else
+                                   404 if err == "memory_card_not_found" else 503,
+                                   {"error": err})
                     except ConversationError as exc:
                         code = 409 if str(exc) == "conversation_capacity_reached" else 503
                         self._send(code, {"error": str(exc)})
@@ -1034,7 +1101,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_agent_history=False, enable_agent_plans=False,
                        enable_agent_github_read=False,
                        enable_local_documents=False,
-                       enable_multi_documents=False):
+                       enable_multi_documents=False,
+                       enable_agent_memory=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1045,6 +1113,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_agent_memory and not enable_local_agent:
+        raise ValueError("agent_memory_requires_local_agent")
     if enable_local_documents and not enable_local_agent:
         raise ValueError("local_documents_require_local_agent")
     if enable_multi_documents and not enable_local_agent:
@@ -1055,6 +1125,7 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("github_plan_read_requires_agent_plans")
     conversation = None
     plan_store = None
+    memory_store = None
     if enable_agent_plans:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
@@ -1062,6 +1133,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             home / "agent-task-plans.sqlite3", github_reader=reader)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
+    if enable_agent_memory:
+        memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
                     if enable_local_agent else None)
     try:
@@ -1086,13 +1159,16 @@ def start_local_server(port=8765, enable_local_agent=False,
                                run_local_device_acceptance if enable_multi_documents else None),
                            local_device_preflight=(
                                check_local_device_preflight if enable_multi_documents else None),
-                           model_safety_state=model_safety))
+                           model_safety_state=model_safety,
+                           agent_memory_store=memory_store))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if memory_store is not None:
+            memory_store.close()
         if model_safety is not None:
             model_safety.close()
         if plan_store is not None:
@@ -1131,6 +1207,8 @@ def main(argv=None):
                        help="Use a one-time code to reset lost owner password offline.")
     parser.add_argument("--enable-local-agent", action="store_true",
                         help="Explicitly enable authenticated Ollama calls in browser.")
+    parser.add_argument("--enable-agent-memory", action="store_true",
+                        help="Opt in to owner-curated plaintext local memory cards.")
     parser.add_argument("--enable-agent-history", action="store_true",
                         help="Explicit opt-in local plaintext transcript storage.")
     parser.add_argument("--enable-agent-plans", action="store_true",
@@ -1142,6 +1220,8 @@ def main(argv=None):
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
+    if args.enable_agent_memory and not args.enable_local_agent:
+        parser.error("--enable-agent-memory requires --enable-local-agent")
     if args.enable_local_documents and not args.enable_local_agent:
         parser.error("--enable-local-documents requires --enable-local-agent")
     if args.enable_multi_documents and not args.enable_local_agent:
@@ -1216,6 +1296,7 @@ def main(argv=None):
     try:
         start_local_server(enable_local_agent=args.enable_local_agent,
                            enable_agent_history=args.enable_agent_history,
+                           enable_agent_memory=args.enable_agent_memory,
                            enable_agent_plans=args.enable_agent_plans,
                            enable_agent_github_read=args.enable_agent_github_read,
                            enable_local_documents=args.enable_local_documents,
