@@ -17,6 +17,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
+from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_server import create_handler
 
 
@@ -40,8 +41,23 @@ def main():
                  "labels":[{"name":"bug"},{"name":"priority:high"}]}]
 
     github_reader = AllowedGitHubIssuesReader(policy,fetcher=fixture_github_fetch)
-    plans = LocalAgentPlanStore(":memory:",github_reader=github_reader)
+    def fixture_analysis_transport(payload):
+        assert payload["model"] == "fixture:model"
+        assert "tools" not in payload
+        return {"message": {"content": '{"items":[{"number":42,"observation":"Could the existing bug label warrant a reproduction check? Impact remains unknown."}]}' }}
+
+    def fixture_issue_analyzer(reader, repo, epoch, model, goal):
+        return analyze_public_issue_metadata(
+            reader, repo, epoch, model, goal,
+            transport=fixture_analysis_transport)
+
+    plans = LocalAgentPlanStore(":memory:",github_reader=github_reader,
+                                issue_analyzer=fixture_issue_analyzer)
     def fixture_planner(goal, model):
+        if "analy" in goal.lower():
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool": "github_issue_analysis",
+                               "args": {"repo": "Octocat/Hello-World"}}]}
         if "triage" in goal.lower():
             return {"model": model, "goal": goal,
                     "steps": [{"tool": "github_issue_triage",
