@@ -90,6 +90,23 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_operator_model_discovery_and_explicit_tool_probe(self):
+        expect(self.page.locator("#local-agent-find-models")).to_be_enabled()
+        expect(self.page.locator("#local-agent-test-model")).to_be_enabled()
+        self.page.locator("#local-agent-find-models").click()
+        expect(self.page.locator("#local-agent-readiness-status")).to_contain_text(
+            "Ollama reachable")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-agent-test-model").click()
+        expect(self.page.locator("#local-agent-readiness-status")).to_contain_text(
+            "calculator tool call was observed")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        expect(self.page.locator("#local-agent-find-models")).to_be_disabled()
+        expect(self.page.locator("#local-agent-test-model")).to_be_disabled()
+        expect(self.page.locator("#local-agent-readiness-status")).to_contain_text(
+            "Session locked")
+
     def test_agent_conversations_are_isolated_and_selectively_deleted(self):
         expect(self.page.locator("#local-agent-conversation")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
