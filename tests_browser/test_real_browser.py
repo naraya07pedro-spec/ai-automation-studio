@@ -90,6 +90,36 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_agent_label_based_github_issue_triage_report(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Triage open GitHub issues from Octocat/Hello-World using labels")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "github_issue_triage")
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "No triage report yet")
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "APPROVED")
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "No triage report yet")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "COMPLETED")
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "DETERMINISTIC_LABEL_RULES_V1")
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "flagged for review: 1")
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "https://github.com/Octocat/Hello-World/issues/42")
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "priority:high")
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
+            "No triage report yet")
+
     def test_agent_approved_github_public_issues_read_with_provenance(self):
         expect(self.page.locator("#agent-plan-github-status")).to_contain_text(
             "GitHub read-only tool enabled")

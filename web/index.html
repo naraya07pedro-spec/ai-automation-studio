@@ -300,7 +300,7 @@ aas:timeline:urgent
 <h2>Plan a small local task</h2>
 <p class="muted">The local model can propose at most three read-only steps. Nothing executes when a plan is created or approved. Review every tool argument, then trigger execution one step at a time.</p>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
-<p class="muted">Example: "List open GitHub issues from Octocat/Hello-World". Before running this, grant that public repository in Public Source Permissions. The agent reads only the first 15 open issues, never private data or issue edits.</p>
+<p class="muted">Example: "Triage open GitHub issues from Octocat/Hello-World by their public labels". Grant that exact repository under Public Source Permissions first. Triage shows category, label evidence, items flagged for review, and source URLs. An unflagged issue is NOT proven low priority. Only the first 15 open issue entries are checked.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
 <textarea id="agent-plan-goal" maxlength="1200" rows="3" style="width:100%;min-height:90px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="For example, calculate 75 × 28, then tell me the current UTC time."></textarea></div>
 <div class="core-actions" style="margin:12px 0">
@@ -319,6 +319,8 @@ aas:timeline:urgent
 </div>
 <div id="agent-plan-status" class="setup-msg" role="status" aria-live="polite">Plan execution is disabled by default.</div>
 <pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
+<div class="kicker">SOURCE-BACKED ISSUE TRIAGE · LABEL EVIDENCE ONLY</div>
+<pre id="agent-plan-triage-report" class="trace" aria-label="GitHub issue triage report">No triage report yet. Execute an approved github_issue_triage step.</pre>
 <pre id="agent-plan-list-output" class="trace" aria-label="Saved plans">No plan list loaded.</pre>
 </section>
 </main>
@@ -1000,6 +1002,7 @@ let agentPlanRevision=0;
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planDetails=$("agent-plan-details");
+const planTriageReport=$("agent-plan-triage-report");
 const planListOutput=$("agent-plan-list-output");
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
@@ -1012,6 +1015,36 @@ const renderPlan=plan=>{
   status:plan.status,goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index
  },null,2):"No selected plan.";
+ const reports=[];
+ for(const item of (plan?.results||[])){
+  if(item.tool!=="github_issue_triage")continue;
+  try{
+   const data=JSON.parse(item.output);
+   if(data.source!=="GITHUB_PUBLIC_ISSUE_TRIAGE_READ_ONLY")continue;
+   const lines=[
+    "Public source: "+data.repository,
+    "Retrieved UTC: "+data.fetched_at_utc,
+    "Method: "+data.method+" (labels only, NOT verified severity)",
+    "Issue entries: "+data.returned_count+"; flagged for review: "+
+      data.review_flagged_count+"; unassessed: "+data.unassessed_count,
+    "More pages might exist: "+(data.may_have_more?"yes":"not indicated"),
+    "Categories: "+JSON.stringify(data.category_counts),
+    "External writes: "+data.external_write_count,
+    ""
+   ];
+   for(const issue of (data.issues||[])){
+    lines.push("#"+issue.number+" ["+issue.priority_signal+"] "+
+      issue.category+" · "+issue.title);
+    lines.push("Evidence labels: "+
+      (issue.priority_evidence_labels||[]).join(", ")+
+      " | category: "+(issue.category_evidence_labels||[]).join(", "));
+    lines.push("Source: "+issue.url,"");
+   }
+   reports.push(lines.join("\n"));
+  }catch(error){reports.push("Unable to read stored triage report.");}
+ }
+ planTriageReport.textContent=reports.length?reports.join("\n---\n"):
+  "No triage report yet. Execute an approved github_issue_triage step.";
  refreshPlanButtons();
 };
 const refreshPlanButtons=()=>{
@@ -1033,6 +1066,7 @@ const refreshPlanButtons=()=>{
 planIdInput.addEventListener("input",()=>{
  agentPlanRevision++;selectedPlan=null;
  planDetails.textContent="Load this ID before approving any action.";
+ planTriageReport.textContent="No selected triage report.";
  refreshPlanButtons();
 });
 const planRequest=async(path,body)=>{

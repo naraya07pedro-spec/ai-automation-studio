@@ -48,6 +48,24 @@ After owner login, use **Public Source Permissions** to allow the exact public r
 
 This feature is disabled by default and is not a substitute for testing Ollama with a real installed model on the user's PC. [Read tool permissions, output provenance and limitations](docs/AGENT_GITHUB_READ_TOOL_V1.md).
 
+## Source-backed GitHub issue triage and Windows model acceptance (Slice 54)
+
+The approved-plan system can now propose a `github_issue_triage` step. It performs **one explicitly approved public GitHub GET** on a granted repository and produces an auditable label-based report: issue category, exact evidence labels, review flags, unknown priority, issue links and sampling limits. It does **not** infer actual incident severity, inspect issue bodies, or edit GitHub.
+
+Enable the optional feature and grant your chosen public repository under **Public Source Permissions**:
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-agent-github-read
+```
+
+A separate local acceptance command checks a **real installed Ollama model**, requests an exactly constrained triage plan and waits for typed operator consent before fetching public issues:
+
+```powershell
+python app/local_agent_e2e_smoke.py --model qwen2.5:3b --repo Octocat/Hello-World
+```
+
+Replace the model and repository with an actually installed, compatible model and a **previously approved** public repo. Without typed `EXECUTE Octocat/Hello-World`, it does not fetch from GitHub. The model weights and Windows hardware compatibility have **not** been verified by GitHub CI. [See triage rules, privacy boundaries and genuine Windows acceptance](docs/AGENT_ISSUE_TRIAGE_AND_E2E_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.

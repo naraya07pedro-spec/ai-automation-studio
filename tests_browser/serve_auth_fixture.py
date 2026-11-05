@@ -37,11 +37,15 @@ def main():
             raise AssertionError("unexpected repository")
         return [{"state":"open","number":42,
                  "title":"Synthetic GitHub issue with human-readable title",
-                 "labels":[{"name":"bug"}]}]
+                 "labels":[{"name":"bug"},{"name":"priority:high"}]}]
 
     github_reader = AllowedGitHubIssuesReader(policy,fetcher=fixture_github_fetch)
     plans = LocalAgentPlanStore(":memory:",github_reader=github_reader)
     def fixture_planner(goal, model):
+        if "triage" in goal.lower():
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool": "github_issue_triage",
+                               "args": {"repo": "Octocat/Hello-World"}}]}
         if "github" in goal.lower():
             return {"model": model, "goal": goal,
                     "steps": [{"tool": "github_public_issues",
