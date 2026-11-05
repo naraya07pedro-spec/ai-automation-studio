@@ -1325,7 +1325,9 @@ documentAnalyze.addEventListener("click",async()=>{
      (output.citations||[]).length+" exact-match source citation(s).";
  }catch(error){
   if(revision===documentRevision&&operatorCsrf)
-   documentStatus.textContent="Analysis blocked: "+error.message;
+   documentStatus.textContent="Analysis blocked: "+(error.message==="document_numeric_evidence_missing"
+    ?"The model gave a number/time absent from its verified quote. That answer was rejected."
+    :error.message);
  }finally{
   documentBusy=false;
   refreshDocumentButton();
@@ -1432,7 +1434,9 @@ multiButton.addEventListener("click",async()=>{
    " quote(s) verified in explicitly selected files.";
  }catch(error){
   if(revision===multiDocumentsRevision&&operatorCsrf)
-   multiStatus.textContent="Analysis blocked: "+error.message;
+   multiStatus.textContent="Analysis blocked: "+(error.message==="multi_document_numeric_evidence_missing"
+    ?"The model gave a number/time absent from its verified source quotes. That answer was rejected."
+    :error.message);
  }finally{
   multiDocumentsBusy=false;
   refreshMultiButton();
@@ -1570,6 +1574,7 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
     "smoke_source_evidence_not_verified":"The model responded but did not give the expected sourced answer and exact citation. It is not compatible with this check yet.",
     "invalid_multi_document_model_response":"The model output did not meet the required JSON schema. Try a suitable JSON-capable installed model.",
     "invalid_multi_document_citation":"The model invented a citation or quoted a passage outside its selected source.",
+    "multi_document_numeric_evidence_missing":"The model stated a number/time unsupported by its verified source quote. Try a more evidence-grounded local model or question.",
     "model_response_too_large":"The local model response exceeded the safety size limit.",
     "invalid_model_response":"The local endpoint did not return valid JSON.",
     "local_agent_busy":"Another local inference is active. Retry only after it finishes."

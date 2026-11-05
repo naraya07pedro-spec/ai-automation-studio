@@ -436,7 +436,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 409 if error == "model_not_installed" else 503)
                         self._send(code, {"error": error})
                     except LocalDocumentError as exc:
-                        self._send(503, {"error": str(exc)})
+                        error = str(exc)
+                        self._send(502 if error == "multi_document_numeric_evidence_missing"
+                                   else 503, {"error": error})
                     except Exception:
                         self._send(503, {"error": "local_device_acceptance_unavailable"})
                 finally:
@@ -478,6 +480,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         error = str(exc)
                         self._send(413 if error in ("multi_document_too_large",
                                                    "local_document_too_large") else
+                                   502 if error == "multi_document_numeric_evidence_missing" else
                                    422 if error.startswith("invalid_") else 503,
                                    {"error": error})
                     except Exception:
@@ -521,6 +524,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except LocalDocumentError as exc:
                         err = str(exc)
                         code = 413 if err == "local_document_too_large" else (
+                            502 if err == "document_numeric_evidence_missing" else
                             422 if err.startswith("invalid_") else 503)
                         self._send(code, {"error": err})
                     except Exception:

@@ -11,6 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
 from local_multi_doc_smoke import smoke
 from local_ollama_agent import AgentError
+from local_document_analysis import LocalDocumentError
 from local_operator_auth import LocalOperatorAuth
 from local_server import create_handler
 
@@ -37,6 +38,8 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
             self.entered.set()
             if model == "fixture:timeout":
                 raise AgentError("local_model_timeout")
+            if model == "fixture:wrong-time":
+                raise LocalDocumentError("multi_document_numeric_evidence_missing")
             if self.pause:self.release.wait(3)
             return smoke(model,catalog=lambda:["fixture:model"],
                          transport=fixture_model,memory=lambda:None)
@@ -166,6 +169,13 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
         self.assertEqual(503,code)
         self.assertEqual("local_model_timeout",body["error"])
         self.assertEqual(["fixture:timeout"],self.calls)
+
+    def test_wrong_numeric_answer_returns_502_not_fake_model_success(self):
+        code,body=self.request("POST","/api/local-agent-device-acceptance",
+                               {"model":"fixture:wrong-time"})
+        self.assertEqual(502,code)
+        self.assertEqual("multi_document_numeric_evidence_missing",body["error"])
+        self.assertEqual(["fixture:wrong-time"],self.calls)
 
     def test_one_operation_shares_global_model_gate(self):
         self.pause=True

@@ -139,6 +139,12 @@ To test the actual device, start `python app/local_server.py --enable-local-agen
 
 GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## Evidence check for numeric answers (Slice 62)
+
+Selected single-file and multi-document Q&A now reject a model answer when a literal number, date, time, percentage or compact-unit measurement (e.g. `5kg`, `16GB`) in the answer is **absent from every independently verified exact source quote**. For example, quoting an authentic `18:30 WIB` passage does not justify answering `19:15 WIB`. The check runs only after the existing file/chunk/character quote validation; it does not create a new inference, inspect additional files or persist data. Blocked outputs use `document_numeric_evidence_missing` or `multi_document_numeric_evidence_missing` (HTTP 502 for unsupported model output).
+
+This is deliberately a conservative **literal** check. Equivalent numeric formats may be rejected (e.g. dates written differently). It is **not semantic entailment**: a model can still misuse an authentic quote, negate the source, or fabricate an unsupported non-numeric claim. The result continues to display `interpretation_verified: false`. Deterministic regression tests demonstrate the previously admitted unsupported-number case. Real inference on the owner's Windows PC still requires the separate manual gate in [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68).
+
 ## One-click Windows host prerequisites and optional live model evidence (Slice 61)
 
 AI Automation Studio now distinguishes a safe **read-only preflight** from actual Ollama inference. This is useful before trying to run local models on constrained Windows hardware: the preflight checks only fixed-localhost Ollama model names and current system RAM, without loading model weights, scanning files, downloading models or modifying anything.

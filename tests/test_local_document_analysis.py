@@ -107,5 +107,44 @@ class SelectedDocumentTests(unittest.TestCase):
         self.assertNotIn("tool",answer)
 
 
+    def test_numeric_fabrication_rejected_despite_real_source_quote(self):
+        response={"answer":"The desk opens at 10:00 on weekdays.",
+                  "insufficient_evidence":False,
+                  "citations":[{"chunk_id":"S1",
+                                "quote":"opens at 09:00 on weekdays"}]}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "document_numeric_evidence_missing"):
+            self.call(response)
+
+    def test_numeric_claim_must_appear_in_actual_citation_not_just_file(self):
+        response={"answer":"The desk opens at 09:00 on weekdays.",
+                  "insufficient_evidence":False,
+                  "citations":[{"chunk_id":"S1",
+                                "quote":"The service desk opens"}]}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "document_numeric_evidence_missing"):
+            self.call(response)
+
+    def test_nonnumeric_claim_remains_accepted_but_not_fact_checked(self):
+        response={"answer":"The service desk opens on weekdays.",
+                  "insufficient_evidence":False,
+                  "citations":[{"chunk_id":"S1",
+                                "quote":"opens at 09:00 on weekdays"}]}
+        result=self.call(response)
+        self.assertFalse(result["interpretation_verified"])
+
+    def test_numeric_token_guard_matches_whole_values_not_substrings(self):
+        from local_document_analysis import unsupported_numeric_claims
+        self.assertTrue(unsupported_numeric_claims("The count is 9.", ["count is 19."]))
+        self.assertTrue(unsupported_numeric_claims("Starts at 18:45.", ["at 18:30."]))
+        self.assertTrue(unsupported_numeric_claims("Change is -5%.", ["change +5%."]))
+        self.assertFalse(unsupported_numeric_claims("Starts at 18:30.", ["at 18:30."]))
+        self.assertFalse(unsupported_numeric_claims("Review required.", ["Review required."]))
+        self.assertTrue(unsupported_numeric_claims("Weight is 7kg.", ["Weight is 5kg."]))
+        self.assertTrue(unsupported_numeric_claims("RAM 16GB.", ["RAM 8GB."]))
+        self.assertTrue(unsupported_numeric_claims("Latency 3.5ms.", ["Latency 2.5ms."]))
+        self.assertFalse(unsupported_numeric_claims("Weight 5kg.", ["Weight 5kg."]))
+
+
 if __name__=="__main__":
     unittest.main()

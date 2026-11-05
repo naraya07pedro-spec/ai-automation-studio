@@ -9,7 +9,7 @@ import unicodedata
 
 from local_document_analysis import (LocalDocumentError, MAX_ANSWER, MAX_CITATIONS,
                                      MAX_QUESTION, MAX_QUOTE, NAME_PATTERN,
-                                     validate_document)
+                                     validate_document, unsupported_numeric_claims)
 from local_ollama_agent import AgentError, ollama_transport
 
 MAX_FILES = 3
@@ -44,6 +44,8 @@ SYSTEM = (
     "If passages do not substantiate the requested answer, return exactly "
     '{"answer":"Insufficient evidence in the selected passages.",'
     '"insufficient_evidence":true,"citations":[]}. '
+    "For each number, time, date or percentage in the answer, provide that "
+    "exact numeric form in at least one cited quote; otherwise abstain. "
     "A quote being present does NOT verify your interpretation."
 )
 
@@ -186,6 +188,9 @@ def _response(document_names, question, model, passages, message):
             "end_char": start + len(citation["quote"]),
             "verified_exact_match": True,
         })
+    if not result["insufficient_evidence"] and unsupported_numeric_claims(
+            result["answer"], [c["quote"] for c in citations]):
+        raise LocalDocumentError("multi_document_numeric_evidence_missing")
     return {
         "status": "MULTI_DOCUMENT_ANALYZED_LOCAL",
         "model": model,
