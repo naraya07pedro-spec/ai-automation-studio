@@ -66,6 +66,18 @@ python app/local_agent_e2e_smoke.py --model qwen2.5:3b --repo Octocat/Hello-Worl
 
 Replace the model and repository with an actually installed, compatible model and a **previously approved** public repo. Without typed `EXECUTE Octocat/Hello-World`, it does not fetch from GitHub. The model weights and Windows hardware compatibility have **not** been verified by GitHub CI. [See triage rules, privacy boundaries and genuine Windows acceptance](docs/AGENT_ISSUE_TRIAGE_AND_E2E_V1.md).
 
+## Source-linked local Ollama issue analysis (Slice 55)
+
+An operator can now authorize a `github_issue_analysis` task-plan step to fetch **real public GitHub issue metadata** from an explicitly granted repository and ask a **locally installed Ollama model** for up to five review questions. The model can select only issue numbers in that exact fetched source snapshot; title, labels and GitHub URLs are always taken from the source, not invented by AI. All AI observations are visibly **unverified interpretations**, never established severity, root cause or security findings.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-agent-github-read
+```
+
+After owner login and granting the exact repository under **Public Source Permissions**, enter a compatible installed model and request "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions". Review the proposed tool/repo, approve, and separately execute the step. Proposal and approval **do not contact GitHub or invoke analysis**; execution performs one permitted GitHub GET and one bounded model inference. No external writes or private issue access. These observations are stored in **plaintext local SQLite** until the plan is deleted.
+
+CI validates this using injected fake model/provider fixtures, not a real installed Ollama model on your Windows computer. [Read the source/citation verification and limits](docs/LOCAL_GITHUB_ISSUE_ANALYSIS_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.

@@ -300,7 +300,7 @@ aas:timeline:urgent
 <h2>Plan a small local task</h2>
 <p class="muted">The local model can propose at most three read-only steps. Nothing executes when a plan is created or approved. Review every tool argument, then trigger execution one step at a time.</p>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
-<p class="muted">Example: "Triage open GitHub issues from Octocat/Hello-World by their public labels". Grant that exact repository under Public Source Permissions first. Triage shows category, label evidence, items flagged for review, and source URLs. An unflagged issue is NOT proven low priority. Only the first 15 open issue entries are checked.</p>
+<p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
 <textarea id="agent-plan-goal" maxlength="1200" rows="3" style="width:100%;min-height:90px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="For example, calculate 75 × 28, then tell me the current UTC time."></textarea></div>
 <div class="core-actions" style="margin:12px 0">
@@ -321,6 +321,8 @@ aas:timeline:urgent
 <pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
 <div class="kicker">SOURCE-BACKED ISSUE TRIAGE · LABEL EVIDENCE ONLY</div>
 <pre id="agent-plan-triage-report" class="trace" aria-label="GitHub issue triage report">No triage report yet. Execute an approved github_issue_triage step.</pre>
+<div class="kicker">LOCAL AI REVIEW · SOURCE-LINKED · NOT FACT-CHECKED</div>
+<pre id="agent-plan-analysis-report" class="trace" aria-label="Local model issue analysis">No AI analysis yet. Approve and execute a github_issue_analysis step.</pre>
 <pre id="agent-plan-list-output" class="trace" aria-label="Saved plans">No plan list loaded.</pre>
 </section>
 </main>
@@ -1003,6 +1005,7 @@ let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
+const planAnalysisReport=$("agent-plan-analysis-report");
 const planListOutput=$("agent-plan-list-output");
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
@@ -1045,6 +1048,34 @@ const renderPlan=plan=>{
  }
  planTriageReport.textContent=reports.length?reports.join("\n---\n"):
   "No triage report yet. Execute an approved github_issue_triage step.";
+ const analyses=[];
+ for(const item of (plan?.results||[])){
+  if(item.tool!=="github_issue_analysis")continue;
+  try{
+   const data=JSON.parse(item.output);
+   if(data.source!=="GITHUB_PUBLIC_ISSUE_ANALYSIS_READ_ONLY")continue;
+   const lines=[
+    "Source repository: "+data.repository,
+    "Fetched UTC: "+data.fetched_at_utc,
+    "Local model: "+data.model,
+    "Method: "+data.method,
+    "Examined "+data.analyzed_count+" of "+data.returned_count+
+      " returned issue(s) from limited first page",
+    "AI observations are UNVERIFIED. Check each linked issue yourself.",
+    "External writes: "+data.external_write_count,""
+   ];
+   for(const issue of (data.issues||[])){
+    lines.push("#"+issue.number+" · "+issue.title);
+    lines.push("Labels: "+(issue.labels||[]).join(", "));
+    lines.push("AI review question (unverified): "+issue.ai_review_question);
+    lines.push("GitHub evidence: "+issue.url,"");
+   }
+   lines.push(data.limitations||"");
+   analyses.push(lines.join("\n"));
+  }catch(error){analyses.push("Stored AI analysis is unavailable.");}
+ }
+ planAnalysisReport.textContent=analyses.length?analyses.join("\n---\n"):
+   "No AI analysis yet. Approve and execute a github_issue_analysis step.";
  refreshPlanButtons();
 };
 const refreshPlanButtons=()=>{
@@ -1067,6 +1098,7 @@ planIdInput.addEventListener("input",()=>{
  agentPlanRevision++;selectedPlan=null;
  planDetails.textContent="Load this ID before approving any action.";
  planTriageReport.textContent="No selected triage report.";
+ planAnalysisReport.textContent="No selected analysis report.";
  refreshPlanButtons();
 });
 const planRequest=async(path,body)=>{

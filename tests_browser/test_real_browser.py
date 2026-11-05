@@ -90,6 +90,36 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_local_ollama_analysis_has_source_citations_and_explicit_approval(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "github_issue_analysis")
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "No AI analysis yet")
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "APPROVED")
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "No AI analysis yet")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "COMPLETED")
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "OLLAMA_BOUNDED_UNVERIFIED_INTERPRETATION")
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "AI observations are UNVERIFIED")
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "Could the existing bug label warrant a reproduction check")
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "https://github.com/Octocat/Hello-World/issues/42")
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-analysis-report")).to_contain_text(
+            "No AI analysis yet")
+
     def test_agent_label_based_github_issue_triage_report(self):
         self.page.locator("#local-agent-model").fill("fixture:model")
         self.page.locator("#agent-plan-goal").fill(

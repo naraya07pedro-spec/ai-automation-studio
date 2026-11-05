@@ -12,6 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"app"))
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
+from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_operator_auth import LocalOperatorAuth
 from local_source_policy import LocalPublicSourcePolicy
 from local_server import create_handler
@@ -32,14 +33,25 @@ class GitHubPlanHTTPTests(unittest.TestCase):
                      "labels":[{"name":"triage"}],
                      "body":"excluded from response"}]
         reader=AllowedGitHubIssuesReader(self.policy,fetcher=fetch)
+        self.model_calls=[]
+        def analyze(reader,repo,epoch,model,goal):
+            def fake(payload):
+                self.model_calls.append(payload)
+                return {"message":{"content":json.dumps({"items":[{
+                    "number":7,"observation":"Could the reported bug need reproduction? No impact evidence."}]})}}
+            return analyze_public_issue_metadata(reader,repo,epoch,model,goal,
+                                                 transport=fake)
         self.store=LocalAgentPlanStore(
-            Path(self.temp.name)/"plans.sqlite3",github_reader=reader)
+            Path(self.temp.name)/"plans.sqlite3",
+            github_reader=reader,issue_analyzer=analyze)
         self.addCleanup(self.store.close)
         self.auth=LocalOperatorAuth.ephemeral_for_tests(PASSWORD)
         self.plan_calls=[]
         def planner(goal,model):
             self.plan_calls.append((goal,model))
-            selected="github_issue_triage" if "triage" in goal.lower() else "github_public_issues"
+            selected=("github_issue_analysis" if "analy" in goal.lower()
+                      else "github_issue_triage" if "triage" in goal.lower()
+                      else "github_public_issues")
             return {"goal":goal,"model":model,"steps":[
                 {"tool":selected,"args":{"repo":REPO}}]}
         self.server=ThreadingHTTPServer(("127.0.0.1",0),
@@ -135,6 +147,38 @@ class GitHubPlanHTTPTests(unittest.TestCase):
         self.assertEqual("UNASSESSED",report["issues"][0]["priority_signal"])
         self.assertEqual(0,report["external_write_count"])
         self.assertEqual([REPO],self.provider_calls)
+
+    def test_approved_analysis_requires_auth_and_click_and_cites_source(self):
+        self.policy.grant(REPO)
+        code,plan=self.create("Analyze public issues with the local model")
+        self.assertEqual(200,code)
+        self.assertEqual("github_issue_analysis",plan["steps"][0]["tool"])
+        pid=plan["plan_id"]
+        self.assertEqual([],self.provider_calls)
+        self.assertEqual([],self.model_calls)
+        self.assertEqual(401,self.request("POST","/api/local-agent-plan-next",
+                             {"plan_id":pid},auth=False)[0])
+        self.assertEqual(403,self.request("POST","/api/local-agent-plan-next",
+                             {"plan_id":pid},csrf=False)[0])
+        self.assertEqual(409,self.request("POST","/api/local-agent-plan-next",
+                             {"plan_id":pid})[0])
+        self.assertEqual([],self.provider_calls)
+        self.assertEqual(200,self.request("POST","/api/local-agent-plan-approve",
+                             {"plan_id":pid})[0])
+        self.assertEqual([],self.provider_calls)
+        code,done=self.request("POST","/api/local-agent-plan-next",{"plan_id":pid})
+        self.assertEqual(200,code)
+        self.assertEqual("COMPLETED",done["status"])
+        report=json.loads(done["results"][0]["output"])
+        self.assertEqual("GITHUB_PUBLIC_ISSUE_ANALYSIS_READ_ONLY",report["source"])
+        self.assertEqual(7,report["issues"][0]["number"])
+        self.assertEqual("https://github.com/Octocat/Hello-World/issues/7",
+                         report["issues"][0]["url"])
+        self.assertEqual("UNVERIFIED_MODEL_INTERPRETATION",
+                         report["issues"][0]["assessment"])
+        self.assertEqual([REPO],self.provider_calls)
+        self.assertEqual(1,len(self.model_calls))
+        self.assertNotIn("excluded from response",json.dumps(self.model_calls))
 
     def test_policy_revoke_blocks_without_provider_read(self):
         self.policy.grant(REPO)
