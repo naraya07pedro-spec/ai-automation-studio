@@ -1277,8 +1277,12 @@ const buildPlanReportMarkdown=plan=>{
 const renderPlan=plan=>{
  selectedPlan=plan;
  selectedPlanReportMarkdown=buildPlanReportMarkdown(plan);
- planReportDisplay.textContent=selectedPlanReportMarkdown||
-  "No report. Complete the plan before generating one.";
+ // The logout flow also calls renderPlan(null); never replace the
+ // locked-session placeholder with an unauthenticated normal-state message.
+ planReportDisplay.textContent=!operatorCsrf
+  ?"Session locked; completed report hidden."
+  :selectedPlanReportMarkdown||
+   "No report. Complete the plan before generating one.";
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,goal:plan.goal,model:plan.model,
