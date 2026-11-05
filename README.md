@@ -3,6 +3,20 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Multi-document comparisons inside owner-reviewed task plans (Slice 70)
+
+A task plan can now use the existing local source-cited retrieval engine to compare **2–3 explicitly selected short text/Markdown files** in a **single approved plan step**. This is an additional real data source for durable tasks, not a temporary Q&A window or unrestricted file search.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-multi-documents
+```
+
+In **Plan a small local task**, choose 2–3 files using **Or select 2–3 short documents to compare**, then explicitly authorize storing the chosen snapshots in the local plaintext SQLite task-plan ledger. File bounds are **2,500 UTF-8 bytes each, 6,000 bytes total**. The local model receives only filenames, sizes and SHA-256 digests while proposing a **local_multi_document_question** step. Only after owner approval and a separate **Execute next step** click does the analyzer receive source contents, use bounded lexical retrieval, verify source-specific quotes and save the answer in the plan. A finished plan can produce the existing Task Deliverable.
+
+One-file and multi-file selection are **mutually exclusive**; neither is granted by default. An old plan migrates without gaining document access, and restarting without the `--enable-multi-documents` flag fails closed. Plan list/details show metadata only until results have been explicitly generated, although those results can quote the source text. SQLite snapshots remain plaintext and are unsuitable for secrets or confidential records. GitHub CI uses synthetic model transport, **not** the user's Windows/Ollama hardware.
+
+[Full workflow, limits, source permissions and trust boundaries](docs/REVIEWED_MULTI_DOCUMENT_PLANS_V1.md).
+
 ## Owner-selected document research inside approved task plans (Slice 69)
 
 The local agent can now include **one explicitly selected text/Markdown document** in a durable, human-reviewed task plan, rather than handling every document only as an isolated one-shot Q&A. This is a substantive source expansion for core agent tasks.
