@@ -102,3 +102,71 @@ class AllowedGitHubIssuesReader:
                 "external_read_count": 1,
                 "external_write_count": 0,
             }, ensure_ascii=False, separators=(",", ":"))
+
+    def triage(self, repo, approved_epoch):
+        """One authorized provider GET; deterministic label-based source report.
+
+        This is a triage queue, not an AI diagnosis or true severity estimate.
+        Raw titles are never interpreted as instructions or priority evidence.
+        """
+        record = json.loads(self.read(repo, approved_epoch))
+        priority_labels = {"p0", "p1", "priority:critical", "priority:high",
+                           "critical", "urgent", "security"}
+        type_signals = (
+            ("bug", {"bug", "type:bug", "kind:bug"}),
+            ("documentation", {"docs", "documentation", "type:docs"}),
+            ("feature", {"enhancement", "feature", "type:feature"}),
+            ("maintenance", {"maintenance", "chore", "type:chore"}),
+        )
+        reviewed = []
+        categories = {"bug": 0, "documentation": 0, "feature": 0,
+                      "maintenance": 0, "unclassified": 0}
+        flagged = 0
+        for issue in record["issues"]:
+            original_labels = issue["labels"]
+            normalized = {label.casefold().strip() for label in original_labels}
+            priority_evidence = sorted(normalized & priority_labels)
+            if priority_evidence:
+                flagged += 1
+            category = "unclassified"
+            category_evidence = []
+            for name, markers in type_signals:
+                matched = sorted(normalized & markers)
+                if matched:
+                    category = name
+                    category_evidence = matched
+                    break
+            categories[category] += 1
+            reviewed.append({
+                "number": issue["number"],
+                "title": issue["title"],
+                "url": issue["url"],
+                "labels": original_labels,
+                "category": category,
+                "category_evidence_labels": category_evidence,
+                "priority_signal": "REVIEW_FLAGGED" if priority_evidence
+                                   else "UNASSESSED",
+                "priority_evidence_labels": priority_evidence,
+                "reason": ("Priority flag appears in visible GitHub labels."
+                           if priority_evidence else
+                           "No recognized priority label; severity unknown."),
+            })
+        reviewed.sort(key=lambda i: (
+            i["priority_signal"] != "REVIEW_FLAGGED", i["number"]))
+        return json.dumps({
+            "source": "GITHUB_PUBLIC_ISSUE_TRIAGE_READ_ONLY",
+            "repository": record["repository"],
+            "fetched_at_utc": record["fetched_at_utc"],
+            "method": "DETERMINISTIC_LABEL_RULES_V1",
+            "limitations": ("Only first-page public open issues, visible labels "
+                            "and title. No bodies, authors, comments or verified severity."),
+            "page_limit": record["page_limit"],
+            "returned_count": record["returned_count"],
+            "may_have_more": record["may_have_more"],
+            "review_flagged_count": flagged,
+            "unassessed_count": len(reviewed) - flagged,
+            "category_counts": categories,
+            "issues": reviewed,
+            "external_read_count": 1,
+            "external_write_count": 0,
+        }, ensure_ascii=False, separators=(",", ":"))
