@@ -5,6 +5,7 @@ Only an authenticated owner's typed notes are stored, in plaintext SQLite.
 No model can create or modify cards. Each chat use requires chosen card IDs.
 """
 from pathlib import Path
+from hashlib import sha256
 import os
 import re
 import sqlite3
@@ -154,6 +155,53 @@ class LocalAgentMemory:
                         raise MemoryCardError("memory_card_not_found")
                     cards.append({"id": card_id, "text": row[0]})
             return cards
+        except sqlite3.Error:
+            raise MemoryCardError("memory_storage_unavailable") from None
+
+    def selected_with_revisions(self, ids):
+        """Single locked snapshot for proposal; no implicit recall."""
+        if not valid_selection(ids):
+            raise MemoryCardError("invalid_memory_selection")
+        try:
+            with self.lock:
+                cards=[]
+                for card_id in ids:
+                    row=self.db.execute(
+                        "SELECT body,revision FROM memory_cards WHERE card_id=?",
+                        (card_id,)).fetchone()
+                    if row is None:
+                        raise MemoryCardError("memory_card_not_found")
+                    cards.append({"id":card_id,"text":row[0],
+                                  "revision":row[1],
+                                  "digest":sha256(row[0].encode("utf-8")).hexdigest()})
+            return cards
+        except sqlite3.Error:
+            raise MemoryCardError("memory_storage_unavailable") from None
+
+    def require_revisions(self, refs):
+        """Check selected IDs+revisions, no note body or model dispatch."""
+        if (type(refs) is not list or not 1<=len(refs)<=MAX_SELECTED_MEMORY
+                or any(type(r) is not dict or set(r)!={"id","revision","digest"}
+                       or not valid_memory_id(r["id"])
+                       or type(r["revision"]) is not int
+                       or not 1<=r["revision"]<=1000001
+                       or type(r["digest"]) is not str
+                       or re.fullmatch(r"[0-9a-f]{64}",r["digest"]) is None
+                       for r in refs)
+                or len(set(r["id"] for r in refs))!=len(refs)):
+            raise MemoryCardError("invalid_memory_selection")
+        try:
+            with self.lock:
+                for r in refs:
+                    row=self.db.execute(
+                        "SELECT revision,body FROM memory_cards WHERE card_id=?",
+                        (r["id"],)).fetchone()
+                    # Revision + exact UTF-8 digest handles delete/recreate of
+                    # the same ID at revision 1 (the ABA stale-reference case).
+                    if (row is None or row[0]!=r["revision"]
+                            or sha256(row[1].encode("utf-8")).hexdigest()!=r["digest"]):
+                        raise MemoryCardError("memory_context_changed")
+            return True
         except sqlite3.Error:
             raise MemoryCardError("memory_storage_unavailable") from None
 

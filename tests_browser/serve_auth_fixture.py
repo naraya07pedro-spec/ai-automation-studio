@@ -59,8 +59,14 @@ def main():
             transport=fixture_analysis_transport)
 
     plans = LocalAgentPlanStore(":memory:",github_reader=github_reader,
-                                issue_analyzer=fixture_issue_analyzer)
-    def fixture_planner(goal, model):
+                                issue_analyzer=fixture_issue_analyzer,
+                                memory_store=memory_cards)
+    def fixture_planner(goal, model, memory_context=None):
+        # The fixture does not run Ollama. It verifies selected cards reach the
+        # proposal callback, without allowing a note to select privileged tools.
+        if memory_context:
+            assert all(set(c)=={"id","text"} for c in memory_context)
+            assert all(c["id"].startswith("fixture_") for c in memory_context)
         if "analy" in goal.lower():
             return {"model": model, "goal": goal,
                     "steps": [{"tool": "github_issue_analysis",

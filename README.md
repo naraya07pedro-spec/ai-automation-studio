@@ -3,6 +3,18 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Memory-backed, owner-reviewed agent plans (Slice 67)
+
+The local workbench now links **explicitly selected memory cards** to its persistent, human-reviewed read-only task plans. Enable both opt-in features:
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-memory --enable-agent-plans
+```
+
+In the authenticated UI, write or inspect memory cards, then under **Plan a small local task**, enter a task goal and optionally up to **3 note IDs** in **Memory IDs for THIS proposed task plan**. The local model receives only those selected cards, labeled unverified, and proposes 1–3 fixed-tool steps. The plan saves the selected note IDs, revisions, and content fingerprints alongside its tool arguments, with **no automatic execution**. Review the complete plan, click **Approve**, then **Execute next step** for each read-only action. If a note is edited or deleted after proposal, a stale plan receives `memory_context_changed` before approval or further step execution; cancel it and propose a fresh plan. Previous plans without memory retain their behavior. No note grants shell, file scan, email, extra GitHub access or other side effects.
+
+Memory and plan ledgers are **plaintext local SQLite**, not appropriate for secrets. The real Windows/Ollama device acceptance remains deferred by owner decision; automated CI checks cover code behavior and injected browser fixtures only. [Full contract, threat model and recovery](docs/MEMORY_BACKED_AGENT_PLANS_V1.md).
+
 ## Owner-curated local AI memory workspace (Slice 66)
 
 The local agent now supports a **separate, optional memory workspace** that carries owner-typed notes across chat threads and restarts, without automatically copying all saved context into every model request. This is a real user-facing capability, not another synthetic agent demonstration.

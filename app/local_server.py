@@ -290,6 +290,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                      and local_device_preflight is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
+                                 "plan_memory": (local_agent_planner is not None
+                                                 and local_agent_plan_store is not None
+                                                 and agent_memory_store is not None),
                                  "github_plan_read": bool(
                                      local_agent_plan_store is not None
                                      and local_agent_plan_store.github_reader is not None),
@@ -712,13 +715,22 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return
                 creating = self.path == "/api/local-agent-plan-create"
                 if (type(data) is not dict or
-                    (creating and (set(data) != {"goal", "model"}
+                    (creating and (set(data) not in (
+                        {"goal", "model"}, {"goal", "model", "memory_ids"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
                         or type(data["plan_id"]) is not str))):
                     self._send(422, {"error": "invalid_plan_request"})
                     return
+                selected_memory_ids = data.get("memory_ids") if creating else None
+                if creating and "memory_ids" in data:
+                    if not valid_selection(selected_memory_ids):
+                        self._send(422, {"error": "invalid_memory_selection"})
+                        return
+                    if agent_memory_store is None:
+                        self._send(403, {"error": "agent_memory_disabled"})
+                        return
                 if not self._enter_agent_gate(allow_uncertain=(not creating and
                         self.path != "/api/local-agent-plan-next")):
                     return
@@ -727,8 +739,20 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         if creating:
                             if len(local_agent_plan_store.list()) >= MAX_PLANS:
                                 raise PlanError("plan_capacity_reached")
-                            proposal = local_agent_planner(data["goal"], data["model"])
-                            outcome = local_agent_plan_store.create(proposal)
+                            if selected_memory_ids is not None:
+                                cards = agent_memory_store.selected_with_revisions(
+                                    selected_memory_ids)
+                                context = [{"id": c["id"], "text": c["text"]}
+                                           for c in cards]
+                                refs = [{"id": c["id"], "revision": c["revision"],
+                                         "digest": c["digest"]} for c in cards]
+                                proposal = local_agent_planner(
+                                    data["goal"], data["model"], memory_context=context)
+                                outcome = local_agent_plan_store.create(
+                                    proposal, memory_refs=refs)
+                            else:
+                                proposal = local_agent_planner(data["goal"], data["model"])
+                                outcome = local_agent_plan_store.create(proposal)
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
@@ -739,6 +763,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                             }[self.path]
                             outcome = action(data["plan_id"])
                         self._send(200, outcome)
+                    except MemoryCardError as exc:
+                        err = str(exc)
+                        self._send(422 if err.startswith("invalid_") else
+                                   404 if err == "memory_card_not_found" else 503,
+                                   {"error": err})
                     except PlanError as exc:
                         self._mark_model_uncertainty(exc)
                         err = str(exc)
@@ -746,7 +775,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 else 403 if err == "public_source_not_allowed"
                                 else 404 if err == "plan_not_found"
                                 else 409 if err in ("plan_state_conflict", "plan_capacity_reached",
-                                                     "public_source_permission_changed")
+                                                     "public_source_permission_changed",
+                                                     "memory_context_changed")
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:
@@ -1126,15 +1156,16 @@ def start_local_server(port=8765, enable_local_agent=False,
     conversation = None
     plan_store = None
     memory_store = None
+    if enable_agent_memory:
+        memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     if enable_agent_plans:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         plan_store = LocalAgentPlanStore(
-            home / "agent-task-plans.sqlite3", github_reader=reader)
+            home / "agent-task-plans.sqlite3", github_reader=reader,
+            memory_store=memory_store)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
-    if enable_agent_memory:
-        memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
                     if enable_local_agent else None)
     try:
@@ -1147,8 +1178,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_models=installed_models if enable_local_agent else None,
                            local_agent_probe=probe_model if enable_local_agent else None,
                            local_agent_planner=(
-                               (lambda goal, model: propose_readonly_plan(
-                                   goal, model, allow_github=enable_agent_github_read))
+                               (lambda goal, model, memory_context=None: propose_readonly_plan(
+                                   goal, model, allow_github=enable_agent_github_read,
+                                   memory_context=memory_context))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_document_analyzer=(
