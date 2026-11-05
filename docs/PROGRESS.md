@@ -2141,3 +2141,14 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - Delivered: explicitly confirmed one-click sequence of already-approved read-only plan steps, with per-step existing backend authorization, durable checkpoint, permission/memory/document/handoff rechecks, no retry, and stop between requests. Single-step execution remains. No shell/filesystem writes, hidden background execution, autonomous replanning or automatic report generation.
 - Limit: **Stop cannot terminate an already in-flight request**; unknown execution requires loading and inspecting the persisted plan before manual continuation. **No real Windows/Ollama testing** was performed; Issue #68 remains open/deferred by owner instruction. CI cannot establish model compatibility, PC RAM or response quality.
 - This final entry is a separate documentation-only commit on `main`; the CI assertion applies to the exact PR feature-code head above.
+
+
+## Slice 73 · 2026-11-05 · Durable server-owned reviewed read-only batch
+
+**Goal:** Replace browser-scoped batch dispatch with owner-authorized server-owned sequential execution. Continue build-first; real Windows/Ollama acceptance remains deferred at open Issue #68.
+
+**Implemented in PR #81 (branch `feat/durable-server-reviewed-batch-slice-73`):** `app/local_agent_task_plans.py` now persists batch statuses RUNNING/STOPPING/STOPPED/COMPLETED/FAILED/INTERRUPTED alongside individually checkpointed approved plan steps, with migration for old plans. `app/local_agent_batch_runner.py` executes only previously reviewed read-only steps in a single local-server worker, protected by the same global model-operation gate and timeout quarantine, with no automatic retry. `app/local_server.py` has authenticated, CSRF-protected start/stop endpoints. `web/index.html` confirms exact remaining steps, polls stored status and supports durable stop. Added synthetic Python concurrency/stop/restart/uncertain-transport tests, Chromium navigation/reload regression, README and `docs/SERVER_OWNED_READONLY_BATCH_V1.md`.
+
+**Constraints:** A browser may close but the *local server must remain running*. No OS service, cross-process queue, scheduling, autonomous replanning, shell, external writes, or additional model-provider capability. Restart marks unfinished batch and in-flight work INTERRUPTED without replay. A stop does not kill an active model request. Local plaintext SQLite must not store secrets.
+
+**Verification:** Exact final-head GitHub CI and merge are pending. An earlier Python CI run caught a manual-step conflict-classification bug while server batch was active; fixed before final-head verification. Automated CI does **not** validate Ollama on the owner's Windows PC.

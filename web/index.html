@@ -344,8 +344,8 @@ aas:timeline:urgent
 <button id="agent-plan-load" type="button" class="secondary" disabled>Load plan</button>
 <button id="agent-plan-approve" type="button" class="secondary" disabled>Approve reviewed plan</button>
 <button id="agent-plan-next" type="button" class="primary" disabled>Execute next step</button>
-<button id="agent-plan-run-remaining" type="button" class="secondary" disabled>Run remaining reviewed read-only steps</button>
-<button id="agent-plan-stop-run" type="button" class="secondary" disabled>Stop after current step</button>
+<button id="agent-plan-run-remaining" type="button" class="secondary" disabled>Run reviewed steps on local server</button>
+<button id="agent-plan-stop-run" type="button" class="secondary" disabled>Request server stop after current step</button>
 <button id="agent-plan-resume" type="button" class="secondary" disabled>Resume interrupted plan</button>
 <button id="agent-plan-cancel" type="button" class="secondary" disabled>Cancel plan</button>
 <button id="agent-plan-delete" type="button" class="secondary" disabled>Delete terminal plan</button>
@@ -1250,6 +1250,30 @@ let agentPlanBusy=false;
 let agentPlanRevision=0;
 let planBatchRunning=false;
 let planBatchStopRequested=false;
+let planBatchPollTimer=null;
+function scheduleServerBatchPoll(){
+ if(planBatchPollTimer!==null || !operatorCsrf || !selectedPlan ||
+    !["RUNNING","STOPPING"].includes(selectedPlan.batch_run_status))return;
+ const pid=selectedPlan.plan_id;
+ planBatchPollTimer=setTimeout(async()=>{
+  planBatchPollTimer=null;
+  if(!operatorCsrf||!selectedPlan||selectedPlan.plan_id!==pid)return;
+  try{
+   const response=await appFetch("/api/local-agent-plan?plan_id="+encodeURIComponent(pid));
+   const data=await response.json();
+   if(!operatorCsrf||!selectedPlan||selectedPlan.plan_id!==pid)return;
+   if(!response.ok)throw Error(data.error||"batch_poll_unavailable");
+   renderPlan(data);
+   if(["COMPLETED","STOPPED","FAILED","INTERRUPTED"].includes(data.batch_run_status))
+    planStatus.textContent="Server batch: "+data.batch_run_status+
+     ". Inspect saved steps before another action.";
+  }catch(error){
+   if(operatorCsrf&&selectedPlan?.plan_id===pid)
+    planStatus.textContent="Server status unavailable. Load the saved plan to inspect.";
+  }
+  scheduleServerBatchPoll();
+ },900);
+}
 // Deliberate closed allowlist: future write-capable tools cannot enter this flow automatically.
 const approvedBatchReadTools=new Set(["calculate","utc_now","github_public_issues",
  "github_issue_triage","github_issue_analysis","local_document_question",
@@ -1324,7 +1348,8 @@ const renderPlan=plan=>{
    "No report. Complete the plan before generating one.";
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
-  status:plan.status,goal:plan.goal,model:plan.model,
+  status:plan.status,batch_run_status:plan.batch_run_status||"IDLE",
+  goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
   verified_numeric_handoff_lineage:plan.handoffs||[],
   selected_memory_refs:plan.memory_refs||[],
@@ -1391,6 +1416,7 @@ const renderPlan=plan=>{
  planAnalysisReport.textContent=analyses.length?analyses.join("\n---\n"):
    "No AI analysis yet. Approve and execute a github_issue_analysis step.";
  refreshPlanButtons();
+ scheduleServerBatchPoll();
 };
 const refreshPlanButtons=()=>{
  const ready=agentPlanEnabled&&operatorCsrf&&!agentPlanBusy;
@@ -1402,18 +1428,22 @@ const refreshPlanButtons=()=>{
  const id=planIdInput.value.trim();
  const same=selectedPlan&&selectedPlan.plan_id===id;
  const status=same?selectedPlan.status:null;
+ const serverBatch=same?selectedPlan.batch_run_status:null;
+ const runningServer=["RUNNING","STOPPING"].includes(serverBatch);
  $("agent-plan-propose").disabled=!ready;
  $("agent-plan-list").disabled=!ready;
  $("agent-plan-load").disabled=!ready||!/^[0-9a-f]{24}$/.test(id);
  $("agent-plan-approve").disabled=!ready||status!=="PREPARED";
- $("agent-plan-next").disabled=!ready||!["APPROVED","NEXT_READY"].includes(status);
+ $("agent-plan-next").disabled=!ready||runningServer||
+   !["APPROVED","NEXT_READY"].includes(status);
  const batchSteps=same&&["APPROVED","NEXT_READY"].includes(status)
   ?selectedPlan.steps.slice(selectedPlan.next_index):[];
- $("agent-plan-run-remaining").disabled=!ready||batchSteps.length===0||
+ $("agent-plan-run-remaining").disabled=!ready||runningServer||batchSteps.length===0||
   selectedPlan.steps.length>3||!batchSteps.every(s=>approvedBatchReadTools.has(s.tool));
- $("agent-plan-stop-run").disabled=!planBatchRunning||planBatchStopRequested;
+ $("agent-plan-stop-run").disabled=!operatorCsrf||!agentPlanEnabled||agentPlanBusy||
+  !same||serverBatch!=="RUNNING";
  $("agent-plan-resume").disabled=!ready||status!=="INTERRUPTED";
- $("agent-plan-cancel").disabled=!ready||
+ $("agent-plan-cancel").disabled=!ready||runningServer||
   !["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(status);
  $("agent-plan-delete").disabled=!ready||
   !["COMPLETED","CANCELLED","BLOCKED"].includes(status);
@@ -1450,7 +1480,11 @@ const planRequest=async(path,body)=>{
    planMultiFiles.value="";
    planMultiConsent.checked=false;
   }
-  planStatus.textContent=result.status==="PREPARED"
+  planStatus.textContent=result.batch_run_status==="RUNNING"
+   ?"Server accepted the reviewed steps. You may close this browser; leave the local server running."
+   :result.batch_run_status==="STOPPING"
+   ?"Server stop requested. The current step may finish; later steps are blocked."
+   :result.status==="PREPARED"
    ?(result.document_source
      ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
      :(result.document_set_sources||[]).length
@@ -1464,7 +1498,11 @@ const planRequest=async(path,body)=>{
    ?"Evidence-linked final report saved locally. Verify all interpretations."
    :result.status==="COMPLETED"
    ?"All plan steps finished. Generate a final deliverable explicitly."
-   :"Plan status: "+result.status+". No background execution.";
+   :result.batch_run_status==="RUNNING"
+   ?"Server accepted the reviewed steps. You may close this browser; leave the local server running."
+   :result.batch_run_status==="STOPPING"
+   ?"Server stop requested. The in-flight step may finish; later steps are blocked."
+   :"Plan status: "+result.status+", batch: "+(result.batch_run_status||"IDLE")+".";
  }catch(error){
   if(rev===agentPlanRevision&&operatorCsrf)
    planStatus.textContent=error.message==="memory_context_changed"
@@ -1619,77 +1657,32 @@ $("agent-plan-report-download").addEventListener("click",()=>{
   planStatus.textContent="Markdown report download requested by owner. Check its claims.";
  }finally{URL.revokeObjectURL(url);}
 });
-// Slice 72: one explicit batch consent; existing server checks each durable step.
-$("agent-plan-run-remaining").addEventListener("click",async()=>{
- const plan=selectedPlan, pid=planIdInput.value.trim();
- if(!operatorCsrf||!agentPlanEnabled||agentPlanBusy||planBatchRunning||
+// Slice 73: owner explicitly authorizes a server-owned, bounded run.
+// The local server continues while it is alive even if this browser closes.
+// Process restart is NEVER an automatic resume.
+$("agent-plan-run-remaining").addEventListener("click",()=>{
+ const plan=selectedPlan,pid=planIdInput.value.trim();
+ if(!operatorCsrf||!agentPlanEnabled||agentPlanBusy||
     !plan||plan.plan_id!==pid||
-    !["APPROVED","NEXT_READY"].includes(plan.status))return;
+    !["APPROVED","NEXT_READY"].includes(plan.status)||
+    ["RUNNING","STOPPING"].includes(plan.batch_run_status))return;
  const remaining=plan.steps.slice(plan.next_index);
  if(!remaining.length||plan.steps.length>3||
     !remaining.every(s=>approvedBatchReadTools.has(s.tool)))return;
  const description=remaining.map((s,i)=>
   (plan.next_index+i+1)+". "+s.tool+" "+JSON.stringify(s.args)).join("\n");
- if(!window.confirm("Run these "+remaining.length+
-   " already-reviewed READ-ONLY steps in sequence?\n\n"+description+
-   "\n\nEach step is checked again by the server. Stop only prevents the NEXT step. "+
-   "Closing the browser does not cancel an in-flight request. No automatic retry."))return;
- const rev=++agentPlanRevision;
- agentPlanBusy=true;
- planBatchRunning=true;
- planBatchStopRequested=false;
- refreshPlanButtons();
- let cursor=plan.next_index;
- try{
-  while(cursor<plan.steps.length&&!planBatchStopRequested&&
-        rev===agentPlanRevision&&operatorCsrf){
-   if(!selectedPlan||selectedPlan.plan_id!==pid||
-      selectedPlan.next_index!==cursor||
-      !["APPROVED","NEXT_READY"].includes(selectedPlan.status)||
-      !approvedBatchReadTools.has(selectedPlan.steps[cursor]?.tool)){
-    planStatus.textContent="Batch stopped: plan state or tool allowlist changed.";
-    break;
-   }
-   planStatus.textContent="Running reviewed read-only step "+(cursor+1)+
-    "/"+plan.steps.length+". No automatic retry.";
-   const response=await appFetch("/api/local-agent-plan-next",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({plan_id:pid})});
-   const result=await response.json();
-   if(rev!==agentPlanRevision||!operatorCsrf)break;
-   if(!response.ok)throw Error(result.error||"plan_batch_step_failed");
-   renderPlan(result);
-   if(result.plan_id!==pid||result.next_index!==cursor+1||
-      !["NEXT_READY","COMPLETED"].includes(result.status))
-    throw Error("unexpected_plan_transition_reload_before_retry");
-   cursor=result.next_index;
-   if(result.status==="COMPLETED"){
-    planStatus.textContent="Reviewed read-only steps completed. Generate the final report separately.";
-    break;
-   }
-   if(planBatchStopRequested){
-    planStatus.textContent="Stopped after step "+cursor+". Remaining steps stay saved.";
-    break;
-   }
-  }
-  if(planBatchStopRequested&&cursor<plan.steps.length&&rev===agentPlanRevision&&operatorCsrf)
-   planStatus.textContent="Stopped after step "+cursor+". No further step dispatched.";
- }catch(error){
-  if(rev===agentPlanRevision&&operatorCsrf)
-   planStatus.textContent="Batch stopped: "+error.message+
-    ". An in-flight step may have completed. Load the saved plan and inspect before retrying.";
- }finally{
-  planBatchRunning=false;
-  planBatchStopRequested=false;
-  if(rev===agentPlanRevision)agentPlanBusy=false;
-  refreshPlanButtons();
- }
+ if(!window.confirm("Authorize the LOCAL SERVER to run these "+
+    remaining.length+" previously reviewed READ-ONLY steps?\n\n"+
+    description+"\n\nRuns sequentially while local server is on, even if "+
+    "browser closes. Stop takes effect before the next step. "+
+    "No replay after service restart or uncertain outcome."))return;
+ planRequest("/api/local-agent-plan-batch-start",{plan_id:pid});
 });
 $("agent-plan-stop-run").addEventListener("click",()=>{
- if(!planBatchRunning||planBatchStopRequested)return;
- planBatchStopRequested=true;
- planStatus.textContent="Stop requested. Current request may finish; no next step will be dispatched.";
- refreshPlanButtons();
+ const pid=planIdInput.value.trim();
+ if(!operatorCsrf||agentPlanBusy||!selectedPlan||
+    selectedPlan.plan_id!==pid||selectedPlan.batch_run_status!=="RUNNING")return;
+ planRequest("/api/local-agent-plan-batch-stop",{plan_id:pid});
 });
 
 for(const [id,endpoint] of [
