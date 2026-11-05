@@ -138,6 +138,8 @@ class ModelSafetyRestartHTTPTests(unittest.TestCase):
             self.dispatched.append(model)
             if model == "fixture:timeout":
                 raise AgentError("local_model_timeout")
+            if model == "fixture:disconnect":
+                raise AgentError("local_model_transport_uncertain")
             return {"status": "SYNTHETIC_MODEL_SMOKE_PASSED",
                     "model": model, "source_evidence_verified": True,
                     "model_calls": 1, "external_write_count": 0,
