@@ -1520,3 +1520,22 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Shipped:** opt-in, authenticated installed Ollama model discovery; real-model user-initiated CLI and browser tool-call probe; clear separation of 'Ollama reachable', 'model text inference responded' and 'calculate tool call actually observed'; no history save and no business/tool write. Readiness is explicitly disabled unless the local agent is enabled.
 - **Not yet proven:** no real Ollama model weights or executable running on the user's Windows machine were included in CI. No real Windows RAM/CPU performance evidence, no durable background agent planning or write-capable third-party connectors. Manual acceptance requires running `python app/local_ollama_readiness.py` and `python app/local_ollama_readiness.py --model <installed-model>` on the actual host and recording results. Do not claim `MODEL_RESPONDED` on that host before running it.
 - **Strategic next step:** use the now-shipped test harness to establish a real installed-model compatibility baseline, then implement bounded task plans with explicit permission gates rather than continuing to accumulate mock work.
+
+
+## Slice 52 · 2026-11-05 · Real model-proposed, human-approved durable read-only task plans
+
+**Why:** Prior slices delivered local model chat, isolated context and real-model readiness tooling. The next core functionality is task-level execution: a model proposes a limited plan, an owner reviews and authorizes it, and each step is performed with explicit human triggering. No SaaS business model or fictional autonomous completion is implied.
+
+**Implemented in `feat/approved-readonly-agent-plans-slice-52` (awaiting exact-head CI):**
+- `app/local_agent_task_plans.py`: actual Ollama JSON-format plan proposal via fixed-loopback model transport, strict tool and argument verification, <=3 allowed steps (`calculate`/`utc_now` only), and a separate opt-in plaintext SQLite plan ledger capped at 12 plans.
+- Durable state machine: `PREPARED` (not executed), `APPROVED` (not executed), `NEXT_READY` (previous step committed), `COMPLETED`, and explicit `CANCELLED`/`BLOCKED`. `IN_FLIGHT` persisted **before** dispatch; process restart converts it to `INTERRUPTED` and **does not rerun** the step. Resumption is explicit and requires a new separate next-step action. Terminal plans may be deleted to free capacity.
+- `app/local_server.py`: `--enable-agent-plans` startup opt-in alongside `--enable-local-agent`; operator-only plan preview/list/load and owner-CSRF guarded propose/approve/next/resume/cancel/delete endpoints. Reuses the existing single-in-flight model/action semaphore. Agent-planning endpoints default to disabled.
+- `web/index.html`: beginner-oriented **Plan a small local task** panel with exact step preview, explicit approval and one-action-at-a-time controls, saved-plan loading, result display and session lock cleanup. Model response displayed as plain text only.
+- `tests/test_local_agent_task_plans.py`: model JSON validation, unauthorized tool rejection, persisted state/restart and interrupted-state recovery, one-step-per-click, capacity and deletion tests.
+- `tests/test_local_agent_task_plans_http.py`: owner session/CSRF/origin/default deny, malformed requests and concurrency/approval-state gate regression.
+- Chromium fixture and browser test added to validate the complete propose-review-approve-step-step-delete interaction using a deterministic **fake model response**, with real read-only calculator and UTC tool execution.
+- `docs/LOCAL_AGENT_TASK_PLANS_V1.md` plus `README.md`: startup usage, proof boundaries, retention, risk and scope.
+
+**Gate before merge:** all exact-head GitHub Actions jobs (Python 3.11, 3.12, 3.13, Chromium, Windows PowerShell ACL fixture, and two actual public GitHub read-only checks) must succeed. CI cannot verify that Ollama and model weights are installed on the user's Windows machine; no real external tool writes, unbounded autonomy, cross-process locking or production-grade secrecy are claimed.
+
+**High-value next step:** run a real Ollama smoke with a model installed on Windows; then add independently scoped read-only external tools and explicit permission policy prior to any external writes. Avoid another long run of only security/test slices without end-user capability gains.
