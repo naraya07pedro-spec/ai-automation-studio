@@ -636,6 +636,19 @@ class LocalAgentPlanStore:
                         # Missing, tampered or unrepresentable numeric evidence
                         # never starts a new step or consumes an approval.
                         raise PlanError("plan_handoff_invalid_source") from None
+                    # A cached numeric field derived from a granted public
+                    # GitHub triage must not bypass later grant revocation.
+                    for bound in (handoff_entry or {}).get("bindings", []):
+                        if bound["source_tool"] != "github_issue_triage":
+                            continue
+                        if self.github_reader is None:
+                            raise PlanError("public_source_permission_changed")
+                        source = old["steps"][bound["from_step"] - 1]
+                        try:
+                            self.github_reader.check(
+                                source["args"]["repo"], old["approval_epoch"])
+                        except GitHubPlanReadError:
+                            raise PlanError("public_source_permission_changed") from None
                 snapshot = None
                 document_set = None
                 if step["tool"] == MULTI_DOCUMENT_TOOL:
