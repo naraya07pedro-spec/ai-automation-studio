@@ -2136,6 +2136,9 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
 });
 
 const operatorReady=()=>{
+ // Prior logout locks the artifact receipt. A fresh login starts with no
+ // selected plan and must not keep displaying the locked-session placeholder.
+ planExportResult.textContent="No file saved to the local workspace.";
  $("operator-gate").style.display="none";
  $("operator-password").value="";
  $("operator-logout").hidden=false;
