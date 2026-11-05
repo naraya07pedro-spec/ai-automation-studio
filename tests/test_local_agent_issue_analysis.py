@@ -119,6 +119,31 @@ class IssueAnalysisTests(unittest.TestCase):
             analyze_public_issue_metadata(self.reader,REPO,epoch,"fixture:model",
                                           transport=revoke_while_model_runs)
 
+    def test_issue_analysis_timeout_survives_durable_plan_error_masking(self):
+        from local_ollama_agent import AgentError
+        self.policy.grant(REPO)
+        epoch=self.policy.version()
+        def timed_out(_):raise AgentError("local_model_timeout")
+        with self.assertRaisesRegex(IssueAnalysisError,"^local_model_timeout$"):
+            analyze_public_issue_metadata(self.reader,REPO,epoch,
+                                          "fixture:model",transport=timed_out)
+        def analyzer(reader,repo,approved_epoch,model,goal):
+            return analyze_public_issue_metadata(
+                reader,repo,approved_epoch,model,goal,transport=timed_out)
+        store=LocalAgentPlanStore(":memory:",github_reader=self.reader,
+                                  issue_analyzer=analyzer)
+        try:
+            plan=store.create({"model":"fixture:model","goal":"Review open issues",
+                               "steps":[STEP]})
+            store.approve(plan["plan_id"])
+            with self.assertRaisesRegex(PlanError,"^local_model_timeout$"):
+                store.advance(plan["plan_id"])
+            blocked=store.get(plan["plan_id"])
+            self.assertEqual("BLOCKED",blocked["status"])
+            self.assertEqual(0,blocked["next_index"])
+            self.assertEqual([],blocked["results"])
+        finally:store.close()
+
     def test_proposal_requires_explicit_external_tool_mode(self):
         def fake(_):
             return {"message":{"content":json.dumps({"steps":[STEP]})}}
