@@ -15,7 +15,7 @@ MAX_QUOTE = 180
 MAX_CITATIONS = 4
 # Numbers in model answers require the same literal numeric token in a verified quote.
 # This does not prove semantic entailment or validate unquoted non-numeric claims.
-_NUMERIC_TOKEN = re.compile(r"(?<!\w)[+\-\u2212]?\d+(?:[.,:/-]\d+)*(?:[%\u00b0])?(?!\w)")
+_NUMERIC_TOKEN = re.compile(r"(?<!\w)[+\-\u2212]?\d+(?:[.,:/-]\d+)*(?:[A-Za-z\u00b5\u03bc%\u00b0]+)?(?!\w)")
 CHUNK_CHARS = 650
 NAME_PATTERN = re.compile(r"[\w.() -]{1,80}\.(txt|md)\Z", re.ASCII | re.IGNORECASE)
 
@@ -63,7 +63,7 @@ def validate_document(filename, content, question, model):
 def unsupported_numeric_claims(answer, quotes):
     """Fail closed on unsupported literal numbers/times, without guessing semantics.
 
-    Compare full numeric tokens, not substrings: 9 must not match 19 or 09:00.
+    Compare full numeric tokens, including compact units such as 5kg or 16GB.\n    9 must not match 19 or 09:00.
     Exact formatting is deliberately required, even for equivalent date formats.
     """
     answer_tokens = set(_NUMERIC_TOKEN.findall(answer))
