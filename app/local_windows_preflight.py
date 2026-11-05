@@ -125,6 +125,8 @@ def diagnose(model=None, *, run_smoke=False, catalog=None, memory=None,
     if report["status"] != "READY_FOR_EXPLICIT_SMOKE":
         report["smoke_status"] = "NOT_ATTEMPTED"
         return report
+    # Set before dispatch: an inference that fails has still been attempted.
+    report["live_model_inference_attempted"] = live_smoke is None
     try:
         result = (live_smoke or smoke)(model)
         # Do not trust an injected callback to pretend to be live.
