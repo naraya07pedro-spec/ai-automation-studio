@@ -276,8 +276,13 @@ aas:timeline:urgent
 <div class="kicker">LOCAL MODEL · READ-ONLY AGENT</div><h2>Ask your local AI agent</h2>
 <p class="muted">Optional Ollama inference running on your computer. No cloud keys and no business actions. Install Ollama and start this local server with --enable-local-agent to activate.</p>
 <div class="core-compact">
-<div class="field"><label for="local-agent-model">Installed Ollama model</label><input id="local-agent-model" maxlength="80" placeholder="e.g. qwen2.5:3b" autocomplete="off"></div>
+<div class="field"><label for="local-agent-model">Installed Ollama model</label><input id="local-agent-model" list="local-agent-installed-model-list" maxlength="80" placeholder="e.g. qwen2.5:3b" autocomplete="off"></div>
 <div class="field"><label for="local-agent-mode">Allowed tools</label><input id="local-agent-mode" value="Calculator and UTC time only" disabled></div></div>
+<datalist id="local-agent-installed-model-list"></datalist>
+<div class="core-actions" style="margin-top:14px">
+<button id="local-agent-find-models" type="button" class="secondary" disabled>Find installed Ollama models</button>
+<button id="local-agent-test-model" type="button" class="secondary" disabled>Test local model &amp; tool calling</button></div>
+<div id="local-agent-readiness-status" class="setup-msg" role="status" aria-live="polite">No local model check performed. Model compatibility is unverified.</div>
 <div class="field"><label for="local-agent-prompt">Your request (max 3,000 characters)</label><textarea id="local-agent-prompt" maxlength="3000" rows="4" style="width:100%;min-height:110px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="Ask a question or request a calculation. Do not enter secrets or customer records."></textarea></div>
 <div class="field"><label for="local-agent-conversation">Conversation ID (local only, maximum 8 saved threads)</label>
 <input id="local-agent-conversation" list="local-agent-conversation-list" value="default" maxlength="32" autocomplete="off" disabled aria-describedby="local-agent-thread-hint">
@@ -742,6 +747,67 @@ let localAgentEnabled=false;
 let localAgentHistoryEnabled=false;
 const localAgentRemember=$("local-agent-remember");
 const agentHistoryDisplay=$("local-agent-history-display");
+const agentReadinessStatus=$("local-agent-readiness-status");
+const agentModelsButton=$("local-agent-find-models");
+const agentProbeButton=$("local-agent-test-model");
+let agentReadinessEnabled=false;
+const readInstalledModels=async()=>{
+ if(!operatorCsrf||!agentReadinessEnabled)return;
+ const revision=++localAgentRevision;
+ agentModelsButton.disabled=true;
+ agentReadinessStatus.textContent="Checking installed models on 127.0.0.1:11434…";
+ try{
+  const response=await appFetch("/api/local-agent-models");
+  const data=await response.json();
+  if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"ollama_unavailable");
+  const list=$("local-agent-installed-model-list");
+  list.replaceChildren();
+  const models=data.models||[];
+  for(const name of models){
+   const option=document.createElement("option");
+   option.value=name;list.appendChild(option);
+  }
+  agentReadinessStatus.textContent=models.length
+    ?("Ollama reachable; "+models.length+" model(s) found. Select a model and run Test to verify tool calling.")
+    :"Ollama reachable but no supported model names are installed. Install a model and refresh.";
+ }catch(error){
+  if(revision===localAgentRevision)
+   agentReadinessStatus.textContent="Model discovery failed: "+error.message;
+ }finally{
+  if(revision===localAgentRevision&&operatorCsrf)agentModelsButton.disabled=!agentReadinessEnabled;
+ }
+};
+agentModelsButton.addEventListener("click",readInstalledModels);
+agentProbeButton.addEventListener("click",async()=>{
+ if(!operatorCsrf||!agentReadinessEnabled)return;
+ const model=$("local-agent-model").value.trim();
+ if(!model){agentReadinessStatus.textContent="Enter or choose an installed model first.";return;}
+ const revision=++localAgentRevision;
+ agentProbeButton.disabled=true;
+ localAgentSend.disabled=true;
+ agentReadinessStatus.textContent="Running one local, read-only model compatibility probe…";
+ try{
+  const response=await appFetch("/api/local-agent-probe",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({model})});
+  const data=await response.json();
+  if(revision!==localAgentRevision||!operatorCsrf
+      ||$("local-agent-model").value.trim()!==model)return;
+  if(!response.ok)throw Error(data.error||"model_probe_failed");
+  agentReadinessStatus.textContent=(data.tool_calling==="OBSERVED")
+   ?"Model inference succeeded and a calculator tool call was observed. This is not proof of answer accuracy."
+   :"Model answered locally, but calculator tool calling was NOT observed. This model is not verified for agent tools.";
+ }catch(error){
+  if(revision===localAgentRevision&&operatorCsrf)
+   agentReadinessStatus.textContent="Model check failed: "+error.message;
+ }finally{
+  if(revision===localAgentRevision&&operatorCsrf){
+   agentProbeButton.disabled=!agentReadinessEnabled;
+   localAgentSend.disabled=!localAgentEnabled;
+  }
+ }
+});
 const conversationField=$("local-agent-conversation");
 const selectedConversation=()=>conversationField.value.trim();
 const validConversation=id=>/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id);
@@ -810,6 +876,9 @@ const invalidateLocalAgent=()=>{
  localAgentRevision++;
  localAgentSend.disabled=!localAgentEnabled||!operatorCsrf;
 };
+$("local-agent-model").addEventListener("input",()=>{
+ agentReadinessStatus.textContent="Model selection changed. Tool calling has not been checked for this selection.";
+});
 conversationField.addEventListener("input",()=>{
  invalidateLocalAgent();
  agentHistoryDisplay.textContent="Select View saved context for this conversation.";
@@ -820,6 +889,8 @@ $("local-agent-prompt").addEventListener("input",invalidateLocalAgent);
 const refreshLocalAgent=async()=>{
  const revision=++localAgentRevision;
  localAgentEnabled=false;localAgentHistoryEnabled=false;
+ agentReadinessEnabled=false;
+ agentModelsButton.disabled=true;agentProbeButton.disabled=true;
  localAgentRemember.disabled=true;
  conversationField.disabled=true;localAgentSend.disabled=true;
  try{
@@ -827,6 +898,9 @@ const refreshLocalAgent=async()=>{
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
+  agentReadinessEnabled=localAgentEnabled&&data.readiness===true;
+  agentModelsButton.disabled=!agentReadinessEnabled;
+  agentProbeButton.disabled=!agentReadinessEnabled;
   localAgentHistoryEnabled=localAgentEnabled&&data.persisted===true;
   localAgentRemember.disabled=!localAgentHistoryEnabled;
   conversationField.disabled=!localAgentHistoryEnabled;
@@ -898,6 +972,10 @@ const lockOperatorUI=message=>{
  operatorCsrf=null;
  localAgentEnabled=false;
  localAgentHistoryEnabled=false;
+ agentReadinessEnabled=false;
+ agentModelsButton.disabled=true;agentProbeButton.disabled=true;
+ $("local-agent-installed-model-list").replaceChildren();
+ agentReadinessStatus.textContent="Session locked; model readiness hidden.";
  localAgentRemember.checked=false;
  localAgentRemember.disabled=true;
  conversationField.value="default";
