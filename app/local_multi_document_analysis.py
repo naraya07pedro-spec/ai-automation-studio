@@ -5,6 +5,7 @@ A small deterministic lexical filter limits the source passages sent to Ollama.
 """
 import json
 import re
+import unicodedata
 
 from local_document_analysis import (LocalDocumentError, MAX_ANSWER, MAX_CITATIONS,
                                      MAX_QUESTION, MAX_QUOTE, NAME_PATTERN,
@@ -16,7 +17,10 @@ MIN_FILES = 2
 MAX_FILE_BYTES = 2500
 MAX_TOTAL_BYTES = 6000
 CHUNK_CHARS = 450
+CHUNK_OVERLAP = 96
+CHUNK_STRIDE = CHUNK_CHARS - CHUNK_OVERLAP
 MAX_SELECTED_CHUNKS = 5
+RETRIEVAL_METHOD = "DETERMINISTIC_LEXICAL_OVERLAP_V2"
 MAX_RESPONSE = 6000
 _STOP = frozenset((
     "yang", "dan", "atau", "dari", "untuk", "pada", "dengan", "apa",
@@ -69,32 +73,69 @@ def validate_multiple_documents(documents, question, model):
 
 
 def _terms(text):
-    return {word for word in _WORD.findall(text.casefold())
-            if len(word) >= 2 and word not in _STOP}
+    """Small, explicit normalization; not a semantic or stemming model."""
+    words = _WORD.findall(unicodedata.normalize("NFKC", text).casefold())
+    result = set()
+    for original in words:
+        if len(original) < 2 or original in _STOP:
+            continue
+        word = original
+        # Conservative inflection handling for simple English plurals.
+        if len(word) >= 6 and word.endswith("ies"):
+            word = word[:-3] + "y"
+        elif len(word) >= 5 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+            word = word[:-1]
+        # Explicit Indonesian possessive suffix only: dokumennya -> dokumen.
+        if len(word) >= 7 and word.endswith("nya"):
+            word = word[:-3]
+        if len(word) >= 2 and word not in _STOP:
+            result.add(word)
+    return result
 
 
 def retrieve_passages(documents, question):
-    """Deterministic no-model rank of exact source chunks by word overlap."""
+    """Lexical rank with 96-character overlap to reduce edge losses.
+
+    Keeps the exact underlying source characters. No fabricated text, vector
+    model or fuzzy inferred citation. Windows are not persisted or indexed.
+    """
     query_terms = _terms(question)
     candidates = []
     for file_number, item in enumerate(documents, 1):
         content = item["content"]
-        for offset in range(0, len(content), CHUNK_CHARS):
+        for window_number, offset in enumerate(range(0, len(content), CHUNK_STRIDE), 1):
+            # Suppress redundant trailing windows entirely covered by a prior
+            # window, while ensuring the last portion of the file is covered.
+            if window_number > 1 and offset + CHUNK_OVERLAP >= len(content):
+                break
             text = content[offset:offset + CHUNK_CHARS]
-            overlap = query_terms & _terms(text)
+            overlap = sorted(query_terms & _terms(text))
             if not overlap:
                 continue
             candidates.append({
-                "chunk_id": "F" + str(file_number) + "C" +
-                            str(1 + offset // CHUNK_CHARS),
+                "chunk_id": "F" + str(file_number) + "C" + str(window_number),
                 "file_index": file_number - 1,
                 "start_char": offset,
                 "text": text,
                 "score": len(overlap),
+                "matched_terms": overlap,
             })
     candidates.sort(key=lambda chunk: (-chunk["score"], chunk["file_index"],
                                        chunk["start_char"]))
     return candidates[:MAX_SELECTED_CHUNKS]
+
+
+def retrieval_evidence(passages, names):
+    """Expose capped, inspectable lexical hits. NOT a confidence metric."""
+    return [{
+        "chunk_id": chunk["chunk_id"],
+        "filename": names[chunk["file_index"]],
+        "start_char": chunk["start_char"],
+        "end_char": chunk["start_char"] + len(chunk["text"]),
+        "lexical_overlap_count": chunk["score"],
+        "matched_terms": chunk["matched_terms"][:16],
+        "source_preview": chunk["text"][:160],
+    } for chunk in passages]
 
 
 def _response(document_names, question, model, passages, message):
@@ -153,7 +194,12 @@ def _response(document_names, question, model, passages, message):
         "citations": citations,
         "selected_files": document_names,
         "selected_passages": len(passages),
-        "retrieval": "DETERMINISTIC_LEXICAL_OVERLAP_V1",
+        "retrieval": RETRIEVAL_METHOD,
+        "retrieval_evidence": retrieval_evidence(passages, document_names),
+        "retrieval_limitations": (
+            "Keyword matching with light inflection normalization and overlapping "
+            "windows; may miss synonyms, paraphrases and relevant context."
+        ),
         "model_calls": 1,
         "source_scope": "OPERATOR_SELECTED_TEXT_FILES_ONLY",
         "interpretation_verified": False,
@@ -175,7 +221,12 @@ def analyze_multiple_documents(documents, question, model, transport=None):
             "citations": [],
             "selected_files": names,
             "selected_passages": 0,
-            "retrieval": "DETERMINISTIC_LEXICAL_OVERLAP_V1",
+            "retrieval": RETRIEVAL_METHOD,
+            "retrieval_evidence": [],
+            "retrieval_limitations": (
+                "No lexical overlap. This does not prove the answer is absent; "
+                "synonyms, paraphrases and vocabulary differences can be missed."
+            ),
             "model_calls": 0,
             "source_scope": "OPERATOR_SELECTED_TEXT_FILES_ONLY",
             "interpretation_verified": False,
