@@ -1,6 +1,7 @@
 """Slice 60: deterministic local Ollama transport failures and timeout contracts."""
 import json
 from pathlib import Path
+from http.client import IncompleteRead, BadStatusLine
 import sys
 import unittest
 from unittest.mock import patch
@@ -70,6 +71,8 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
             (ConnectionResetError("connection reset"),"local_model_transport_uncertain"),
             (URLError(BrokenPipeError("broken pipe")),"local_model_transport_uncertain"),
             (BrokenPipeError("broken pipe"),"local_model_transport_uncertain"),
+            (IncompleteRead(b"partial",12),"local_model_transport_uncertain"),
+            (BadStatusLine("incomplete headers"),"local_model_transport_uncertain"),
             (URLError(OSError("unknown transport phase")),"local_model_transport_uncertain"),
             (OSError("unknown transport phase"),"local_model_transport_uncertain"),
             (HTTPError(url,408,"Request Timeout",{},None),"local_model_timeout"),
@@ -86,6 +89,15 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
                 with self.assertRaisesRegex(AgentError,"^"+expected+"$"):
                     ollama_transport({"model":"fixture:model"},opener=opener)
                 self.assertEqual(1,len(opener.calls),"Must never retry a POST")
+
+    def test_truncated_body_after_response_headers_is_uncertain(self):
+        class PartialBody(DummyResponse):
+            def read(self,_limit):
+                raise IncompleteRead(b"partial response", 28)
+        opener=DummyOpener(PartialBody(b"unused"))
+        with self.assertRaisesRegex(AgentError,"^local_model_transport_uncertain$"):
+            ollama_transport({"model":"fixture:model"},opener=opener)
+        self.assertEqual(1,len(opener.calls))
 
     def test_definite_connect_refusal_with_errno_does_not_latch_as_uncertain(self):
         import errno
