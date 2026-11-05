@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 import json
 import sys
 from urllib.error import HTTPError, URLError
-from urllib.request import build_opener, ProxyHandler, Request
+from urllib.request import build_opener, ProxyHandler, Request, HTTPRedirectHandler
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MAX_TURNS = 4
@@ -34,6 +34,22 @@ SYSTEM = ("You are a local read-only assistant. Use the available tools when use
 
 class AgentError(Exception):
     pass
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Never follow redirects outside the fixed localhost endpoint."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def safe_local_opener():
+    """Ignore OS HTTP proxies and reject redirects from the Ollama server."""
+    return build_opener(ProxyHandler({}), _NoRedirect())
+
+
+def valid_model_name(model):
+    return (type(model) is str and 1 <= len(model) <= 80
+            and all(c.isascii() and (c.isalnum() or c in "._:-") for c in model))
 
 
 def calculate(args):
@@ -72,7 +88,7 @@ def execute_tool(name, args):
 
 def ollama_transport(payload):
     """Fixed loopback only. Bypass environment proxy; cap response memory and time."""
-    opener = build_opener(ProxyHandler({}))
+    opener = safe_local_opener()
     req = Request(OLLAMA_URL, data=json.dumps(payload).encode("utf-8"),
                   headers={"Content-Type": "application/json"}, method="POST")
     try:
@@ -93,8 +109,7 @@ def run_agent(prompt, model, transport=None, history=None):
     """One user-initiated turn; model-generated calls never expand tool permissions."""
     if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
         raise AgentError("invalid_prompt")
-    if (type(model) is not str or not 1 <= len(model) <= 80 or
-            not all(c.isascii() and (c.isalnum() or c in "._:-") for c in model)):
+    if not valid_model_name(model):
         raise AgentError("invalid_model_name")
     transport = transport or ollama_transport
     # History is user-owned context only, never a source of tool permissions.
