@@ -1409,7 +1409,9 @@ const planRequest=async(path,body)=>{
    planDocumentConsent.checked=false;
   }
   planStatus.textContent=result.status==="PREPARED"
-   ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
+   ?(result.document_source
+     ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
+     :"Plan proposed. Review every tool and argument before approving.")
    :result.status==="APPROVED"
    ?"Approved. Nothing executed yet. Click Execute next step."
    :result.status==="NEXT_READY"
