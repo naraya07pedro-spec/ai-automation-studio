@@ -592,12 +592,19 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-approve").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "APPROVED"')
-        self.page.locator("#agent-plan-next").click()
-        saved_profile = self.page.evaluate(
-            "() => JSON.parse(JSON.parse(document.querySelector("
-            + "'#agent-plan-details').textContent).completed_steps[0].output)")
+        with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    "/api/local-agent-plan-next")) as recorded:
+            self.page.locator("#agent-plan-next").click()
+        self.assertEqual(200, recorded.value.status)
+        saved_plan = recorded.value.json()
+        self.assertEqual("COMPLETED", saved_plan["status"])
+        self.assertEqual(1, len(saved_plan["results"]))
+        saved_profile = json.loads(saved_plan["results"][0]["output"])
         self.assertEqual("30",
                          saved_profile["column_stats"][0]["numeric_summary"]["sum"])
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
         self.assertNotIn("SYNTHETIC_PERSON_2",
                          self.page.locator("#agent-plan-details").inner_text())
         self.page.locator("#agent-plan-load").click()
