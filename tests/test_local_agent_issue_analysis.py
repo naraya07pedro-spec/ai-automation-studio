@@ -144,6 +144,27 @@ class IssueAnalysisTests(unittest.TestCase):
             self.assertEqual([],blocked["results"])
         finally:store.close()
 
+    def test_uncertain_transport_failure_keeps_approved_task_blocked(self):
+        from local_ollama_agent import AgentError
+        self.policy.grant(REPO)
+        def uncertain(_):raise AgentError("local_model_transport_uncertain")
+        def analyzer(reader,repo,epoch,model,goal):
+            return analyze_public_issue_metadata(reader,repo,epoch,model,goal,
+                                                 transport=uncertain)
+        store=LocalAgentPlanStore(":memory:",github_reader=self.reader,
+                                  issue_analyzer=analyzer)
+        try:
+            plan=store.create({"model":"fixture:model","goal":"Review issues",
+                               "steps":[STEP]})
+            store.approve(plan["plan_id"])
+            with self.assertRaisesRegex(PlanError,"^local_model_transport_uncertain$"):
+                store.advance(plan["plan_id"])
+            blocked=store.get(plan["plan_id"])
+            self.assertEqual("BLOCKED",blocked["status"])
+            self.assertEqual(0,blocked["next_index"])
+            self.assertEqual([],blocked["results"])
+        finally:store.close()
+
     def test_proposal_requires_explicit_external_tool_mode(self):
         def fake(_):
             return {"message":{"content":json.dumps({"steps":[STEP]})}}
