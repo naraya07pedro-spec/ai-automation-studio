@@ -150,6 +150,51 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "No unresolved local timeout")
         expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
 
+    def test_owner_memory_cards_create_select_replace_delete_without_implicit_use(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-memory-id").fill("memory_browser_66")
+        self.page.locator("#local-memory-text").fill("Local reference: use Indonesian.")
+        self.page.locator("#local-memory-save-button").click()
+        expect(self.page.locator("#local-memory-list")).to_contain_text(
+            "memory_browser_66")
+        expect(self.page.locator("#local-memory-list")).to_contain_text(
+            "Local reference: use Indonesian.")
+        expect(self.page.locator("#local-memory-status")).to_contain_text(
+            "owner-curated notes")
+
+        self.page.locator("#local-memory-use").fill("memory_browser_66")
+        self.page.locator("#local-agent-prompt").fill("What note was explicitly selected?")
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-output")).to_contain_text(
+            "selected note IDs: memory_browser_66")
+        expect(self.page.locator("#local-agent-status")).to_contain_text(
+            "Selected local notes: memory_browser_66")
+
+        # A next independent chat turn has no implicit memory.
+        self.page.locator("#local-memory-use").fill("")
+        self.page.locator("#local-agent-send").click()
+        expect(self.page.locator("#local-agent-output")).to_contain_text("Fixture answer:")
+        expect(self.page.locator("#local-agent-output")).not_to_contain_text(
+            "selected note IDs")
+        expect(self.page.locator("#local-agent-status")).to_contain_text(
+            "Selected local notes: none")
+
+        self.page.locator("#local-memory-load-button").click()
+        expect(self.page.locator("#local-memory-revision")).to_contain_text(
+            "revision 1")
+        self.page.locator("#local-memory-text").fill(
+            "Updated memory, no automatic model access.")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#local-memory-save-button").click()
+        expect(self.page.locator("#local-memory-list")).to_contain_text(
+            "Updated memory, no automatic model access.")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#local-memory-delete-button").click()
+        expect(self.page.locator("#local-memory-list")).not_to_contain_text(
+            "memory_browser_66")
+        expect(self.page.locator("#local-memory-status")).to_contain_text(
+            "Deleted local memory note")
+
     def test_device_acceptance_fixture_is_not_misrepresented_as_real_ollama(self):
         expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
