@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import errno
+from http.client import HTTPException
 import json
 import sys
 from urllib.error import HTTPError, URLError
@@ -139,6 +140,10 @@ def ollama_transport(payload, *, timeout_seconds=25, opener=None):
         raise AgentError("local_model_transport_uncertain") from None
     except TimeoutError:
         raise AgentError("local_model_timeout") from None
+    except HTTPException:
+        # IncompleteRead/BadStatusLine can occur after POST dispatch; a
+        # truncated HTTP response cannot prove the backend stopped inference.
+        raise AgentError("local_model_transport_uncertain") from None
     except OSError as exc:
         if _connection_refused(exc):
             raise AgentError("local_model_unavailable") from None
