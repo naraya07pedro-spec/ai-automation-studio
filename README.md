@@ -3,6 +3,14 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Typed numeric handoffs across approved task steps (Slice 71)
+
+Reviewed task plans can **reuse a saved numeric result in a later calculator step** without the owner copying values by hand. For example, the local agent may propose `7 × 8` followed by `previous output × 2`, and each step still requires a separate owner click. A stricter example reads visible-label counts from **previously permissioned** public GitHub issue triage and calculates a flagged-share percentage, without additional GitHub requests or model-generated data interpretation between the steps.
+
+The only supported reference is a two-key object such as `{"from_step":1,"field":"output"}`. It must point strictly backward to a preceding `calculate.output`, or to one of `github_issue_triage.returned_count`, `review_flagged_count`, `unassessed_count`. No arbitrary text fields, source documents, paths, JSONPath, code, or general AI-generated answers can flow into operands. The executor resolves only recorded outputs, rechecks calculator bounds and triage-count consistency **before** starting the next step, and refuses invalid sources with HTTP 409. Every successfully resolved value and SHA-256 source fingerprint is saved as an audit log visible in the plan and final Markdown report, with legacy plans migrated unchanged.
+
+This is opt-in through the existing `--enable-local-agent --enable-agent-plans` flags; using public GitHub counts also requires `--enable-agent-github-read` and an explicit source grant. **No auto-execution, new external-write tool or real PC Ollama test is introduced.** Automated CI uses synthetic model fixtures; actual Windows/Ollama acceptance remains deferred. [Complete typed binding contract](docs/TYPED_STEP_HANDOFFS_V1.md).
+
 ## Multi-document comparisons inside owner-reviewed task plans (Slice 70)
 
 A task plan can now use the existing local source-cited retrieval engine to compare **2–3 explicitly selected short text/Markdown files** in a **single approved plan step**. This is an additional real data source for durable tasks, not a temporary Q&A window or unrestricted file search.
