@@ -20,7 +20,7 @@ from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
-from local_ollama_agent import run_agent, AgentError
+from local_ollama_agent import run_agent, AgentError, valid_model_name
 from local_document_analysis import (analyze_local_document, LocalDocumentError,
                                      validate_document)
 from local_multi_document_analysis import (analyze_multiple_documents,
@@ -29,6 +29,7 @@ from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan)
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
+from local_multi_doc_smoke import smoke as run_local_device_acceptance
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
 
@@ -61,7 +62,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_agent_models=None, local_agent_probe=None,
                    local_agent_planner=None, local_agent_plan_store=None,
                    local_document_analyzer=None,
-                   local_multi_document_analyzer=None):
+                   local_multi_document_analyzer=None,
+                   local_device_acceptance=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -194,6 +196,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                and local_document_analyzer is not None),
                                  "multi_documents": (local_agent_runner is not None
                                                      and local_multi_document_analyzer is not None),
+                                 "device_acceptance": (local_agent_runner is not None
+                                                       and local_device_acceptance is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
                                  "github_plan_read": bool(
@@ -338,6 +342,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-probe",
                                  "/api/local-agent-document-analyze",
                                  "/api/local-agent-multi-document-analyze",
+                                 "/api/local-agent-device-acceptance",
                                  "/api/local-agent-plan-create",
                                  "/api/local-agent-plan-approve",
                                  "/api/local-agent-plan-next",
@@ -374,6 +379,44 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/local-agent-device-acceptance":
+                if local_agent_runner is None or local_device_acceptance is None:
+                    self._send(403, {"error": "device_acceptance_disabled"})
+                    return
+                if (type(data) is not dict or set(data) != {"model"}
+                        or not valid_model_name(data.get("model"))):
+                    self._send(422, {"error": "invalid_device_acceptance_request"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    try:
+                        report = local_device_acceptance(data["model"])
+                        if (type(report) is not dict
+                                or report.get("status") not in (
+                                    "REAL_LOCAL_MULTI_DOCUMENT_SMOKE_PASSED",
+                                    "SYNTHETIC_MODEL_SMOKE_PASSED")
+                                or report.get("model") != data["model"]
+                                or report.get("source_evidence_verified") is not True
+                                or report.get("model_calls") != 1
+                                or report.get("history_saved") is not False
+                                or report.get("external_write_count") != 0):
+                            self._send(502, {"error": "invalid_device_acceptance_result"})
+                        else:
+                            self._send(200, report)
+                    except AgentError as exc:
+                        error = str(exc)
+                        code = (422 if error.startswith("invalid_") else
+                                409 if error == "model_not_installed" else 503)
+                        self._send(code, {"error": error})
+                    except LocalDocumentError as exc:
+                        self._send(503, {"error": str(exc)})
+                    except Exception:
+                        self._send(503, {"error": "local_device_acceptance_unavailable"})
+                finally:
+                    agent_gate.release()
                 return
             if self.path == "/api/local-agent-multi-document-analyze":
                 if local_agent_runner is None or local_multi_document_analyzer is None:
@@ -880,7 +923,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
-                               analyze_multiple_documents if enable_multi_documents else None)))
+                               analyze_multiple_documents if enable_multi_documents else None),
+                           local_device_acceptance=(
+                               run_local_device_acceptance if enable_multi_documents else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
