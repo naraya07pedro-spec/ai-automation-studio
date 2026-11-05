@@ -14,6 +14,7 @@ import threading
 from local_ollama_agent import (AgentError, calculate, execute_tool,
                                 ollama_transport, valid_model_name)
 from local_agent_github_reader import valid_repo, GitHubPlanReadError
+from local_agent_issue_analysis import analyze_public_issue_metadata
 
 MAX_STEPS = 3
 MAX_PLANS = 12
@@ -21,9 +22,11 @@ MAX_GOAL = 1200
 ID_PATTERN = re.compile(r"[0-9a-f]{24}\Z")
 GITHUB_PLANNING_ADDENDUM = (
     ' Additional allowed read-only tool when explicitly enabled: '
-    'github_public_issues and github_issue_triage with EXACT args '
-    '{"repo":"owner/repository"}. '
-    'For requests to categorize/triage public issues, choose github_issue_triage. '
+    'github_public_issues, github_issue_triage and github_issue_analysis '
+    'with EXACT args {"repo":"owner/repository"}. '
+    'For deterministic label triage choose github_issue_triage. '
+    'For a source-cited, explicitly UNVERIFIED Ollama review of issue titles and '
+    'labels choose github_issue_analysis. '
     'github_issue_triage produces a transparent label-based prioritization report, '
     'not an AI-calculated severity or an automatic fix. '
     'Both read at most 15 open public GitHub issues from a repository '
@@ -68,7 +71,8 @@ def validate_steps(steps):
         elif tool == "utc_now":
             if args:
                 raise PlanError("invalid_model_plan")
-        elif tool in ("github_public_issues", "github_issue_triage"):
+        elif tool in ("github_public_issues", "github_issue_triage",
+                           "github_issue_analysis"):
             if set(args) != {"repo"} or valid_repo(args.get("repo")) is None:
                 raise PlanError("invalid_model_plan")
         else:
@@ -101,7 +105,7 @@ def propose_readonly_plan(goal, model, transport=None, allow_github=False):
     if type(data) is not dict or set(data) != {"steps"}:
         raise PlanError("invalid_model_plan")
     steps = validate_steps(data["steps"])
-    if not allow_github and any(step["tool"] in ("github_public_issues", "github_issue_triage") for step in steps):
+    if not allow_github and any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
         raise PlanError("tool_not_allowed")
     return {"model": model, "goal": goal, "steps": steps}
 
@@ -201,11 +205,11 @@ class LocalAgentPlanStore:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
-        if any(step["tool"] in ("github_public_issues", "github_issue_triage") for step in steps):
+        if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
             if self.github_reader is None:
                 raise PlanError("tool_not_allowed")
             for step in steps:
-                if step["tool"] in ("github_public_issues", "github_issue_triage"):
+                if step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis"):
                     try:
                         self.github_reader.check(step["args"]["repo"])
                     except GitHubPlanReadError:
@@ -233,12 +237,12 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 epoch = None
-                if any(step["tool"] in ("github_public_issues", "github_issue_triage") for step in old["steps"]):
+                if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in old["steps"]):
                     if self.github_reader is None:
                         raise PlanError("tool_not_allowed")
                     epoch = self.github_reader.version()
                     for step in old["steps"]:
-                        if step["tool"] in ("github_public_issues", "github_issue_triage"):
+                        if step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis"):
                             try:
                                 self.github_reader.check(step["args"]["repo"], epoch)
                             except GitHubPlanReadError:
@@ -274,7 +278,7 @@ class LocalAgentPlanStore:
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
-                if step["tool"] in ("github_public_issues", "github_issue_triage"):
+                if step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis"):
                     if self.github_reader is None:
                         raise PlanError("tool_not_allowed")
                     try:
@@ -286,7 +290,11 @@ class LocalAgentPlanStore:
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                if step["tool"] == "github_issue_triage":
+                if step["tool"] == "github_issue_analysis":
+                    output = analyze_public_issue_metadata(
+                        self.github_reader, step["args"]["repo"],
+                        old["approval_epoch"], old["model"], old["goal"])
+                elif step["tool"] == "github_issue_triage":
                     output = self.github_reader.triage(
                         step["args"]["repo"], old["approval_epoch"])
                 elif step["tool"] == "github_public_issues":
