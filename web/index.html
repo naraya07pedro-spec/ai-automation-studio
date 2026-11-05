@@ -1476,6 +1476,9 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
    "Model: "+result.model,
    "UTC: "+result.checked_at_utc,
    "One inference elapsed: "+result.elapsed_ms+" ms",
+   "Configured inference timeout: "+
+     (result.model_request_timeout_seconds??"fixture")+
+     (result.model_request_timeout_seconds?" seconds":""),
    "Available system RAM before/after: "+
      (result.available_ram_before_mb??"not available")+" / "+
      (result.available_ram_after_mb??"not available")+" MB",
@@ -1496,8 +1499,23 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
     :"CI/test fixture only. This result is NOT hardware acceptance.";
  }catch(error){
   if(revision===deviceAcceptanceRevision&&operatorCsrf){
-   deviceAcceptanceStatus.textContent="Acceptance BLOCKED: "+error.message;
-   deviceAcceptanceResult.textContent="No successful device acceptance. Check Ollama and the installed model.";
+   const guidance={
+    "local_model_timeout":"The acceptance request exceeded 90 seconds. The model may still be loading or running; do not immediately repeat. Close memory-heavy programs, inspect Ollama locally, then retry manually.",
+    "local_model_unavailable":"Check that Ollama is running and reachable at 127.0.0.1:11434. No cloud fallback exists.",
+    "model_not_installed":"Use Find installed models and choose an exact installed model name.",
+    "local_model_endpoint_missing":"The local Ollama endpoint or selected model was not found. Check the Ollama installation and model catalog.",
+    "local_model_server_error":"Ollama returned a server error. Check its local logs and available RAM; resource exhaustion is only one possible cause.",
+    "smoke_source_evidence_not_verified":"The model responded but did not give the expected sourced answer and exact citation. It is not compatible with this check yet.",
+    "invalid_multi_document_model_response":"The model output did not meet the required JSON schema. Try a suitable JSON-capable installed model.",
+    "invalid_multi_document_citation":"The model invented a citation or quoted a passage outside its selected source.",
+    "model_response_too_large":"The local model response exceeded the safety size limit.",
+    "invalid_model_response":"The local endpoint did not return valid JSON.",
+    "local_agent_busy":"Another local inference is active. Retry only after it finishes."
+   };
+   const code=error.message;
+   deviceAcceptanceStatus.textContent="Acceptance BLOCKED: "+code;
+   deviceAcceptanceResult.textContent="No successful device acceptance. "+
+     (guidance[code]||"Inspect the error code and the local Ollama process.");
   }
  }finally{
   deviceAcceptanceBusy=false;
