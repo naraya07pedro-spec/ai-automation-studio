@@ -21,6 +21,7 @@ from local_ollama_agent import AgentError
 from local_document_analysis import analyze_local_document
 from local_multi_document_analysis import analyze_multiple_documents
 from local_multi_doc_smoke import smoke as device_smoke
+from local_windows_preflight import preflight as device_preflight
 from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_server import create_handler
 
@@ -129,7 +130,13 @@ def main():
                        local_agent_plan_store=plans,
                        local_document_analyzer=fixture_document,
                        local_multi_document_analyzer=fixture_multi_document,
-                       local_device_acceptance=fixture_device_acceptance))
+                       local_device_acceptance=fixture_device_acceptance,
+                       local_device_preflight=(lambda: device_preflight(
+                           catalog=lambda:["fixture:model"],
+                           memory=lambda:{"total_ram_mb":8192,
+                                          "available_ram_mb":1664,
+                                          "memory_load_pct":79},
+                           system="Windows"))))
     try:
         server.serve_forever()
     finally:

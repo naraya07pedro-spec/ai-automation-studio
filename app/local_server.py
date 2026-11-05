@@ -30,6 +30,7 @@ from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
+from local_windows_preflight import preflight as check_local_device_preflight
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
 
@@ -63,7 +64,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_agent_planner=None, local_agent_plan_store=None,
                    local_document_analyzer=None,
                    local_multi_document_analyzer=None,
-                   local_device_acceptance=None):
+                   local_device_acceptance=None,
+                   local_device_preflight=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -198,6 +200,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                      and local_multi_document_analyzer is not None),
                                  "device_acceptance": (local_agent_runner is not None
                                                        and local_device_acceptance is not None),
+                                 "device_preflight": (local_agent_runner is not None
+                                                     and local_device_preflight is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
                                  "github_plan_read": bool(
@@ -228,6 +232,26 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     code = (422 if str(exc).startswith("invalid_") else
                             404 if str(exc) == "plan_not_found" else 503)
                     self._send(code, {"error": str(exc)})
+                return
+            if route.path == "/api/local-agent-device-preflight":
+                if route.query:
+                    self._send(422, {"error": "invalid_preflight_query"})
+                    return
+                if local_agent_runner is None or local_device_preflight is None:
+                    self._send(403, {"error": "device_preflight_disabled"})
+                    return
+                try:
+                    report = local_device_preflight()
+                    if (type(report) is not dict
+                            or report.get("source") != "LOCAL_OLLAMA_HOST_PREFLIGHT"
+                            or report.get("live_model_inference_attempted") is not False
+                            or report.get("external_write_count") != 0
+                            or report.get("history_saved") is not False):
+                        self._send(502, {"error": "invalid_device_preflight_result"})
+                    else:
+                        self._send(200, report)
+                except Exception:
+                    self._send(503, {"error": "local_device_preflight_unavailable"})
                 return
             if route.path == "/api/local-agent-models" and not route.query:
                 if local_agent_runner is None or local_agent_models is None:
@@ -925,7 +949,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_multi_document_analyzer=(
                                analyze_multiple_documents if enable_multi_documents else None),
                            local_device_acceptance=(
-                               run_local_device_acceptance if enable_multi_documents else None)))
+                               run_local_device_acceptance if enable_multi_documents else None),
+                           local_device_preflight=(
+                               check_local_device_preflight if enable_multi_documents else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
