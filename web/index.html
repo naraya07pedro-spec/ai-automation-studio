@@ -359,9 +359,12 @@ aas:timeline:urgent
 <p class="muted">Run one real Ollama check using two built-in harmless text samples. The model must answer 18:30 WIB and quote that exact fact from schedule.md. This tests a real local request, source binding, response time and available system RAM. It does not measure model-specific peak RAM or prove all answers will be correct.</p>
 <p class="muted">Use the installed model selected in the Ask your local AI agent panel. This check requires --enable-local-agent --enable-multi-documents. It does not read your chosen files or save an evaluation history.</p>
 <div class="core-actions">
+<button id="device-preflight-run" type="button" class="secondary" disabled>Check Windows & Ollama readiness (no inference)</button>
 <button id="device-acceptance-run" type="button" class="primary" disabled>Run real Ollama acceptance on this PC</button>
 <button id="device-acceptance-clear" type="button" class="secondary">Clear device result</button>
 </div>
+<div id="device-preflight-status" class="setup-msg" role="status" aria-live="polite">Preflight disabled. No hardware check has been run.</div>
+<pre id="device-preflight-result" class="trace" aria-label="Host prerequisites and Ollama models">No host preflight yet. This check does not execute any model.</pre>
 <div id="device-acceptance-status" class="setup-msg" role="status" aria-live="polite">Device acceptance disabled. Start with --enable-local-agent --enable-multi-documents.</div>
 <pre id="device-acceptance-result" class="trace" aria-label="Actual local model acceptance evidence">No device acceptance attempted on this server.</pre>
 </section>
@@ -971,6 +974,11 @@ const refreshLocalAgent=async()=>{
   localDocumentsEnabled=localAgentEnabled&&data.documents===true;
   multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
   deviceAcceptanceEnabled=localAgentEnabled&&data.device_acceptance===true;
+  devicePreflightEnabled=localAgentEnabled&&data.device_preflight===true;
+  devicePreflightStatus.textContent=devicePreflightEnabled
+    ?"Preflight ready; click to check localhost Ollama and system RAM without inference."
+    :"Preflight disabled. Start with --enable-local-agent --enable-multi-documents.";
+  refreshDevicePreflight();
   deviceAcceptanceStatus.textContent=deviceAcceptanceEnabled
     ?"Ready. This button will execute one actual local Ollama inference."
     :"Disabled. Start with --enable-local-agent --enable-multi-documents.";
@@ -1430,6 +1438,58 @@ multiButton.addEventListener("click",async()=>{
 });
 
 
+// Slice 61: read-only host preflight is deliberately separate from live inference.
+let devicePreflightEnabled=false;
+let devicePreflightRevision=0;
+const devicePreflightButton=$("device-preflight-run");
+const devicePreflightStatus=$("device-preflight-status");
+const devicePreflightResult=$("device-preflight-result");
+const refreshDevicePreflight=()=>{
+ devicePreflightButton.disabled=!operatorCsrf||!devicePreflightEnabled;
+};
+devicePreflightButton.addEventListener("click",async()=>{
+ if(!operatorCsrf||!devicePreflightEnabled)return;
+ const revision=++devicePreflightRevision;
+ devicePreflightButton.disabled=true;
+ devicePreflightStatus.textContent="Checking localhost model catalog and system RAM. No inference…";
+ devicePreflightResult.textContent="Preflight in progress. No live model success claimed.";
+ try{
+  const response=await appFetch("/api/local-agent-device-preflight");
+  const result=await response.json();
+  if(revision!==devicePreflightRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(result.error||"device_preflight_unavailable");
+  const ram=result.system_ram||{};
+  const lines=[
+   "PREFLIGHT ONLY · NOT AN INFERENCE TEST",
+   "State: "+result.status,
+   "Host: "+result.host_os,
+   "Python: "+result.python_version,
+   "Ollama API reachable: "+result.ollama_reachable,
+   "Installed models ("+result.installed_model_count+"): "+
+     (result.installed_models||[]).join(", "),
+   "System RAM total: "+(ram.total_ram_mb??"not available")+" MB",
+   "System RAM available: "+(ram.available_ram_mb??"not available")+" MB",
+   "Memory load: "+(ram.memory_load_pct??"not available")+"%",
+   "Interpretation: "+result.memory_note,
+   "Next action: "+(result.next_action||"Check the local Ollama process."),
+   "No model inference attempted; no external writes."
+  ];
+  if(result.resource_warning)lines.push("Resource warning: "+result.resource_warning);
+  if(result.error)lines.push("Diagnostic code: "+result.error);
+  devicePreflightResult.textContent=lines.join("\n");
+  devicePreflightStatus.textContent=result.status==="OLLAMA_NOT_READY"
+    ?"Ollama preflight blocked. Follow the diagnostic below."
+    :"Preflight completed. This does not establish model compatibility.";
+ }catch(error){
+  if(revision===devicePreflightRevision&&operatorCsrf){
+   devicePreflightStatus.textContent="Preflight blocked: "+error.message;
+   devicePreflightResult.textContent="No hardware or installed-model claim can be made.";
+  }
+ }finally{
+  if(revision===devicePreflightRevision)refreshDevicePreflight();
+ }
+});
+
 // Slice 59: acceptance is a real user-triggered local model test in production.
 // Fixture transport is explicitly labeled as synthetic in CI results.
 let deviceAcceptanceEnabled=false;
@@ -1535,6 +1595,11 @@ const operatorReady=()=>{
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ devicePreflightEnabled=false;
+ devicePreflightRevision++;
+ devicePreflightResult.textContent="Session locked; host preflight cleared.";
+ devicePreflightStatus.textContent="Session locked.";
+ refreshDevicePreflight();
  deviceAcceptanceEnabled=false;
  deviceAcceptanceBusy=false;
  deviceAcceptanceRevision++;
