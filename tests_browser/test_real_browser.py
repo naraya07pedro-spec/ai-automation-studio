@@ -626,7 +626,11 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-run-remaining").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
         self.page.once("dialog", lambda dialog: dialog.accept())
-        self.page.locator("#agent-plan-run-remaining").click()
+        with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    "/api/local-agent-plan-batch-start")) as captured:
+            self.page.locator("#agent-plan-run-remaining").click()
+        self.assertEqual(200, captured.value.status)
         pid = self.page.locator("#agent-plan-id").input_value()
         self.assertEqual(24, len(pid))
         # The owner can navigate away and return. The server, not browser JS,
