@@ -624,8 +624,10 @@ class LocalAgentPlanStore:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
-        if sum((document_snapshot is not None,
-                document_set_snapshot is not None, csv_snapshot is not None)) > 1:
+        if document_snapshot is not None and document_set_snapshot is not None:
+            raise PlanError("invalid_plan_document_selection")
+        if csv_snapshot is not None and (
+                document_snapshot is not None or document_set_snapshot is not None):
             raise PlanError("invalid_plan_source_selection")
         document = validated_document_snapshot(document_snapshot, proposed["model"])
         document_set = validated_document_set_snapshot(
