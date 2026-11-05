@@ -26,6 +26,7 @@ _GUIDANCE = {
     "smoke_source_evidence_not_verified": "The model did not answer and cite the fixed evidence correctly.",
     "invalid_multi_document_model_response": "The model JSON format does not satisfy the strict citation schema.",
     "invalid_multi_document_citation": "The model cited text absent from its selected source.",
+    "multi_document_numeric_evidence_missing": "The model stated a number or time not present in any verified source quote. Check the model response; try a better grounded local model.",
     "local_multi_document_model_unavailable": "Local model inference was unavailable; inspect Ollama.",
     "invalid_model_response": "The local endpoint returned invalid JSON.",
     "model_response_too_large": "The model response exceeded the fixed output limit.",
