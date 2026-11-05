@@ -110,7 +110,13 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#local-multidoc-result")).to_contain_text(
             "meeting starts at 18:30 WIB")
         expect(self.page.locator("#local-multidoc-result")).to_contain_text(
-            "DETERMINISTIC_LEXICAL_OVERLAP_V1")
+            "DETERMINISTIC_LEXICAL_OVERLAP_V2")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "Why these passages were selected")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "Source preview:")
+        expect(self.page.locator("#local-multidoc-result")).to_contain_text(
+            "matched words:")
         self.page.locator("#operator-logout").click()
         expect(self.page.locator("#operator-gate")).to_be_visible()
         expect(self.page.locator("#local-multidoc-files")).to_be_disabled()
