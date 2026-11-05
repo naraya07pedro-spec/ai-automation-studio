@@ -350,6 +350,16 @@ def document_source_metadata(snapshot):
             "scope": "OWNER_SELECTED_DOCUMENT_SNAPSHOT"}
 
 
+def validated_csv_snapshot(snapshot):
+    """One owner-selected UTF-8 CSV snapshot; server never reads a path."""
+    if type(snapshot) is not dict or set(snapshot) != {"filename", "content"}:
+        raise PlanError("invalid_plan_csv")
+    try:
+        return parse_selected_csv(snapshot["filename"], snapshot["content"])
+    except CSVProfileError:
+        raise PlanError("invalid_plan_csv") from None
+
+
 def validate_memory_refs(refs):
     if refs is None or refs == []:
         return []
@@ -376,7 +386,7 @@ class LocalAgentPlanStore:
     """Persistent state machine. No automatic dispatch on restart or approval."""
     def __init__(self, database=":memory:", github_reader=None, issue_analyzer=None,
                  memory_store=None, report_generator=None, document_analyzer=None,
-                 multi_document_analyzer=None):
+                 multi_document_analyzer=None, csv_profiler=None):
         location = str(database)
         if location != ":memory:":
             path = Path(database).expanduser()
@@ -391,6 +401,7 @@ class LocalAgentPlanStore:
         self.report_generator = report_generator or generate_completed_plan_report
         self.document_analyzer = document_analyzer
         self.multi_document_analyzer = multi_document_analyzer
+        self.csv_profiler = csv_profiler
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -412,7 +423,8 @@ class LocalAgentPlanStore:
                     document_json TEXT NOT NULL DEFAULT '',
                     document_set_json TEXT NOT NULL DEFAULT '',
                     handoff_log_json TEXT NOT NULL DEFAULT '[]',
-                    batch_run_status TEXT NOT NULL DEFAULT 'IDLE')""")
+                    batch_run_status TEXT NOT NULL DEFAULT 'IDLE',
+                    csv_json TEXT NOT NULL DEFAULT '')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -442,6 +454,10 @@ class LocalAgentPlanStore:
                 if "batch_run_status" not in columns:
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN batch_run_status TEXT NOT NULL DEFAULT 'IDLE'""")
+                if "csv_json" not in columns:
+                    # Legacy plans cannot gain an implicitly selected CSV.
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN csv_json TEXT NOT NULL DEFAULT ''""")
                 # Never redispatch a persisted server run after service restart.
                 self.db.execute("""UPDATE agent_task_plans SET
                     batch_run_status='INTERRUPTED' WHERE
@@ -515,12 +531,32 @@ class LocalAgentPlanStore:
         except (ValueError, TypeError, KeyError, PlanError):
             raise PlanError("plan_document_set_storage_invalid") from None
 
+    def _stored_csv(self, plan_id):
+        row = self.db.execute("SELECT csv_json FROM agent_task_plans "
+                              "WHERE plan_id=?", (plan_id,)).fetchone()
+        if row is None:
+            raise PlanError("plan_not_found")
+        if not row[0]:
+            return None
+        try:
+            saved = json.loads(row[0])
+            if type(saved) is not dict or set(saved) != {
+                    "filename", "content", "sha256"}:
+                raise PlanError("plan_csv_storage_invalid")
+            parsed = validated_csv_snapshot({
+                "filename": saved["filename"], "content": saved["content"]})
+            if parsed["sha256"] != saved["sha256"]:
+                raise PlanError("plan_csv_storage_invalid")
+            return parsed
+        except (ValueError, TypeError, KeyError, PlanError):
+            raise PlanError("plan_csv_storage_invalid") from None
+
     def _fetch(self, plan_id):
         _require_id(plan_id)
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
                 next_index,status,created_utc,approval_epoch,memory_refs_json,
                 report_json,document_json,document_set_json,
-                handoff_log_json,batch_run_status FROM agent_task_plans
+                handoff_log_json,batch_run_status,csv_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -532,7 +568,9 @@ class LocalAgentPlanStore:
             document = self._stored_document(plan_id, row[0]) if row[10] else None
             document_set = self._stored_document_set(plan_id, row[0]) if row[11] else None
             handoffs = json.loads(row[12])
-            if document is not None and document_set is not None:
+            selected_csv = self._stored_csv(plan_id) if row[14] else None
+            if sum((document is not None, document_set is not None,
+                    selected_csv is not None)) > 1:
                 raise PlanError("plan_storage_invalid")
         except (TypeError, ValueError, PlanError):
 
@@ -558,7 +596,8 @@ class LocalAgentPlanStore:
                 "batch_run_status": row[13],
                 "report": report,
                 "document_source": document_source_metadata(document),
-                "document_set_sources": document_set_source_metadata(document_set)}
+                "document_set_sources": document_set_source_metadata(document_set),
+                "csv_source": csv_source_metadata(selected_csv)}
 
     def get(self, plan_id):
         try:
@@ -580,16 +619,26 @@ class LocalAgentPlanStore:
             raise PlanError("plan_storage_unavailable") from None
 
     def create(self, proposed, memory_refs=None, document_snapshot=None,
-               document_set_snapshot=None):
+               document_set_snapshot=None, csv_snapshot=None):
         if type(proposed) is not dict or set(proposed) != {"model", "goal", "steps"}:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
-        if document_snapshot is not None and document_set_snapshot is not None:
-            raise PlanError("invalid_plan_document_selection")
+        if sum((document_snapshot is not None,
+                document_set_snapshot is not None, csv_snapshot is not None)) > 1:
+            raise PlanError("invalid_plan_source_selection")
         document = validated_document_snapshot(document_snapshot, proposed["model"])
         document_set = validated_document_set_snapshot(
             document_set_snapshot, proposed["model"]) if document_set_snapshot is not None else None
+        selected_csv = validated_csv_snapshot(csv_snapshot) if csv_snapshot is not None else None
+        has_csv_step = any(step["tool"] == CSV_PROFILE_TOOL for step in steps)
+        if (has_csv_step != (selected_csv is not None)
+                or (has_csv_step and self.csv_profiler is None)
+                or (selected_csv is not None and any(
+                    col not in selected_csv["headers"]
+                    for s in steps if s["tool"] == CSV_PROFILE_TOOL
+                    for col in s["args"]["columns"]))):
+            raise PlanError("tool_not_allowed")
         has_document_step = any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in steps)
         has_multi_step = any(step["tool"] == MULTI_DOCUMENT_TOOL for step in steps)
         if (has_document_step != (document is not None)
@@ -620,15 +669,20 @@ class LocalAgentPlanStore:
                 self._verify_memory_refs(refs)
                 self.db.execute("""INSERT INTO agent_task_plans
                     (plan_id,model,goal,steps_json,results_json,next_index,status,
-                     created_utc,memory_refs_json,document_json,document_set_json)
-                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?)""",
+                     created_utc,memory_refs_json,document_json,document_set_json,
+                     csv_json)
+                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?,?)""",
                     (pid, proposed["model"], proposed["goal"],
                      json.dumps(steps, separators=(",", ":")), "[]", created,
                      json.dumps(refs, separators=(",", ":")),
                      json.dumps(document, ensure_ascii=False, separators=(",", ":"))
                      if document is not None else "",
                      json.dumps(document_set, ensure_ascii=False, separators=(",", ":"))
-                     if document_set is not None else ""))
+                     if document_set is not None else "",
+                     json.dumps({k: selected_csv[k] for k in
+                                 ("filename", "content", "sha256")},
+                                ensure_ascii=False, separators=(",", ":"))
+                     if selected_csv is not None else ""))
                 return self._fetch(pid)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
@@ -640,6 +694,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
+                    if self.csv_profiler is None or old["csv_source"] is None:
+                        raise PlanError("plan_csv_unavailable")
                 if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
                     if self.document_analyzer is None or old["document_source"] is None:
                         raise PlanError("plan_document_unavailable")
@@ -672,6 +729,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "INTERRUPTED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
+                    if self.csv_profiler is None or old["csv_source"] is None:
+                        raise PlanError("plan_csv_unavailable")
                 if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
                     if self.document_analyzer is None or old["document_source"] is None:
                         raise PlanError("plan_document_unavailable")
