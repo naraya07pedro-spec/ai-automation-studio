@@ -101,6 +101,11 @@ class SelectedDocumentTests(unittest.TestCase):
         with self.assertRaisesRegex(LocalDocumentError,"^local_model_timeout$"):
             analyze_local_document("notes.txt",self.text,self.question,
                                    "fixture:model",transport=timeout)
+        def uncertain(_):raise AgentError("local_model_transport_uncertain")
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "^local_model_transport_uncertain$"):
+            analyze_local_document("notes.txt",self.text,self.question,
+                                   "fixture:model",transport=uncertain)
         def hidden(_):raise AgentError("private_server_detail")
         with self.assertRaisesRegex(LocalDocumentError,
                                     "^local_document_model_unavailable$"):

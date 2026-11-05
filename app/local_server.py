@@ -215,9 +215,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             return checkpoint_ok
 
         @staticmethod
-        def _mark_model_timeout(exc):
-            if str(exc) == "local_model_timeout":
+        def _mark_model_uncertainty(exc):
+            if str(exc) in ("local_model_timeout", "local_model_transport_uncertain"):
                 try:
+                    # Ambiguous socket failure may occur after HTTP POST dispatch;
+                    # never mark that model request as proven complete.
                     model_safety.timeout()
                 except ModelSafetyError:
                     # Database failures latch a fail-closed state.
@@ -552,13 +554,13 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, report)
                     except AgentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         error = str(exc)
                         code = (422 if error.startswith("invalid_") else
                                 409 if error == "model_not_installed" else 503)
                         self._send(code, {"error": error})
                     except LocalDocumentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         error = str(exc)
                         self._send(502 if error == "multi_document_numeric_evidence_missing"
                                    else 503, {"error": error})
@@ -581,7 +583,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     validate_multiple_documents(data["documents"], data["question"],
                                                 data["model"])
                 except LocalDocumentError as exc:
-                    self._mark_model_timeout(exc)
+                    self._mark_model_uncertainty(exc)
                     code = 413 if str(exc) in ("multi_document_too_large",
                                                 "local_document_too_large") else 422
                     self._send(code, {"error": str(exc)})
@@ -600,7 +602,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except LocalDocumentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         error = str(exc)
                         self._send(413 if error in ("multi_document_too_large",
                                                    "local_document_too_large") else
@@ -626,7 +628,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     validate_document(data["filename"], data["content"],
                                       data["question"], data["model"])
                 except LocalDocumentError as exc:
-                    self._mark_model_timeout(exc)
+                    self._mark_model_uncertainty(exc)
                     err = str(exc)
                     self._send(413 if err == "local_document_too_large" else 422,
                                {"error": err})
@@ -646,7 +648,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except LocalDocumentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         err = str(exc)
                         code = 413 if err == "local_document_too_large" else (
                             502 if err == "document_numeric_evidence_missing" else
@@ -691,7 +693,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                             outcome = action(data["plan_id"])
                         self._send(200, outcome)
                     except PlanError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
                                 else 403 if err == "public_source_not_allowed"
@@ -701,7 +703,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         self._send(503, {"error": str(exc)})
                     except Exception:
                         self._send(503, {"error": "agent_plan_unavailable"})
@@ -727,7 +729,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except AgentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         code = (422 if str(exc).startswith("invalid_") else
                                 409 if str(exc) == "model_not_installed" else 503)
                         self._send(code, {"error": str(exc)})
@@ -818,7 +820,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         code = 409 if str(exc) == "conversation_capacity_reached" else 503
                         self._send(code, {"error": str(exc)})
                     except AgentError as exc:
-                        self._mark_model_timeout(exc)
+                        self._mark_model_uncertainty(exc)
                         self._send(422 if str(exc).startswith("invalid_") else 503,
                                    {"error": str(exc)})
                     except Exception:

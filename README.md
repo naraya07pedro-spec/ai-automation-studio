@@ -139,6 +139,12 @@ To test the actual device, start `python app/local_server.py --enable-local-agen
 
 GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## Ambiguous Ollama connection failures (Slice 65)
+
+An Ollama inference request can be **accepted** by the localhost server before its HTTP connection resets, aborts, breaks, or returns a truncated/malformed HTTP stream. Previously these ambiguous failures were reported as generic `local_model_unavailable` and the workbench's durable `IN_FLIGHT` checkpoint could be cleared even though inference may still have been running. The transport now distinguishes **connection refused before dispatch** (`local_model_unavailable`, no quarantine) from an **uncertain transport failure** (`local_model_transport_uncertain`, durable `UNCERTAIN` quarantine). Follow-up inference is blocked with HTTP 423 until the authenticated operator inspects Ollama and explicitly acknowledges the safety state. No automatic retry, model cancellation, download, cloud fallback or new permission is introduced.
+
+The distinction covers interrupted document analysis, model probes, live acceptance, ordinary chats and model-powered read-only task plans. Local CLI/Windows preflight and browser give a safe diagnostic. [Recovery and scope](docs/OLLAMA_CRASH_RECOVERY_V1.md). This is not evidence of a real Ollama run on the owner's PC; actual on-device acceptance remains [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68).
+
 ## Durable restart and crash recovery (Slice 64)
 
 The model timeout safety latch now persists locally in a minimal SQLite checkpoint (`~/.ai-automation-studio/ollama-safety.sqlite3`). The server commits `IN_FLIGHT` **before** dispatching each model-backed workbench operation. A recognized timeout changes it to `UNCERTAIN`; an unfinished `IN_FLIGHT` record discovered on restart is also treated as `UNCERTAIN`, never assumed completed. New model requests are blocked with 423 until the owner checks Ollama and explicitly acknowledges. The status UI distinguishes `IDLE`, `IN_FLIGHT` and `UNCERTAIN`. Invalid/unreadable safety storage is fail-closed, not silently recreated.

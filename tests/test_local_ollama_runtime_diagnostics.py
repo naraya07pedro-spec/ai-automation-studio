@@ -1,6 +1,7 @@
 """Slice 60: deterministic local Ollama transport failures and timeout contracts."""
 import json
 from pathlib import Path
+from http.client import IncompleteRead, BadStatusLine
 import sys
 import unittest
 from unittest.mock import patch
@@ -64,8 +65,16 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
         cases=[
             (TimeoutError("timed out"),"local_model_timeout"),
             (URLError(TimeoutError("timed out")),"local_model_timeout"),
-            (URLError(OSError("connection refused")),"local_model_unavailable"),
-            (OSError("connection refused"),"local_model_unavailable"),
+            (URLError(ConnectionRefusedError("connection refused")),"local_model_unavailable"),
+            (ConnectionRefusedError("connection refused"),"local_model_unavailable"),
+            (URLError(ConnectionResetError("connection reset")),"local_model_transport_uncertain"),
+            (ConnectionResetError("connection reset"),"local_model_transport_uncertain"),
+            (URLError(BrokenPipeError("broken pipe")),"local_model_transport_uncertain"),
+            (BrokenPipeError("broken pipe"),"local_model_transport_uncertain"),
+            (IncompleteRead(b"partial",12),"local_model_transport_uncertain"),
+            (BadStatusLine("incomplete headers"),"local_model_transport_uncertain"),
+            (URLError(OSError("unknown transport phase")),"local_model_transport_uncertain"),
+            (OSError("unknown transport phase"),"local_model_transport_uncertain"),
             (HTTPError(url,408,"Request Timeout",{},None),"local_model_timeout"),
             (HTTPError(url,504,"Gateway Timeout",{},None),"local_model_timeout"),
             (HTTPError(url,404,"Not Found",{},None),"local_model_endpoint_missing"),
@@ -81,6 +90,28 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
                     ollama_transport({"model":"fixture:model"},opener=opener)
                 self.assertEqual(1,len(opener.calls),"Must never retry a POST")
 
+    def test_truncated_body_after_response_headers_is_uncertain(self):
+        class PartialBody(DummyResponse):
+            def read(self,_limit):
+                raise IncompleteRead(b"partial response", 28)
+        class ReadFailsOpener(DummyOpener):
+            def open(self,request,timeout):
+                self.calls.append((request,timeout))
+                return PartialBody(b"unused")
+        opener=ReadFailsOpener(b"unused")
+        with self.assertRaisesRegex(AgentError,"^local_model_transport_uncertain$"):
+            ollama_transport({"model":"fixture:model"},opener=opener)
+        self.assertEqual(1,len(opener.calls))
+
+    def test_definite_connect_refusal_with_errno_does_not_latch_as_uncertain(self):
+        import errno
+        for failure in (OSError(errno.ECONNREFUSED, "Connection refused"),
+                        URLError(OSError(errno.ECONNREFUSED, "Connection refused"))):
+            with self.subTest(failure=repr(failure)):
+                with self.assertRaisesRegex(AgentError,"^local_model_unavailable$"):
+                    ollama_transport({"model":"fixture:model"},
+                                     opener=DummyOpener(failure))
+
     def test_malformed_or_oversize_response_still_fails_closed(self):
         for raw,expected in [(b"not json","invalid_model_response"),
                              (b"x"*(MAX_RESPONSE_BYTES+1),
@@ -90,7 +121,8 @@ class ModelTransportDiagnosticTests(unittest.TestCase):
                 ollama_transport({},opener=DummyOpener(raw))
 
     def test_analysis_exposes_stable_diagnostic_without_sensitive_message(self):
-        for code in ("local_model_timeout","local_model_server_error",
+        for code in ("local_model_timeout","local_model_transport_uncertain",
+                     "local_model_server_error",
                      "local_model_endpoint_missing","local_model_unavailable",
                      "invalid_model_response","model_response_too_large"):
             with self.subTest(code=code),self.assertRaisesRegex(

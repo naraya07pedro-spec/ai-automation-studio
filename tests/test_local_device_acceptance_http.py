@@ -38,6 +38,8 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
             self.entered.set()
             if model == "fixture:timeout":
                 raise AgentError("local_model_timeout")
+            if model == "fixture:disconnect":
+                raise AgentError("local_model_transport_uncertain")
             if model == "fixture:wrong-time":
                 raise LocalDocumentError("multi_document_numeric_evidence_missing")
             if self.pause:self.release.wait(3)
@@ -224,6 +226,37 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
         self.assertEqual(200,self.request("POST",endpoint,
                                           {"model":"fixture:model"})[0])
         self.assertEqual(["fixture:timeout","fixture:model"],self.calls)
+
+    def test_midstream_transport_failure_quarantines_without_retry(self):
+        endpoint="/api/local-agent-device-acceptance"
+        code,body=self.request("POST",endpoint,{"model":"fixture:disconnect"})
+        self.assertEqual(503,code)
+        self.assertEqual("local_model_transport_uncertain",body["error"])
+        self.assertEqual(["fixture:disconnect"],self.calls)
+
+        code,state=self.request("GET","/api/local-agent-timeout-status")
+        self.assertEqual(200,code)
+        self.assertEqual("UNCERTAIN",state["checkpoint_state"])
+        self.assertTrue(state["timeout_unresolved"])
+        self.assertFalse(state["backend_stopped_verified"])
+
+        code,body=self.request("POST",endpoint,{"model":"fixture:model"})
+        self.assertEqual(423,code)
+        self.assertEqual("local_ollama_timeout_unresolved",body["error"])
+        self.assertEqual(["fixture:disconnect"],self.calls)
+        code,body=self.request("POST","/api/local-agent-run",
+                               {"model":"fixture:model","prompt":"hi"})
+        self.assertEqual(423,code)
+        self.assertEqual(["fixture:disconnect"],self.calls)
+
+        code,ack=self.request("POST","/api/local-agent-timeout-acknowledge",
+                              {"acknowledge":"OLLAMA_INSPECTED"})
+        self.assertEqual(200,code)
+        self.assertFalse(ack["backend_stopped_verified"])
+        self.assertEqual(0,ack["model_calls"])
+        self.assertEqual(200,self.request("POST",endpoint,
+                                         {"model":"fixture:model"})[0])
+        self.assertEqual(["fixture:disconnect","fixture:model"],self.calls)
 
     def test_timeout_ack_denied_while_active_request_in_flight(self):
         self.pause=True

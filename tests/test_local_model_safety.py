@@ -138,6 +138,8 @@ class ModelSafetyRestartHTTPTests(unittest.TestCase):
             self.dispatched.append(model)
             if model == "fixture:timeout":
                 raise AgentError("local_model_timeout")
+            if model == "fixture:disconnect":
+                raise AgentError("local_model_transport_uncertain")
             return {"status": "SYNTHETIC_MODEL_SMOKE_PASSED",
                     "model": model, "source_evidence_verified": True,
                     "model_calls": 1, "external_write_count": 0,
@@ -181,6 +183,28 @@ class ModelSafetyRestartHTTPTests(unittest.TestCase):
         result = (response.status, json.loads(response.read()))
         conn.close()
         return result
+
+    def test_uncertain_connection_loss_remains_blocked_after_restart(self):
+        self._start()
+        api="/api/local-agent-device-acceptance"
+        code,body=self._request("POST",api,{"model":"fixture:disconnect"})
+        self.assertEqual(503,code)
+        self.assertEqual("local_model_transport_uncertain",body["error"])
+        self._stop()
+        self._start()
+        code,status=self._request("GET","/api/local-agent-timeout-status")
+        self.assertEqual(200,code)
+        self.assertEqual("UNCERTAIN",status["checkpoint_state"])
+        self.assertFalse(status["backend_stopped_verified"])
+        self.assertEqual(423,self._request("POST",api,
+                                           {"model":"fixture:model"})[0])
+        self.assertEqual(["fixture:disconnect"],self.dispatched)
+        self.assertEqual(200,self._request(
+            "POST","/api/local-agent-timeout-acknowledge",
+            {"acknowledge":"OLLAMA_INSPECTED"})[0])
+        self.assertEqual(200,self._request("POST",api,
+                                           {"model":"fixture:model"})[0])
+        self.assertEqual(["fixture:disconnect","fixture:model"],self.dispatched)
 
     def test_server_restart_preserves_timeout_quarantine(self):
         self._start()

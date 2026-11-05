@@ -109,6 +109,8 @@ def main():
     def fixture_device_acceptance(model):
         if model == "fixture:timeout":
             raise AgentError("local_model_timeout")
+        if model == "fixture:disconnect":
+            raise AgentError("local_model_transport_uncertain")
         return device_smoke(
             model, catalog=lambda:["fixture:model"],
             transport=lambda _:{"message":{"content":
