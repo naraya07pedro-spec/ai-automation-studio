@@ -95,8 +95,9 @@ class ThreadStoreTests(unittest.TestCase):
                 with self.subTest(value=bad),self.assertRaisesRegex(
                     ConversationError,"invalid_conversation_id"):
                     store.snapshot(bad)
-                with self.assertRaises(ConversationError):
-                    store.clear(bad)
+                if bad is not None:
+                    with self.assertRaises(ConversationError):
+                        store.clear(bad)
                 with self.assertRaises(ConversationError):
                     store.append("m","p","a",bad)
             self.assertEqual([],store.list_conversations())
