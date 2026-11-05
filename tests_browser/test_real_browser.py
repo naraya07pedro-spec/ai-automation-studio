@@ -566,6 +566,47 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "Session locked")
         expect(self.page.locator("#agent-plan-report-download")).to_be_disabled()
 
+    def test_selected_csv_column_profile_is_consented_and_reloaded(self):
+        """Real Chromium: selected CSV remains private and stats are deterministic."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Profile exactly the two columns from this synthetic selected CSV")
+        self.page.locator("#agent-plan-csv-file").set_input_files({
+            "name": "synthetic-ledger.csv", "mimeType": "text/csv",
+            "buffer": (b"revenue,stage\\n10,SYNTHETIC_PERSON_1\\n"
+                       b"20,SYNTHETIC_PERSON_2\\n,SYNTHETIC_PERSON_3\\n")
+        })
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "Explicit plaintext CSV snapshot storage consent")
+        self.page.locator("#agent-plan-csv-consent").check()
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "PREPARED"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"selected_csv"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"row_count": 3')
+        self.assertNotIn("SYNTHETIC_PERSON_1",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "APPROVED"')
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '\\\"sum\\\": \\"30\\\"')
+        self.assertNotIn("SYNTHETIC_PERSON_2",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-load").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"row_count": 3')
+        expect(self.page.locator("#agent-plan-report-generate")).to_be_enabled()
+        self.page.locator("#agent-plan-report-generate").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "Local Agent Task Deliverable")
+
     def test_cross_step_numeric_handoff_requires_click_and_reloads_lineage(self):
         self.page.locator("#local-agent-model").fill("fixture:model")
         self.page.locator("#agent-plan-goal").fill(
