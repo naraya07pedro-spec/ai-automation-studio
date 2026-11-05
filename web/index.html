@@ -1480,7 +1480,11 @@ const planRequest=async(path,body)=>{
    planMultiFiles.value="";
    planMultiConsent.checked=false;
   }
-  planStatus.textContent=result.status==="PREPARED"
+  planStatus.textContent=result.batch_run_status==="RUNNING"
+   ?"Server accepted the reviewed steps. You may close this browser; leave the local server running."
+   :result.batch_run_status==="STOPPING"
+   ?"Server stop requested. The current step may finish; later steps are blocked."
+   :result.status==="PREPARED"
    ?(result.document_source
      ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
      :(result.document_set_sources||[]).length
