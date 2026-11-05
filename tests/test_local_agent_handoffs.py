@@ -134,6 +134,41 @@ class NumericHandoffPlanTests(unittest.TestCase):
         self.assertEqual(finished["handoffs"],
                          self.store.get(created["plan_id"])["handoffs"])
 
+    def test_revoked_github_permission_blocks_cached_numeric_handoff(self):
+        self.policy.grant(REPO)
+        created=self.store.create(plan(triage_steps()))
+        self.store.approve(created["plan_id"])
+        first=self.store.advance(created["plan_id"])
+        self.assertEqual("NEXT_READY",first["status"])
+        self.assertEqual([REPO],self.fetches)
+        self.policy.revoke(REPO)
+        # A regrant cannot revive the previous approved permission epoch.
+        self.policy.grant(REPO)
+        with self.assertRaisesRegex(PlanError,
+                                    "public_source_permission_changed"):
+            self.store.advance(created["plan_id"])
+        stopped=self.store.get(created["plan_id"])
+        self.assertEqual("NEXT_READY",stopped["status"])
+        self.assertEqual(1,stopped["next_index"])
+        self.assertEqual(1,len(stopped["results"]))
+        self.assertEqual([],stopped["handoffs"])
+        self.assertEqual([REPO],self.fetches)
+
+    def test_missing_github_adapter_blocks_cached_numeric_handoff(self):
+        self.policy.grant(REPO)
+        created=self.store.create(plan(triage_steps()))
+        self.store.approve(created["plan_id"])
+        self.store.advance(created["plan_id"])
+        without_source=LocalAgentPlanStore(self.path)
+        try:
+            with self.assertRaisesRegex(PlanError,
+                                        "public_source_permission_changed"):
+                without_source.advance(created["plan_id"])
+            self.assertEqual("NEXT_READY",
+                             without_source.get(created["plan_id"])["status"])
+        finally:
+            without_source.close()
+
     def test_model_cannot_invent_forward_references_paths_or_text_handoffs(self):
         invalid = [
             [calc(ref(1,"output"),"2")],  # self
