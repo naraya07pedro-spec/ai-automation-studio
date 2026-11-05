@@ -21,6 +21,7 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
+from local_document_analysis import analyze_local_document, LocalDocumentError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan)
 from local_agent_github_reader import AllowedGitHubIssuesReader
@@ -55,7 +56,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    operator_auth=None, source_policy=None, security_audit=None,
                    local_agent_runner=None, agent_conversation=None,
                    local_agent_models=None, local_agent_probe=None,
-                   local_agent_planner=None, local_agent_plan_store=None):
+                   local_agent_planner=None, local_agent_plan_store=None,
+                   local_document_analyzer=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -184,6 +186,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
+                                 "documents": (local_agent_runner is not None
+                                               and local_document_analyzer is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
                                  "github_plan_read": bool(
@@ -326,6 +330,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
                                  "/api/local-agent-run", "/api/local-agent-clear",
                                  "/api/local-agent-probe",
+                                 "/api/local-agent-document-analyze",
                                  "/api/local-agent-plan-create",
                                  "/api/local-agent-plan-approve",
                                  "/api/local-agent-plan-next",
@@ -362,6 +367,40 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/local-agent-document-analyze":
+                if local_agent_runner is None or local_document_analyzer is None:
+                    self._send(403, {"error": "local_documents_disabled"})
+                    return
+                if (type(data) is not dict
+                        or set(data) != {"filename", "content", "question", "model"}
+                        or any(type(data[key]) is not str for key in data)):
+                    self._send(422, {"error": "invalid_local_document_request"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    try:
+                        result = local_document_analyzer(
+                            data["filename"], data["content"],
+                            data["question"], data["model"])
+                        if (type(result) is not dict
+                                or result.get("status") != "DOCUMENT_ANALYZED_LOCAL"
+                                or result.get("history_saved") is not False
+                                or result.get("external_write_count") != 0):
+                            self._send(502, {"error": "invalid_document_model_response"})
+                        else:
+                            self._send(200, result)
+                    except LocalDocumentError as exc:
+                        err = str(exc)
+                        code = 413 if err == "local_document_too_large" else (
+                            422 if err.startswith("invalid_") else 503)
+                        self._send(code, {"error": err})
+                    except Exception:
+                        self._send(503, {"error": "local_document_model_unavailable"})
+                finally:
+                    agent_gate.release()
                 return
             if self.path.startswith("/api/local-agent-plan-"):
                 if local_agent_planner is None or local_agent_plan_store is None:
@@ -735,7 +774,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
 def start_local_server(port=8765, enable_local_agent=False,
                        enable_agent_history=False, enable_agent_plans=False,
-                       enable_agent_github_read=False):
+                       enable_agent_github_read=False,
+                       enable_local_documents=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -746,6 +786,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_local_documents and not enable_local_agent:
+        raise ValueError("local_documents_require_local_agent")
     if enable_agent_plans and not enable_local_agent:
         raise ValueError("agent_plans_require_local_agent")
     if enable_agent_github_read and not enable_agent_plans:
@@ -772,7 +814,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                                (lambda goal, model: propose_readonly_plan(
                                    goal, model, allow_github=enable_agent_github_read))
                                if enable_agent_plans else None),
-                           local_agent_plan_store=plan_store))
+                           local_agent_plan_store=plan_store,
+                           local_document_analyzer=(
+                               analyze_local_document if enable_local_documents else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
@@ -819,9 +863,13 @@ def main(argv=None):
                         help="Explicit opt-in local plaintext transcript storage.")
     parser.add_argument("--enable-agent-plans", action="store_true",
                         help="Opt in to persistent, human-approved read-only task plans.")
+    parser.add_argument("--enable-local-documents", action="store_true",
+                        help="Separately opt into owner-selected, in-memory text file analysis.")
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
+    if args.enable_local_documents and not args.enable_local_agent:
+        parser.error("--enable-local-documents requires --enable-local-agent")
     if args.enable_agent_plans and not args.enable_local_agent:
         parser.error("--enable-agent-plans requires --enable-local-agent")
     if args.enable_agent_github_read and not args.enable_agent_plans:
@@ -893,7 +941,8 @@ def main(argv=None):
         start_local_server(enable_local_agent=args.enable_local_agent,
                            enable_agent_history=args.enable_agent_history,
                            enable_agent_plans=args.enable_agent_plans,
-                           enable_agent_github_read=args.enable_agent_github_read)
+                           enable_agent_github_read=args.enable_agent_github_read,
+                           enable_local_documents=args.enable_local_documents)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
