@@ -44,7 +44,7 @@ class SelectedDocumentTests(unittest.TestCase):
         c=answer["citations"][0]
         self.assertEqual(c["quote"],self.text[c["start_char"]:c["end_char"]])
         self.assertEqual(1,len(self.recorded))
-        self.assertIn("untrusted",self.recorded[0]["messages"][0]["content"])
+        self.assertIn("untrusted",self.recorded[0]["messages"][0]["content"].lower())
         self.assertIn("service desk",self.recorded[0]["messages"][1]["content"])
 
     def test_hallucinated_citation_and_additional_fields_rejected(self):
