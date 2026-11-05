@@ -90,6 +90,33 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_selected_text_file_analysis_verified_quote_and_logout_clears(self):
+        expect(self.page.locator("#local-document-file")).to_be_enabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#local-document-file").set_input_files({
+            "name":"notes.txt", "mimeType":"text/plain",
+            "buffer":b"The service desk opens at 09:00 on weekdays.\\n"
+        })
+        self.page.locator("#local-document-question").fill(
+            "When does the desk open?")
+        expect(self.page.locator("#local-document-analyze")).to_be_enabled()
+        self.page.locator("#local-document-analyze").click()
+        expect(self.page.locator("#local-document-status")).to_contain_text(
+            "exact-match source citation")
+        expect(self.page.locator("#local-document-result")).to_contain_text(
+            "The desk opens at 09:00.")
+        expect(self.page.locator("#local-document-result")).to_contain_text(
+            "[S1] chars")
+        expect(self.page.locator("#local-document-result")).to_contain_text(
+            "opens at 09:00")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#operator-gate")).to_be_visible()
+        expect(self.page.locator("#local-document-file")).to_be_disabled()
+        expect(self.page.locator("#local-document-analyze")).to_be_disabled()
+        expect(self.page.locator("#local-document-result")).to_contain_text(
+            "Session locked")
+        self.assertEqual("",self.page.locator("#local-document-question").input_value())
+
     def test_local_ollama_analysis_has_source_citations_and_explicit_approval(self):
         self.page.locator("#local-agent-model").fill("fixture:model")
         self.page.locator("#agent-plan-goal").fill(
