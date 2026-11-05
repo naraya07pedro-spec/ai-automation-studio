@@ -436,7 +436,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 409 if error == "model_not_installed" else 503)
                         self._send(code, {"error": error})
                     except LocalDocumentError as exc:
-                        self._send(503, {"error": str(exc)})
+                        error = str(exc)
+                        self._send(502 if error == "multi_document_numeric_evidence_missing"
+                                   else 503, {"error": error})
                     except Exception:
                         self._send(503, {"error": "local_device_acceptance_unavailable"})
                 finally:
