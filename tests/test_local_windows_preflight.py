@@ -104,6 +104,17 @@ class WindowsHostPreflightTests(unittest.TestCase):
         self.assertFalse(report["live_model_inference_attempted"])
         self.assertIn("Do not retry",report["next_action"])
 
+    def test_numeric_evidence_failure_preserves_precise_device_diagnostic(self):
+        def unsupported(model):
+            raise LocalDocumentError("multi_document_numeric_evidence_missing")
+        result=diagnose("fixture:model",run_smoke=True,
+                        catalog=lambda:["fixture:model"],memory=lambda:RAM,
+                        system="Windows",live_smoke=unsupported)
+        self.assertEqual("DEVICE_SMOKE_BLOCKED",result["status"])
+        self.assertEqual("multi_document_numeric_evidence_missing",result["error"])
+        self.assertIn("number or time",result["next_action"])
+        self.assertNotEqual("local_model_unavailable",result["error"])
+
     def test_cli_without_run_smoke_never_invokes_model(self):
         import local_windows_preflight as pre
         with patch.object(pre,"preflight",return_value={
