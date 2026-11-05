@@ -18,6 +18,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_memory import LocalAgentMemory
 from local_agent_task_plans import LocalAgentPlanStore
+from local_csv_profile import profile_selected_csv
 from local_plan_artifacts import LocalPlanArtifactExporter
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_agent import AgentError
@@ -74,14 +75,22 @@ def main():
     plans = LocalAgentPlanStore(":memory:",github_reader=github_reader,
                                 issue_analyzer=fixture_issue_analyzer,
                                 memory_store=memory_cards,
-                                report_generator=fixture_final_report)
+                                report_generator=fixture_final_report,
+                                csv_profiler=profile_selected_csv)
     def fixture_planner(goal, model, memory_context=None, document_context=None,
-                        document_set_context=None):
+                        document_set_context=None, csv_context=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
         if memory_context:
             assert all(set(c)=={"id","text"} for c in memory_context)
             assert all(c["id"].startswith("fixture_") for c in memory_context)
+        if csv_context is not None:
+            assert csv_context["columns"] == ["revenue", "stage"]
+            assert csv_context["row_count"] == 3
+            assert "SYNTHETIC_PERSON_1" not in json.dumps(csv_context)
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool": "local_csv_profile",
+                               "args": {"columns": ["revenue", "stage"]}}]}
         if document_set_context is not None:
             assert [d["filename"] for d in document_set_context] == [
                 "fixture-runbook.txt", "fixture-meeting.md"]
