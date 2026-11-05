@@ -1,6 +1,7 @@
 """Slice 75: synthetic only, owner-selected bounded CSV within reviewed plans."""
 import http.client
 from http.server import ThreadingHTTPServer
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -127,12 +128,13 @@ class CSVProfileUnitTests(unittest.TestCase):
             reopened = LocalAgentPlanStore(path, csv_profiler=profile_selected_csv)
             try:
                 self.assertEqual(3, reopened.get(pid)["csv_source"]["row_count"])
-                with sqlite3.connect(path) as db:
+                with closing(sqlite3.connect(path)) as db:
                     raw = db.execute("SELECT csv_json FROM agent_task_plans "
                                      "WHERE plan_id=?", (pid,)).fetchone()[0]
                     self.assertIn("SYNTHETIC_PERSON_1", raw)
                     db.execute("UPDATE agent_task_plans SET csv_json=? "
                                "WHERE plan_id=?", (raw.replace("10,SYNTHETIC", "90,SYNTHETIC"), pid))
+                    db.commit()
                 with self.assertRaisesRegex(PlanError, "plan_storage_invalid"):
                     reopened.get(pid)
             finally:
@@ -216,7 +218,6 @@ class CSVProfileHTTPTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PERSON_", json.dumps(self.proposals))
         self.assertEqual("PREPARED", created["status"])
         pid = created["plan_id"]
-        self.assertEqual("owner", "owner")
         self.assertEqual(200, self.req("POST",
             "/api/local-agent-plan-approve", {"plan_id":pid})[0])
         status, next_step = self.req("POST",
