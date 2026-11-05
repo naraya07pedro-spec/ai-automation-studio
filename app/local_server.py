@@ -822,7 +822,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(422, {"error": "invalid_local_agent_request"})
                     return
                 memory_ids = data.get("memory_ids")
-                if memory_ids is not None:
+                if "memory_ids" in data:
                     if not valid_selection(memory_ids):
                         self._send(422, {"error": "invalid_memory_selection"})
                         return
