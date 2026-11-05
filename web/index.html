@@ -317,7 +317,7 @@ aas:timeline:urgent
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
-<p class="muted">The local model can propose at most three read-only steps. Nothing executes when a plan is created or approved. Review every tool argument, then trigger execution one step at a time.</p>
+<p class="muted">The local model proposes up to three reviewed read-only steps. Nothing executes at creation or approval. Execute one step at a time, or explicitly confirm a bounded one-click run of the remaining approved read-only steps. Stop prevents the next step, not a request already in flight. No background worker or write tools.</p>
 <p class="muted">Typed cross-step handoffs: a later calculator can reference the saved numeric result of an earlier calculator, or a numeric count from an explicitly authorized public GitHub issue triage. Example goal: “Multiply 7 by 8, then multiply the saved result by 2.” Each reference must point backward; the exact resolved numbers and source fingerprints are shown in the plan audit. No arbitrary text or document content is passed as a command.</p>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
 <p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
@@ -344,6 +344,8 @@ aas:timeline:urgent
 <button id="agent-plan-load" type="button" class="secondary" disabled>Load plan</button>
 <button id="agent-plan-approve" type="button" class="secondary" disabled>Approve reviewed plan</button>
 <button id="agent-plan-next" type="button" class="primary" disabled>Execute next step</button>
+<button id="agent-plan-run-remaining" type="button" class="secondary" disabled>Run remaining reviewed read-only steps</button>
+<button id="agent-plan-stop-run" type="button" class="secondary" disabled>Stop after current step</button>
 <button id="agent-plan-resume" type="button" class="secondary" disabled>Resume interrupted plan</button>
 <button id="agent-plan-cancel" type="button" class="secondary" disabled>Cancel plan</button>
 <button id="agent-plan-delete" type="button" class="secondary" disabled>Delete terminal plan</button>
@@ -1246,6 +1248,12 @@ let agentPlanDocumentsEnabled=false;
 let agentPlanMultiDocumentsEnabled=false;
 let agentPlanBusy=false;
 let agentPlanRevision=0;
+let planBatchRunning=false;
+let planBatchStopRequested=false;
+// Deliberate closed allowlist: future write-capable tools cannot enter this flow automatically.
+const approvedBatchReadTools=new Set(["calculate","utc_now","github_public_issues",
+ "github_issue_triage","github_issue_analysis","local_document_question",
+ "local_multi_document_question"]);
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planMemoryField=$("agent-plan-memory-ids");
@@ -1261,7 +1269,8 @@ const planReportDisplay=$("agent-plan-report-display");
 let selectedPlanReportMarkdown="";
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
- "agent-plan-approve","agent-plan-next","agent-plan-resume","agent-plan-cancel",
+ "agent-plan-approve","agent-plan-next","agent-plan-run-remaining",
+ "agent-plan-resume","agent-plan-cancel",
  "agent-plan-delete","agent-plan-report-generate","agent-plan-report-copy",
  "agent-plan-report-download"];
 const buildPlanReportMarkdown=plan=>{
@@ -1398,6 +1407,11 @@ const refreshPlanButtons=()=>{
  $("agent-plan-load").disabled=!ready||!/^[0-9a-f]{24}$/.test(id);
  $("agent-plan-approve").disabled=!ready||status!=="PREPARED";
  $("agent-plan-next").disabled=!ready||!["APPROVED","NEXT_READY"].includes(status);
+ const batchSteps=same&&["APPROVED","NEXT_READY"].includes(status)
+  ?selectedPlan.steps.slice(selectedPlan.next_index):[];
+ $("agent-plan-run-remaining").disabled=!ready||batchSteps.length===0||
+  selectedPlan.steps.length>3||!batchSteps.every(s=>approvedBatchReadTools.has(s.tool));
+ $("agent-plan-stop-run").disabled=!planBatchRunning||planBatchStopRequested;
  $("agent-plan-resume").disabled=!ready||status!=="INTERRUPTED";
  $("agent-plan-cancel").disabled=!ready||
   !["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(status);
@@ -1605,6 +1619,79 @@ $("agent-plan-report-download").addEventListener("click",()=>{
   planStatus.textContent="Markdown report download requested by owner. Check its claims.";
  }finally{URL.revokeObjectURL(url);}
 });
+// Slice 72: one explicit batch consent; existing server checks each durable step.
+$("agent-plan-run-remaining").addEventListener("click",async()=>{
+ const plan=selectedPlan, pid=planIdInput.value.trim();
+ if(!operatorCsrf||!agentPlanEnabled||agentPlanBusy||planBatchRunning||
+    !plan||plan.plan_id!==pid||
+    !["APPROVED","NEXT_READY"].includes(plan.status))return;
+ const remaining=plan.steps.slice(plan.next_index);
+ if(!remaining.length||plan.steps.length>3||
+    !remaining.every(s=>approvedBatchReadTools.has(s.tool)))return;
+ const description=remaining.map((s,i)=>
+  (plan.next_index+i+1)+". "+s.tool+" "+JSON.stringify(s.args)).join("\n");
+ if(!window.confirm("Run these "+remaining.length+
+   " already-reviewed READ-ONLY steps in sequence?\n\n"+description+
+   "\n\nEach step is checked again by the server. Stop only prevents the NEXT step. "+
+   "Closing the browser does not cancel an in-flight request. No automatic retry."))return;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;
+ planBatchRunning=true;
+ planBatchStopRequested=false;
+ refreshPlanButtons();
+ let cursor=plan.next_index;
+ try{
+  while(cursor<plan.steps.length&&!planBatchStopRequested&&
+        rev===agentPlanRevision&&operatorCsrf){
+   if(!selectedPlan||selectedPlan.plan_id!==pid||
+      selectedPlan.next_index!==cursor||
+      !["APPROVED","NEXT_READY"].includes(selectedPlan.status)||
+      !approvedBatchReadTools.has(selectedPlan.steps[cursor]?.tool)){
+    planStatus.textContent="Batch stopped: plan state or tool allowlist changed.";
+    break;
+   }
+   planStatus.textContent="Running reviewed read-only step "+(cursor+1)+
+    "/"+plan.steps.length+". No automatic retry.";
+   const response=await appFetch("/api/local-agent-plan-next",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({plan_id:pid})});
+   const result=await response.json();
+   if(rev!==agentPlanRevision||!operatorCsrf)break;
+   if(!response.ok)throw Error(result.error||"plan_batch_step_failed");
+   renderPlan(result);
+   if(result.plan_id!==pid||result.next_index!==cursor+1||
+      !["NEXT_READY","COMPLETED"].includes(result.status))
+    throw Error("unexpected_plan_transition_reload_before_retry");
+   cursor=result.next_index;
+   if(result.status==="COMPLETED"){
+    planStatus.textContent="Reviewed read-only steps completed. Generate the final report separately.";
+    break;
+   }
+   if(planBatchStopRequested){
+    planStatus.textContent="Stopped after step "+cursor+". Remaining steps stay saved.";
+    break;
+   }
+  }
+  if(planBatchStopRequested&&cursor<plan.steps.length&&rev===agentPlanRevision&&operatorCsrf)
+   planStatus.textContent="Stopped after step "+cursor+". No further step dispatched.";
+ }catch(error){
+  if(rev===agentPlanRevision&&operatorCsrf)
+   planStatus.textContent="Batch stopped: "+error.message+
+    ". An in-flight step may have completed. Load the saved plan and inspect before retrying.";
+ }finally{
+  planBatchRunning=false;
+  planBatchStopRequested=false;
+  if(rev===agentPlanRevision)agentPlanBusy=false;
+  refreshPlanButtons();
+ }
+});
+$("agent-plan-stop-run").addEventListener("click",()=>{
+ if(!planBatchRunning||planBatchStopRequested)return;
+ planBatchStopRequested=true;
+ planStatus.textContent="Stop requested. Current request may finish; no next step will be dispatched.";
+ refreshPlanButtons();
+});
+
 for(const [id,endpoint] of [
  ["agent-plan-approve","approve"],["agent-plan-next","next"],
  ["agent-plan-resume","resume"],["agent-plan-cancel","cancel"],
@@ -2078,6 +2165,7 @@ const lockOperatorUI=message=>{
  planMemoryField.value="";
  planMemoryField.disabled=true;
  agentPlanBusy=false;
+ planBatchStopRequested=true;
  agentPlanRevision++;
  planIdInput.value="";
  $("agent-plan-goal").value="";

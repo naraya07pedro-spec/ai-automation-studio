@@ -440,3 +440,8 @@ PRs run the Python 3.11/3.12/3.13 matrix and a separate Chromium UI job. Chromiu
 - `docs/PROGRESS.md`: chronological engineering changes and CI evidence.
 
 There is **no** verified public deployment, comprehensive accessibility audit, durable external-action execution, custom visual graph builder, 45-scenario catalog, secured production server or externally *live-verified* GitHub source run in this prototype. The **local rule workbench** does have durable SQLite run history, while the five mocks remain process-local. The source architecture and CI evidence should be reviewed before relying on anything beyond synthetic sandbox experimentation.
+
+
+### Reviewed read-only plan execution (Slice 72)
+
+After proposing and approving an explicitly reviewed 1–3-step task plan, use **Run remaining reviewed read-only steps** to confirm the exact remaining tools/arguments once and execute them sequentially in the open browser. **Stop after current step** prevents additional dispatches but cannot cancel an in-flight request; failures never auto-retry. All actions still pass existing server authorization, source checks and persisted state checks, and final report generation remains separately owner-triggered. See [reviewed batch run safety and limits](docs/REVIEWED_READONLY_BATCH_RUN_V1.md). This is not a background autonomous agent. No Windows/Ollama device acceptance is claimed.

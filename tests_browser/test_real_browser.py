@@ -587,6 +587,33 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
             "Session locked")
 
+    def test_reviewed_readonly_batch_requires_consent_and_completes(self):
+        """One owner confirmation executes at most the approved read-only steps."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Synthetic: multiply 7 by 8 and read UTC")
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_disabled()
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_disabled()
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_enabled()
+        self.page.once("dialog", lambda dialog: dialog.dismiss())
+        self.page.locator("#agent-plan-run-remaining").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        self.assertEqual(0,self.page.locator("#agent-plan-details").inner_text().count(
+            '"output":'))
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#agent-plan-run-remaining").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("COMPLETED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "56"')
+        self.assertEqual(2,len(__import__("json").loads(
+            self.page.locator("#agent-plan-details").inner_text())["completed_steps"]))
+        expect(self.page.locator("#agent-plan-run-remaining")).to_be_disabled()
+        expect(self.page.locator("#agent-plan-stop-run")).to_be_disabled()
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
