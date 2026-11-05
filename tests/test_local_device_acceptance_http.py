@@ -177,6 +177,69 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
         self.assertEqual("multi_document_numeric_evidence_missing",body["error"])
         self.assertEqual(["fixture:wrong-time"],self.calls)
 
+    def test_timeout_quarantines_all_model_inference_until_owner_ack(self):
+        endpoint="/api/local-agent-device-acceptance"
+        code,body=self.request("POST",endpoint,{"model":"fixture:timeout"})
+        self.assertEqual(503,code)
+        self.assertEqual("local_model_timeout",body["error"])
+        self.assertEqual(["fixture:timeout"],self.calls)
+
+        # No inference dispatch while backend state is uncertain.
+        code,body=self.request("POST",endpoint,{"model":"fixture:model"})
+        self.assertEqual(423,code)
+        self.assertEqual("local_ollama_timeout_unresolved",body["error"])
+        self.assertEqual(["fixture:timeout"],self.calls)
+        code,body=self.request("POST","/api/local-agent-run",
+                               {"model":"fixture:model","prompt":"hi"})
+        self.assertEqual(423,code)
+        self.assertEqual("local_ollama_timeout_unresolved",body["error"])
+
+        status_url="/api/local-agent-timeout-status"
+        self.assertEqual(401,self.request("GET",status_url,auth=False)[0])
+        self.assertEqual(422,self.request("GET",status_url+"?x=1")[0])
+        code,state=self.request("GET",status_url,csrf=False)
+        self.assertEqual(200,code)
+        self.assertTrue(state["timeout_unresolved"])
+        self.assertFalse(state["backend_stopped_verified"])
+        self.assertIn("Inspect Ollama",state["next_action"])
+
+        ack="/api/local-agent-timeout-acknowledge"
+        payload={"acknowledge":"OLLAMA_INSPECTED"}
+        self.assertEqual(401,self.request("POST",ack,payload,auth=False)[0])
+        self.assertEqual(403,self.request("POST",ack,payload,csrf=False)[0])
+        self.assertEqual(403,self.request("POST",ack,payload,
+                                         origin="http://attacker.invalid")[0])
+        self.assertEqual(422,self.request("POST",ack,{})[0])
+        self.assertEqual(422,self.request("POST",ack,{"acknowledge":"yes"})[0])
+        self.assertEqual(["fixture:timeout"],self.calls)
+        self.assertTrue(self.request("GET",status_url)[1]["timeout_unresolved"])
+
+        code,ack_result=self.request("POST",ack,payload)
+        self.assertEqual(200,code)
+        self.assertEqual("OPERATOR_ACKNOWLEDGED",ack_result["status"])
+        self.assertFalse(ack_result["backend_stopped_verified"])
+        self.assertEqual(0,ack_result["model_calls"])
+        self.assertFalse(self.request("GET",status_url)[1]["timeout_unresolved"])
+        self.assertEqual(["fixture:timeout"],self.calls)
+        self.assertEqual(200,self.request("POST",endpoint,
+                                          {"model":"fixture:model"})[0])
+        self.assertEqual(["fixture:timeout","fixture:model"],self.calls)
+
+    def test_timeout_ack_denied_while_active_request_in_flight(self):
+        self.pause=True
+        replies=[]
+        runner=threading.Thread(target=lambda:replies.append(self.request(
+            "POST","/api/local-agent-device-acceptance",{"model":"fixture:model"})))
+        runner.start()
+        self.assertTrue(self.entered.wait(2))
+        code,body=self.request("POST","/api/local-agent-timeout-acknowledge",
+                               {"acknowledge":"OLLAMA_INSPECTED"})
+        self.assertEqual(429,code)
+        self.assertEqual("local_agent_busy",body["error"])
+        self.release.set()
+        runner.join(5)
+        self.assertEqual(200,replies[0][0])
+
     def test_one_operation_shares_global_model_gate(self):
         self.pause=True
         outcome=[]

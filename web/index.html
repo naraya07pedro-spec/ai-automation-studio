@@ -362,9 +362,12 @@ aas:timeline:urgent
 <button id="device-preflight-run" type="button" class="secondary" disabled>Check Windows & Ollama readiness (no inference)</button>
 <button id="device-acceptance-run" type="button" class="primary" disabled>Run real Ollama acceptance on this PC</button>
 <button id="device-acceptance-clear" type="button" class="secondary">Clear device result</button>
+<button id="local-timeout-status-check" type="button" class="secondary" disabled>Check timeout safety state (no inference)</button>
+<button id="local-timeout-ack" type="button" class="secondary" disabled>I inspected Ollama; re-enable inference</button>
 </div>
 <div id="device-preflight-status" class="setup-msg" role="status" aria-live="polite">Preflight disabled. No hardware check has been run.</div>
 <pre id="device-preflight-result" class="trace" aria-label="Host prerequisites and Ollama models">No host preflight yet. This check does not execute any model.</pre>
+<div id="local-timeout-state" class="setup-msg" role="status" aria-live="polite">Timeout safety state not checked. A timed-out request might still be running in Ollama.</div>
 <div id="device-acceptance-status" class="setup-msg" role="status" aria-live="polite">Device acceptance disabled. Start with --enable-local-agent --enable-multi-documents.</div>
 <pre id="device-acceptance-result" class="trace" aria-label="Actual local model acceptance evidence">No device acceptance attempted on this server.</pre>
 </section>
@@ -974,6 +977,7 @@ const refreshLocalAgent=async()=>{
   localDocumentsEnabled=localAgentEnabled&&data.documents===true;
   multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
   deviceAcceptanceEnabled=localAgentEnabled&&data.device_acceptance===true;
+  refreshTimeoutButtons();
   devicePreflightEnabled=localAgentEnabled&&data.device_preflight===true;
   devicePreflightRevision++;
   devicePreflightResult.textContent="No host preflight yet. This check does not run any model.";
@@ -1501,12 +1505,59 @@ devicePreflightButton.addEventListener("click",async()=>{
 let deviceAcceptanceEnabled=false;
 let deviceAcceptanceBusy=false;
 let deviceAcceptanceRevision=0;
+let timeoutGuardUnresolved=false;
+let timeoutGuardRevision=0;
+const timeoutGuardMessage=$("local-timeout-state");
+const timeoutCheckButton=$("local-timeout-status-check");
+const timeoutAckButton=$("local-timeout-ack");
+const refreshTimeoutButtons=()=>{
+ timeoutCheckButton.disabled=!operatorCsrf||!localAgentEnabled;
+ timeoutAckButton.disabled=!operatorCsrf||!localAgentEnabled||!timeoutGuardUnresolved;
+};
+const readTimeoutStatus=async()=>{
+ if(!operatorCsrf)return;
+ const revision=++timeoutGuardRevision;
+ try{
+  const response=await appFetch("/api/local-agent-timeout-status");
+  const report=await response.json();
+  if(revision!==timeoutGuardRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(report.error||"timeout_status_unavailable");
+  timeoutGuardUnresolved=report.timeout_unresolved===true;
+  timeoutGuardMessage.textContent=timeoutGuardUnresolved
+   ?"Inference QUARANTINED after a local Ollama timeout. Inspect actual Ollama work before acknowledging; no background completion is verified."
+   :"No unresolved local timeout is recorded by this server. This is NOT proof Ollama is idle.";
+ }catch(error){
+  if(revision===timeoutGuardRevision&&operatorCsrf){
+   timeoutGuardMessage.textContent="Timeout safety status unavailable: "+error.message;
+   timeoutGuardUnresolved=true;
+  }
+ }finally{
+  if(revision===timeoutGuardRevision){refreshTimeoutButtons();refreshDeviceAcceptance();}
+ }
+};
+timeoutCheckButton.addEventListener("click",readTimeoutStatus);
+timeoutAckButton.addEventListener("click",async()=>{
+ if(!operatorCsrf||!timeoutGuardUnresolved)return;
+ if(!window.confirm("Only continue after inspecting Ollama locally and ensuring another inference will not overlap. Acknowledging does NOT prove Ollama stopped. Re-enable new inference?"))return;
+ timeoutAckButton.disabled=true;
+ try{
+  const response=await appFetch("/api/local-agent-timeout-acknowledge",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({acknowledge:"OLLAMA_INSPECTED"})});
+  const report=await response.json();
+  if(!operatorCsrf)return;
+  if(!response.ok)throw Error(report.error||"timeout_ack_failed");
+  timeoutGuardMessage.textContent="Operator acknowledged inspection; backend stopped NOT verified. No inference was run by this action.";
+ }catch(error){
+  if(operatorCsrf)timeoutGuardMessage.textContent="Timeout acknowledgement blocked: "+error.message;
+ }finally{await readTimeoutStatus();}
+});
 const deviceAcceptanceRun=$("device-acceptance-run");
 const deviceAcceptanceStatus=$("device-acceptance-status");
 const deviceAcceptanceResult=$("device-acceptance-result");
 const refreshDeviceAcceptance=()=>{
  deviceAcceptanceRun.disabled=!operatorCsrf||!deviceAcceptanceEnabled
-   ||deviceAcceptanceBusy||!$("local-agent-model").value.trim();
+   ||deviceAcceptanceBusy||timeoutGuardUnresolved||!$("local-agent-model").value.trim();
 };
 const invalidateDeviceAcceptance=()=>{
  deviceAcceptanceRevision++;
@@ -1577,12 +1628,14 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
     "multi_document_numeric_evidence_missing":"The model stated a number/time unsupported by its verified source quote. Try a more evidence-grounded local model or question.",
     "model_response_too_large":"The local model response exceeded the safety size limit.",
     "invalid_model_response":"The local endpoint did not return valid JSON.",
-    "local_agent_busy":"Another local inference is active. Retry only after it finishes."
+    "local_agent_busy":"Another local inference is active. Retry only after it finishes.",
+    "local_ollama_timeout_unresolved":"An earlier Ollama call timed out. Inspect local Ollama and use the explicit acknowledgement to re-enable model inference."
    };
    const code=error.message;
    deviceAcceptanceStatus.textContent="Acceptance BLOCKED: "+code;
    deviceAcceptanceResult.textContent="No successful device acceptance. "+
      (guidance[code]||"Inspect the error code and the local Ollama process.");
+   if(code==="local_model_timeout"||code==="local_ollama_timeout_unresolved")readTimeoutStatus();
   }
  }finally{
   deviceAcceptanceBusy=false;
@@ -1599,9 +1652,14 @@ const operatorReady=()=>{
  refreshOperatorSources();
  refreshOperatorAudit();
  refreshLocalAgent();
+ readTimeoutStatus();
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ timeoutGuardRevision++;
+ timeoutGuardUnresolved=false;
+ timeoutGuardMessage.textContent="Session locked; timeout safety state hidden.";
+ refreshTimeoutButtons();
  devicePreflightEnabled=false;
  devicePreflightRevision++;
  devicePreflightResult.textContent="Session locked; host preflight cleared.";

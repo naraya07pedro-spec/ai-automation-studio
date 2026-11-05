@@ -139,6 +139,12 @@ To test the actual device, start `python app/local_server.py --enable-local-agen
 
 GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## Timeout quarantine for real local Ollama requests (Slice 63)
+
+A timed-out Ollama request may still be running in the backend after the HTTP client gives up. A new owner-gated safety latch now blocks further model inferences after an observed timeout, responding with `local_ollama_timeout_unresolved` (HTTP 423) instead of allowing rapid manual retries. Authenticated **Check timeout safety state (no inference)** remains available; an operator must inspect local Ollama before explicitly selecting **I inspected Ollama; re-enable inference**. The acknowledgement requires owner login, CSRF and a confirmation; it **does not cancel Ollama, prove the backend stopped, or execute another inference**. Other local applications and workbench restarts are outside this in-process latch's guarantee.
+
+The feature applies to local chat, document Q&A, model probes, live acceptance, and Ollama-powered approved task plans. Read-only preflight and permitted administrative actions remain separate. This is safety hardening, **not real Windows model evidence**; [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68) remains open. [Operator behavior, HTTP contract and limitations](docs/OLLAMA_TIMEOUT_QUARANTINE_V1.md).
+
 ## Evidence check for numeric answers (Slice 62)
 
 Selected single-file and multi-document Q&A now reject a model answer when a literal number, date, time, percentage or compact-unit measurement (e.g. `5kg`, `16GB`) in the answer is **absent from every independently verified exact source quote**. For example, quoting an authentic `18:30 WIB` passage does not justify answering `19:15 WIB`. The check runs only after the existing file/chunk/character quote validation; it does not create a new inference, inspect additional files or persist data. Blocked outputs use `document_numeric_evidence_missing` or `multi_document_numeric_evidence_missing` (HTTP 502 for unsupported model output).
