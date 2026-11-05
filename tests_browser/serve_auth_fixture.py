@@ -18,6 +18,7 @@ from local_agent_conversation import LocalAgentConversation
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_document_analysis import analyze_local_document
+from local_multi_document_analysis import analyze_multiple_documents
 from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_server import create_handler
 
@@ -93,6 +94,15 @@ def main():
                 '"insufficient_evidence":false,'
                 '"citations":[{"chunk_id":"S1","quote":"opens at 09:00"}]}'}})
 
+    def fixture_multi_document(documents,question,model):
+        return analyze_multiple_documents(
+            documents,question,model,
+            transport=lambda _:{"message":{"content":
+                '{"answer":"The meeting begins at 18:30 WIB.",'
+                '"insufficient_evidence":false,'
+                '"citations":[{"chunk_id":"F2C1",'
+                '"quote":"meeting starts at 18:30 WIB"}]}'}})
+
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
@@ -103,7 +113,8 @@ def main():
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
                        local_agent_plan_store=plans,
-                       local_document_analyzer=fixture_document))
+                       local_document_analyzer=fixture_document,
+                       local_multi_document_analyzer=fixture_multi_document))
     try:
         server.serve_forever()
     finally:
