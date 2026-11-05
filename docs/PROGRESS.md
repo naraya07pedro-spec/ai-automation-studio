@@ -2117,3 +2117,19 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Explicit limits:** only numeric chaining, only calculator operands and deterministic issue-label triage counts, only max three reviewed steps. This is not unconstrained source-to-source orchestration, autonomous task-loop execution, PDF scanning, shell, external writes or scheduled agent work. Quote/source hashes and deterministic counts do not prove factual truth of external labels or AI interpretations. Audit data is local plaintext SQLite and not intended for sensitive records.
 - **Owner build-first policy preserved:** real Windows/Ollama model compatibility, latency, RAM usage and quality acceptance remains **deferred**, tracked by still-open [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68). No owner-PC commands or on-device smoke tests were requested or run.
 - This final note is a separate post-merge `main` **documentation-only bookkeeping commit**; CI evidence pertains to the exact merged PR feature-code head listed above.
+
+
+## Slice 72 · 2026-11-05 · Reviewed read-only batch run (BUILD FIRST; PR PENDING)
+
+**User decision:** Finish useful core agent capabilities before testing Ollama on the owner's Windows PC. Existing CI regression testing still applies; [real-device Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68) remains deferred.
+
+**Product gap after merged Slice 71:** The owner could approve a durable 1–3-step plan but had to press *Execute next step* separately even for a fully reviewed, strictly read-only sequence. The typed handoff feature was not yet usable as an effortless multi-step execution from one explicit confirmation.
+
+**Implemented on `feat/reviewed-readonly-run-remaining-slice-72` (CI/merge pending):**
+- `web/index.html`: new **Run remaining reviewed read-only steps** button with a fresh native confirmation showing exact remaining tool names and arguments, plus **Stop after current step**. It calls the already authorized single-step endpoint sequentially, persists each result via the existing store, never changes a plan or dispatches new model-selected tools, and stops on unexpected status/errors, revoked context, logout, or operator stop. The one-step mode remains available. Only seven exact existing read-only tool names are eligible; future write-capable tools are excluded by default. No persistent autorun state or background worker was added.
+- `tests_browser/test_real_browser.py`: synthetic Ollama/actual Chromium browser regression for no run before approval, rejected native confirmation with no dispatch, and accepted two-step batch completion.
+- `docs/REVIEWED_READONLY_BATCH_RUN_V1.md`, `README.md`: workflow, precise permission limits, stop semantics, error/unknown completion guidance and real-device boundary.
+
+**Safety:** Each step still goes through the existing server path and independently enforces localhost owner/CSRF, explicit source permission with approval epoch, memory/document/handoff checks, the Ollama uncertainty gate, and persisted IN_FLIGHT state. No automatic retries, resumption, file/shell writes, cloud provider grants or external messaging. A current step may finish after Stop, browser closure or network uncertainty. Do not interpret Stop as killing a running Ollama request. This is a browser-scoped opt-in read-only batch, not an always-on autonomous operator.
+
+**Verification:** Code committed on feature branch; GitHub Actions final-head results and merge status **NOT YET VERIFIED**. No real local Windows/Ollama inference performed or requested. Record check results and actual final commit SHAs only after verification.
