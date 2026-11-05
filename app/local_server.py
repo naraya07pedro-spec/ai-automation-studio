@@ -19,6 +19,7 @@ from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
+from local_csv_profile import profile_selected_csv, csv_source_metadata
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError, valid_model_name
 from local_document_analysis import (analyze_local_document, LocalDocumentError,
@@ -30,7 +31,8 @@ from local_plan_artifacts import LocalPlanArtifactExporter, PlanArtifactError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
                                     document_source_metadata, validated_document_set_snapshot,
-                                    document_set_source_metadata)
+                                    document_set_source_metadata,
+                                    validated_csv_snapshot)
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
@@ -304,6 +306,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "plan_artifact_export": (local_agent_planner is not None
                                                           and local_agent_plan_store is not None
                                                           and plan_artifact_exporter is not None),
+                                 "plan_csv": (local_agent_planner is not None
+                                              and local_agent_plan_store is not None
+                                              and local_agent_plan_store.csv_profiler is not None),
                                  "plan_reports": (local_agent_planner is not None
                                                   and local_agent_plan_store is not None),
                                  "plan_documents": (local_agent_planner is not None
@@ -747,7 +752,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     (creating and (
                         not {"goal", "model"}.issubset(set(data))
                         or not set(data).issubset(
-                            {"goal", "model", "memory_ids", "document", "documents"})
+                            {"goal", "model", "memory_ids", "document", "documents", "csv"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
@@ -766,6 +771,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 source_metadata = None
                 source_set_snapshot = None
                 source_set_metadata = None
+                csv_snapshot = None
+                csv_metadata = None
+                if (creating and sum(key in data
+                     for key in ("document", "documents", "csv")) > 1):
+                    self._send(422, {"error": "invalid_plan_source_selection"})
+                    return
                 if creating and "documents" in data and "document" in data:
                     self._send(422, {"error": "invalid_plan_document_selection"})
                     return
@@ -794,6 +805,19 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         source_metadata = document_source_metadata(source_snapshot)
                         source_metadata = {k: source_metadata[k] for k in
                                            ("filename", "source_bytes", "sha256")}
+                    except PlanError as exc:
+                        self._send(422, {"error": str(exc)})
+                        return
+                if creating and "csv" in data:
+                    if local_agent_plan_store.csv_profiler is None:
+                        self._send(403, {"error": "plan_csv_disabled"})
+                        return
+                    try:
+                        csv_snapshot = validated_csv_snapshot(data["csv"])
+                        csv_metadata = {key: value for key, value in
+                            csv_source_metadata(csv_snapshot).items()
+                            if key in ("filename", "source_bytes", "sha256",
+                                       "row_count", "columns")}
                     except PlanError as exc:
                         self._send(422, {"error": str(exc)})
                         return
@@ -866,6 +890,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 kwargs["document_context"] = source_metadata
                             if source_set_metadata is not None:
                                 kwargs["document_set_context"] = source_set_metadata
+                            if csv_metadata is not None:
+                                kwargs["csv_context"] = csv_metadata
                             proposal = local_agent_planner(
                                 data["goal"], data["model"], **kwargs)
                             # The plan store independently validates the exact
@@ -879,7 +905,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                    else None),
                                 document_set_snapshot=(data["documents"]
                                                        if source_set_snapshot is not None
-                                                       else None))
+                                                       else None),
+                                csv_snapshot=(data["csv"] if csv_snapshot is not None
+                                              else None))
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
@@ -1263,7 +1291,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_local_documents=False,
                        enable_multi_documents=False,
                        enable_agent_memory=False,
-                       enable_plan_artifacts=False):
+                       enable_plan_artifacts=False,
+                       enable_plan_csv=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1286,6 +1315,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("github_plan_read_requires_agent_plans")
     if enable_plan_artifacts and not enable_agent_plans:
         raise ValueError("plan_artifacts_require_agent_plans")
+    if enable_plan_csv and not enable_agent_plans:
+        raise ValueError("plan_csv_requires_agent_plans")
     conversation = None
     plan_store = None
     memory_store = None
@@ -1300,7 +1331,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             document_analyzer=(analyze_local_document
                                if enable_local_documents else None),
             multi_document_analyzer=(analyze_multiple_documents
-                                     if enable_multi_documents else None))
+                                     if enable_multi_documents else None),
+            csv_profiler=(profile_selected_csv if enable_plan_csv else None))
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
@@ -1316,12 +1348,13 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_probe=probe_model if enable_local_agent else None,
                            local_agent_planner=(
                                (lambda goal, model, memory_context=None, document_context=None,
-                                       document_set_context=None:
+                                       document_set_context=None, csv_context=None:
                                 propose_readonly_plan(
                                    goal, model, allow_github=enable_agent_github_read,
                                    memory_context=memory_context,
                                    document_context=document_context,
-                                   document_set_context=document_set_context))
+                                   document_set_context=document_set_context,
+                                   csv_context=csv_context))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_document_analyzer=(
@@ -1393,6 +1426,8 @@ def main(argv=None):
                         help="Opt in to 2-3 manually selected text files with bounded retrieval.")
     parser.add_argument("--enable-local-documents", action="store_true",
                         help="Separately opt into owner-selected, in-memory text file analysis.")
+    parser.add_argument("--enable-plan-csv", action="store_true",
+                        help="Opt in to a single owner-selected, short CSV snapshot for reviewed deterministic profile steps.")
     parser.add_argument("--enable-plan-artifacts", action="store_true",
                         help="Allow explicit, write-once Markdown report export to the local owner workspace.")
     parser.add_argument("--enable-agent-github-read", action="store_true",
@@ -1410,6 +1445,8 @@ def main(argv=None):
         parser.error("--enable-agent-github-read requires --enable-agent-plans")
     if args.enable_plan_artifacts and not args.enable_agent_plans:
         parser.error("--enable-plan-artifacts requires --enable-agent-plans")
+    if args.enable_plan_csv and not args.enable_agent_plans:
+        parser.error("--enable-plan-csv requires --enable-agent-plans")
     if args.enable_agent_history and not args.enable_local_agent:
         parser.error("--enable-agent-history also requires --enable-local-agent")
     home = Path.home() / ".ai-automation-studio"
@@ -1481,7 +1518,8 @@ def main(argv=None):
                            enable_agent_github_read=args.enable_agent_github_read,
                            enable_local_documents=args.enable_local_documents,
                            enable_multi_documents=args.enable_multi_documents,
-                           enable_plan_artifacts=args.enable_plan_artifacts)
+                           enable_plan_artifacts=args.enable_plan_artifacts,
+                           enable_plan_csv=args.enable_plan_csv)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
