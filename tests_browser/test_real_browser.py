@@ -90,6 +90,20 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_device_acceptance_timeout_shows_actionable_local_diagnosis(self):
+        self.page.locator("#local-agent-model").fill("fixture:timeout")
+        expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
+        self.page.locator("#device-acceptance-run").click()
+        expect(self.page.locator("#device-acceptance-status")).to_contain_text(
+            "Acceptance BLOCKED: local_model_timeout")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "exceeded 90 seconds")
+        expect(self.page.locator("#device-acceptance-result")).not_to_contain_text(
+            "REAL LOCAL OLLAMA ACCEPTANCE: PASSED")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "No result for this selected model")
+
     def test_device_acceptance_fixture_is_not_misrepresented_as_real_ollama(self):
         expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
         self.page.locator("#local-agent-model").fill("fixture:model")

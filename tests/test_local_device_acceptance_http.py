@@ -35,6 +35,8 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
         def acceptance(model):
             self.calls.append(model)
             self.entered.set()
+            if model == "fixture:timeout":
+                raise AgentError("local_model_timeout")
             if self.pause:self.release.wait(3)
             return smoke(model,catalog=lambda:["fixture:model"],
                          transport=fixture_model,memory=lambda:None)
@@ -122,6 +124,13 @@ class DeviceAcceptanceHTTPTests(unittest.TestCase):
                                {"model":"missing:model"})
         self.assertEqual(409,code)
         self.assertEqual("model_not_installed",data["error"])
+
+    def test_timeout_is_503_with_stable_diagnostic_and_no_retry(self):
+        code,body=self.request("POST","/api/local-agent-device-acceptance",
+                               {"model":"fixture:timeout"})
+        self.assertEqual(503,code)
+        self.assertEqual("local_model_timeout",body["error"])
+        self.assertEqual(["fixture:timeout"],self.calls)
 
     def test_one_operation_shares_global_model_gate(self):
         self.pause=True

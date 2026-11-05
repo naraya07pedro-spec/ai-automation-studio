@@ -58,3 +58,25 @@ The browser displays output as inert text, clears the displayed result when the 
 Backend tests exercise owner login, origin/CSRF denial, disabled-by-default behavior, strict model shape, absent installed model, global model gate and verified source evidence. They also assert that an injected fake model is **never** described as a real Windows model, and reject a superficially correct quote paired with a wrong answer. Chromium browser tests click the actual button against a synthetic injected model and inspect the explicit fixture warning and logout cleanup.
 
 **Next release gate:** 7/7 GitHub Actions checks on the final PR head, followed by squash merge and progress recording. A successful merge means the user can initiate real device testing in the local UI; it does **not** mean that test has already been completed on their machine.
+
+## Slice 60 runtime reliability and diagnosis update (2026-11-05)
+
+On machines with little free RAM, a model can take longer to load on its **first** inference. The user-triggered **device acceptance** now allows a maximum of **90 seconds for its single Ollama HTTP request**, instead of inheriting the ordinary chat transport's **25-second** bound. Ordinary chat, agent planning, document Q&A, and other model calls still use the existing default 25 seconds. The acceptance test does not add automatic retry, background polling, model installation, restart, or memory optimization.
+
+The fixed local transport still sends **only** to `http://127.0.0.1:11434/api/chat` with no proxies or redirects, bounds response bytes and exposes stable diagnostic error codes rather than raw Ollama responses:
+
+| Error code | Meaning and next action |
+| --- | --- |
+| `local_model_timeout` | One request exceeded the configured bound or the local endpoint reported a timeout. Check Ollama responsiveness and running model; a request might still run on the backend after the client gives up. Do not immediately spam retries. |
+| `local_model_unavailable` | The local connection failed, including refused connections or redirects. Ensure Ollama is running and the localhost endpoint is reachable. |
+| `model_not_installed` | The exact selected model is not in the local `/api/tags` catalog. Use **Find installed models**. |
+| `local_model_endpoint_missing` | Ollama returned HTTP 404 for chat. Verify installation, API compatibility and selected model. |
+| `local_model_server_error` | Ollama returned a server error (HTTP 5xx other than 504). Check its own logs, resource availability and model; this does **not** prove an out-of-memory condition. |
+| `invalid_model_response` / `invalid_multi_document_model_response` | Response was not valid JSON or did not satisfy the expected output schema. A different compatible local model may be required. |
+| `smoke_source_evidence_not_verified` / `invalid_multi_document_citation` | The answer or verified citation did not match the fixed challenge. The model did not meet this evidence requirement. |
+| `model_response_too_large` | Output exceeded the existing bounded response limit. |
+| `local_agent_busy` | Another inference currently owns the local model gate. |
+
+The browser displays the sanitized error plus a concrete follow-up action. **There is no automatic second POST** after an HTTP timeout, because the local model may still be generating and a second request could raise CPU/RAM load further. The 90-second setting is a socket request timeout, not a guaranteed hard deadline for a backend process or a forced termination. Model-specific peak RAM remains unmeasured. None of these changes proves a real installed model was run on the user's Windows device; that requires an operator-side run.
+
+The reliability gate is covered with injected timeout, HTTP 404/500/504, refused connection, oversized/malformed output, model/answer mismatch, and browser diagnostic tests on multiple Python versions and Chromium. CI cannot measure real machine RAM or local Ollama behavior.

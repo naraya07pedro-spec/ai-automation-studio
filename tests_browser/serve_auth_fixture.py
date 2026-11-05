@@ -17,6 +17,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
+from local_ollama_agent import AgentError
 from local_document_analysis import analyze_local_document
 from local_multi_document_analysis import analyze_multiple_documents
 from local_multi_doc_smoke import smoke as device_smoke
@@ -105,6 +106,8 @@ def main():
                 '"quote":"meeting starts at 18:30 WIB"}]}'}})
 
     def fixture_device_acceptance(model):
+        if model == "fixture:timeout":
+            raise AgentError("local_model_timeout")
         return device_smoke(
             model, catalog=lambda:["fixture:model"],
             transport=lambda _:{"message":{"content":

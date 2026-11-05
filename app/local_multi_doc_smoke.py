@@ -13,7 +13,7 @@ import time
 
 from local_document_analysis import LocalDocumentError
 from local_multi_document_analysis import analyze_multiple_documents
-from local_ollama_agent import AgentError
+from local_ollama_agent import AgentError, ollama_transport
 from local_ollama_readiness import installed_models
 
 
@@ -64,8 +64,12 @@ def smoke(model, *, catalog=None, transport=None, clock=None, memory=None):
     memory_probe = memory or windows_memory_snapshot
     before = memory_probe()
     started = now()
+    # Allow a 90s bounded first-load window on slow/8GB-class Windows PCs.
+    # Normal agent/chat calls retain their existing 25s limit. No retry.
+    effective_transport = (transport if transport is not None else
+                           lambda payload: ollama_transport(payload, timeout_seconds=90))
     result = analyze_multiple_documents(
-        EXAMPLE_DOCUMENTS, EXAMPLE_QUESTION, model, transport=transport)
+        EXAMPLE_DOCUMENTS, EXAMPLE_QUESTION, model, transport=effective_transport)
     elapsed = round((now() - started) * 1000)
     after = memory_probe()
     source_text = EXAMPLE_DOCUMENTS[1]["content"]
@@ -102,6 +106,7 @@ def smoke(model, *, catalog=None, transport=None, clock=None, memory=None):
         "available_ram_after_mb": (after or {}).get("available_ram_mb"),
         "memory_note": "System-wide available physical RAM, NOT model RSS or peak RAM.",
         "model_calls": result["model_calls"],
+        "model_request_timeout_seconds": (90 if actual_runtime else None),
         "selected_passages": result["selected_passages"],
         "source_files": result["selected_files"],
         "citations": result["citations"],

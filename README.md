@@ -131,6 +131,14 @@ After local owner login, click **Find installed models**, choose the exact name 
 
 The UI and test contract explicitly distinguish `LIVE_LOCAL_OLLAMA` from `INJECTED_TEST_TRANSPORT`. A green CI fixture is **not** Windows-device evidence; the operator must run the check on their own PC. The old CLI `python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL` remains available. [Details, validation and limitations](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## Ollama reliability diagnostics for Windows (Slice 60)
+
+The one-click local-device acceptance introduced in Slice 59 now has a **bounded 90-second Ollama request timeout** for the first-model-load scenario on RAM-limited Windows PCs. Regular chat and other Ollama calls retain the normal 25-second timeout. Timeouts, missing models, Ollama HTTP 404/5xx, invalid JSON, oversize output and incorrect source evidence now produce **separate, actionable error codes** in the local UI. Timeout requests are **never automatically retried**, because the model may still be running after the client gives up.
+
+To test the actual device, start `python app/local_server.py --enable-local-agent --enable-multi-documents`, sign in, select an installed Ollama model and click **Run real Ollama acceptance on this PC**. This is one user-approved local inference, not a cloud call or model installer. Its observed elapsed time and system-wide available RAM do **not** represent model-specific peak memory.
+
+GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.

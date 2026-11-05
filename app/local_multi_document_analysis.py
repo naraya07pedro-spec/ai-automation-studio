@@ -10,7 +10,7 @@ import unicodedata
 from local_document_analysis import (LocalDocumentError, MAX_ANSWER, MAX_CITATIONS,
                                      MAX_QUESTION, MAX_QUOTE, NAME_PATTERN,
                                      validate_document)
-from local_ollama_agent import ollama_transport
+from local_ollama_agent import AgentError, ollama_transport
 
 MAX_FILES = 3
 MIN_FILES = 2
@@ -250,6 +250,14 @@ def analyze_multiple_documents(documents, question, model, transport=None):
     }
     try:
         response = (transport or ollama_transport)(request)
+    except AgentError as exc:
+        # Stable, non-sensitive codes. Never expose raw HTTP payloads or host internals.
+        known = {"local_model_timeout", "local_model_endpoint_missing",
+                 "local_model_server_error", "local_model_unavailable",
+                 "model_response_too_large", "invalid_model_response"}
+        raise LocalDocumentError(
+            str(exc) if str(exc) in known
+            else "local_multi_document_model_unavailable") from None
     except Exception:
         raise LocalDocumentError("local_multi_document_model_unavailable") from None
     return _response(names, question, model, passages, response)
