@@ -23,6 +23,7 @@ from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan)
+from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
@@ -185,6 +186,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "persisted": agent_conversation is not None,
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
+                                 "github_plan_read": bool(
+                                     local_agent_plan_store is not None
+                                     and local_agent_plan_store.github_reader is not None),
                                  "readiness": (local_agent_models is not None
                                                and local_agent_probe is not None)})
                 return
@@ -395,8 +399,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except PlanError as exc:
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
+                                else 403 if err == "public_source_not_allowed"
                                 else 404 if err == "plan_not_found"
-                                else 409 if err in ("plan_state_conflict", "plan_capacity_reached")
+                                else 409 if err in ("plan_state_conflict", "plan_capacity_reached",
+                                                     "public_source_permission_changed")
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:
@@ -728,7 +734,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
 
 def start_local_server(port=8765, enable_local_agent=False,
-                       enable_agent_history=False, enable_agent_plans=False):
+                       enable_agent_history=False, enable_agent_plans=False,
+                       enable_agent_github_read=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -741,10 +748,15 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise
     if enable_agent_plans and not enable_local_agent:
         raise ValueError("agent_plans_require_local_agent")
+    if enable_agent_github_read and not enable_agent_plans:
+        raise ValueError("github_plan_read_requires_agent_plans")
     conversation = None
     plan_store = None
     if enable_agent_plans:
-        plan_store = LocalAgentPlanStore(home / "agent-task-plans.sqlite3")
+        reader = (AllowedGitHubIssuesReader(source_policy)
+                  if enable_agent_github_read else None)
+        plan_store = LocalAgentPlanStore(
+            home / "agent-task-plans.sqlite3", github_reader=reader)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     try:
@@ -756,7 +768,10 @@ def start_local_server(port=8765, enable_local_agent=False,
                            agent_conversation=conversation,
                            local_agent_models=installed_models if enable_local_agent else None,
                            local_agent_probe=probe_model if enable_local_agent else None,
-                           local_agent_planner=propose_readonly_plan if enable_agent_plans else None,
+                           local_agent_planner=(
+                               (lambda goal, model: propose_readonly_plan(
+                                   goal, model, allow_github=enable_agent_github_read))
+                               if enable_agent_plans else None),
                            local_agent_plan_store=plan_store))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
@@ -804,9 +819,13 @@ def main(argv=None):
                         help="Explicit opt-in local plaintext transcript storage.")
     parser.add_argument("--enable-agent-plans", action="store_true",
                         help="Opt in to persistent, human-approved read-only task plans.")
+    parser.add_argument("--enable-agent-github-read", action="store_true",
+                        help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
     if args.enable_agent_plans and not args.enable_local_agent:
         parser.error("--enable-agent-plans requires --enable-local-agent")
+    if args.enable_agent_github_read and not args.enable_agent_plans:
+        parser.error("--enable-agent-github-read requires --enable-agent-plans")
     if args.enable_agent_history and not args.enable_local_agent:
         parser.error("--enable-agent-history also requires --enable-local-agent")
     home = Path.home() / ".ai-automation-studio"
@@ -873,7 +892,8 @@ def main(argv=None):
     try:
         start_local_server(enable_local_agent=args.enable_local_agent,
                            enable_agent_history=args.enable_agent_history,
-                           enable_agent_plans=args.enable_agent_plans)
+                           enable_agent_plans=args.enable_agent_plans,
+                           enable_agent_github_read=args.enable_agent_github_read)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")

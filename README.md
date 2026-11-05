@@ -1,6 +1,6 @@
 # AI Automation Studio
 
-AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
+AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
 ## Optional local AI agent in the browser (Slices 47–50)
@@ -35,6 +35,18 @@ python app/local_server.py --enable-local-agent --enable-agent-plans
 ```
 
 Task plans are **disabled by default**, separate from the optional conversation history. The plan DB stores goal text, arguments and results as **plaintext** and is not suitable for credentials or customer data. CI exercises the real state machine with model fixtures; it does not replace testing an installed model on your Windows PC. [Read the task plan contract and security limits](docs/LOCAL_AGENT_TASK_PLANS_V1.md).
+
+## Operator-allowlisted GitHub issue reads in agent plans (Slice 53)
+
+The optional durable plan runner can now fetch **real open issue metadata from a specific public GitHub repository** through the existing fixed-host, read-only connector. This is the first externally sourced plan step, not an uncontrolled browser or GitHub editing assistant.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-agent-github-read
+```
+
+After owner login, use **Public Source Permissions** to allow the exact public repository; then enter an installed local model, request a GitHub issue-list plan, review the `github_public_issues` step, approve it and click **Execute next step**. Creation and approval do not fetch the external source. Revoking a source grant invalidates old plan approvals, even after regrant. Only the first 15 public open issue entries are examined, with bounded title/label/number/URL metadata; issue bodies, private content and all writes remain disabled.
+
+This feature is disabled by default and is not a substitute for testing Ollama with a real installed model on the user's PC. [Read tool permissions, output provenance and limitations](docs/AGENT_GITHUB_READ_TOOL_V1.md).
 
 ## Run the demo
 

@@ -16,6 +16,7 @@ from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_task_plans import LocalAgentPlanStore
+from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_server import create_handler
 
 
@@ -31,8 +32,20 @@ def main():
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
     conversation = LocalAgentConversation(":memory:")
-    plans = LocalAgentPlanStore(":memory:")
+    def fixture_github_fetch(repo):
+        if repo != "Octocat/Hello-World":
+            raise AssertionError("unexpected repository")
+        return [{"state":"open","number":42,
+                 "title":"Synthetic GitHub issue with human-readable title",
+                 "labels":[{"name":"bug"}]}]
+
+    github_reader = AllowedGitHubIssuesReader(policy,fetcher=fixture_github_fetch)
+    plans = LocalAgentPlanStore(":memory:",github_reader=github_reader)
     def fixture_planner(goal, model):
+        if "github" in goal.lower():
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool": "github_public_issues",
+                               "args": {"repo": "Octocat/Hello-World"}}]}
         return {"model": model, "goal": goal,
                 "steps": [{"tool": "calculate",
                            "args": {"a": "7", "b": "8", "operation": "multiply"}},

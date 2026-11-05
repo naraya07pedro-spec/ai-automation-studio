@@ -1,6 +1,6 @@
 """Opt-in bounded AI task planning with explicit human approval and durable steps.
 
-Only read-only calculator/UTC tools, no plugins or business writes. Plaintext
+Read-only tools, with GitHub public issue metadata only by separate opt-in; no writes. Plaintext
 single-owner SQLite, intentionally separate from the conversation database.
 """
 from datetime import datetime, timezone
@@ -13,19 +13,27 @@ import threading
 
 from local_ollama_agent import (AgentError, calculate, execute_tool,
                                 ollama_transport, valid_model_name)
+from local_agent_github_reader import valid_repo, GitHubPlanReadError
 
 MAX_STEPS = 3
 MAX_PLANS = 12
 MAX_GOAL = 1200
 ID_PATTERN = re.compile(r"[0-9a-f]{24}\Z")
+GITHUB_PLANNING_ADDENDUM = (
+    ' Additional allowed read-only tool when explicitly enabled: '
+    'github_public_issues with EXACT args {"repo":"owner/repository"}. '
+    'It reads at most 15 open public GitHub issues from a repository '
+    'the operator explicitly allowed in local source permissions. '
+    'No arbitrary URLs, private repositories, issue edits or unrestricted browsing.'
+)
 PLANNING_SYSTEM = (
     "Build a short read-only tool plan for the user's request. "
     "Return ONLY JSON with a single key 'steps', an array of 1 to 3 objects. "
     "Each step must have EXACT keys 'tool' and 'args'. "
     "Allowed tool: calculate with string a,b and operation add/subtract/multiply/divide. "
-    "Allowed tool: utc_now with empty args object. No other tool names or actions. "
-    "If the request cannot be fulfilled with these tools, return {\"steps\":[]}. "
-    "Do not pretend to research, send messages, modify files or use external APIs."
+    "Allowed tool: utc_now with empty args object. "
+    "If the request cannot be fulfilled with the tools listed here, return {\"steps\":[]}. "
+    "Do not pretend to send messages, modify files or use unrestricted external APIs."
 )
 
 
@@ -56,18 +64,22 @@ def validate_steps(steps):
         elif tool == "utc_now":
             if args:
                 raise PlanError("invalid_model_plan")
+        elif tool == "github_public_issues":
+            if set(args) != {"repo"} or valid_repo(args.get("repo")) is None:
+                raise PlanError("invalid_model_plan")
         else:
             raise PlanError("tool_not_allowed")
         checked.append({"tool": tool, "args": args})
     return checked
 
 
-def propose_readonly_plan(goal, model, transport=None):
+def propose_readonly_plan(goal, model, transport=None, allow_github=False):
     """Actual local model inference with fixed JSON output and zero tool execution."""
     _validate_goal_model(goal, model)
     request = {
         "model": model,
-        "messages": [{"role": "system", "content": PLANNING_SYSTEM},
+        "messages": [{"role": "system", "content":
+                     PLANNING_SYSTEM + (GITHUB_PLANNING_ADDENDUM if allow_github else "")},
                      {"role": "user", "content": goal}],
         "stream": False,
         "format": "json",
@@ -85,6 +97,8 @@ def propose_readonly_plan(goal, model, transport=None):
     if type(data) is not dict or set(data) != {"steps"}:
         raise PlanError("invalid_model_plan")
     steps = validate_steps(data["steps"])
+    if not allow_github and any(step["tool"] == "github_public_issues" for step in steps):
+        raise PlanError("tool_not_allowed")
     return {"model": model, "goal": goal, "steps": steps}
 
 
@@ -95,7 +109,7 @@ def _require_id(value):
 
 class LocalAgentPlanStore:
     """Persistent state machine. No automatic dispatch on restart or approval."""
-    def __init__(self, database=":memory:"):
+    def __init__(self, database=":memory:", github_reader=None):
         location = str(database)
         if location != ":memory:":
             path = Path(database).expanduser()
@@ -104,6 +118,7 @@ class LocalAgentPlanStore:
             path.parent.mkdir(parents=True, exist_ok=True)
             location = str(path)
         self.lock = threading.RLock()
+        self.github_reader = github_reader
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -118,7 +133,13 @@ class LocalAgentPlanStore:
                     results_json TEXT NOT NULL,
                     next_index INTEGER NOT NULL,
                     status TEXT NOT NULL,
-                    created_utc TEXT NOT NULL)""")
+                    created_utc TEXT NOT NULL,
+                    approval_epoch INTEGER)""")
+                columns = {col[1] for col in self.db.execute(
+                    "PRAGMA table_info(agent_task_plans)").fetchall()}
+                if "approval_epoch" not in columns:
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN approval_epoch INTEGER""")
                 # A process death leaves an explicitly visible interruption,
                 # rather than silently executing a plan again.
                 self.db.execute("""UPDATE agent_task_plans SET status='INTERRUPTED'
@@ -133,7 +154,7 @@ class LocalAgentPlanStore:
     def _fetch(self, plan_id):
         _require_id(plan_id)
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
-                next_index,status,created_utc FROM agent_task_plans
+                next_index,status,created_utc,approval_epoch FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -149,7 +170,8 @@ class LocalAgentPlanStore:
         return {"plan_id": plan_id, "model": row[0], "goal": row[1],
                 "steps": steps, "results": results,
                 "next_index": row[4], "status": row[5],
-                "created_utc": row[6]}
+                "created_utc": row[6],
+                "approval_epoch": row[7]}
 
     def get(self, plan_id):
         try:
@@ -175,6 +197,15 @@ class LocalAgentPlanStore:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
+        if any(step["tool"] == "github_public_issues" for step in steps):
+            if self.github_reader is None:
+                raise PlanError("tool_not_allowed")
+            for step in steps:
+                if step["tool"] == "github_public_issues":
+                    try:
+                        self.github_reader.check(step["args"]["repo"])
+                    except GitHubPlanReadError:
+                        raise PlanError("public_source_not_allowed") from None
         pid = secrets.token_hex(12)
         created = datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -197,8 +228,20 @@ class LocalAgentPlanStore:
                 old = self._fetch(plan_id)
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
-                self.db.execute("UPDATE agent_task_plans SET status='APPROVED' WHERE plan_id=?",
-                                (plan_id,))
+                epoch = None
+                if any(step["tool"] == "github_public_issues" for step in old["steps"]):
+                    if self.github_reader is None:
+                        raise PlanError("tool_not_allowed")
+                    epoch = self.github_reader.version()
+                    for step in old["steps"]:
+                        if step["tool"] == "github_public_issues":
+                            try:
+                                self.github_reader.check(step["args"]["repo"], epoch)
+                            except GitHubPlanReadError:
+                                raise PlanError("public_source_not_allowed") from None
+                self.db.execute("""UPDATE agent_task_plans
+                    SET status='APPROVED',approval_epoch=? WHERE plan_id=?""",
+                                (epoch, plan_id))
                 return self._fetch(plan_id)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
@@ -227,11 +270,23 @@ class LocalAgentPlanStore:
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
+                if step["tool"] == "github_public_issues":
+                    if self.github_reader is None:
+                        raise PlanError("tool_not_allowed")
+                    try:
+                        self.github_reader.check(step["args"]["repo"],
+                                                 old["approval_epoch"])
+                    except GitHubPlanReadError:
+                        raise PlanError("public_source_permission_changed") from None
                 self.db.execute("""UPDATE agent_task_plans
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                output = execute_tool(step["tool"], step["args"])
+                if step["tool"] == "github_public_issues":
+                    output = self.github_reader.read(
+                        step["args"]["repo"], old["approval_epoch"])
+                else:
+                    output = execute_tool(step["tool"], step["args"])
             except Exception:
                 with self.lock, self.db:
                     self.db.execute("""UPDATE agent_task_plans
