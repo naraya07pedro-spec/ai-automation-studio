@@ -119,6 +119,18 @@ python app/local_retrieval_eval.py
 
 This fully offline command compares historical Slice 57 retrieval to Slice 58 over the same **curated synthetic cases** (including an old chunk-boundary failure). Its success means the specified spans were found in the correct file. It is not a real-world benchmark, and it does not prove Ollama is installed on your computer. For the separate Windows **real-model** test continue using `python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL`. [Read the v2 retrieval trace, measurable comparison and limits](docs/LOCAL_RETRIEVAL_V2_EVALUATION.md).
 
+## One-click actual Ollama acceptance in the localhost UI (Slice 59)
+
+The model compatibility gate is now accessible **directly in the authenticated local workbench**, rather than relying only on synthetic GitHub CI or a manual terminal smoke command. The check runs one real inference on two harmless built-in text samples, verifies the answer **and** an exact citation from the correct source document, and shows the observed model name, elapsed time, and available system RAM before/after (not model-specific RSS).
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-multi-documents
+```
+
+After local owner login, click **Find installed models**, choose the exact name of a locally installed model, then under **Verify the installed model on this computer**, click **Run real Ollama acceptance on this PC**. This button does not install Ollama, request credentials, read your selected files, save a report, or use cloud AI. If the model is missing, the inference fails, or the response is unsupported, it reports **BLOCKED**.
+
+The UI and test contract explicitly distinguish `LIVE_LOCAL_OLLAMA` from `INJECTED_TEST_TRANSPORT`. A green CI fixture is **not** Windows-device evidence; the operator must run the check on their own PC. The old CLI `python app/local_multi_doc_smoke.py --model YOUR_INSTALLED_MODEL` remains available. [Details, validation and limitations](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.

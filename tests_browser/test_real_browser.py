@@ -90,6 +90,26 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_device_acceptance_fixture_is_not_misrepresented_as_real_ollama(self):
+        expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
+        self.page.locator("#device-acceptance-run").click()
+        expect(self.page.locator("#device-acceptance-status")).to_contain_text(
+            "NOT hardware acceptance")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "SYNTHETIC FIXTURE: NOT REAL OLLAMA")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "INJECTED_TEST_TRANSPORT")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "schedule.md")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "18:30 WIB")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "Session locked")
+
     def test_selected_multi_documents_cite_correct_filename_and_clear_on_logout(self):
         expect(self.page.locator("#local-multidoc-files")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
