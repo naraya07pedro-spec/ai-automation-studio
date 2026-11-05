@@ -90,6 +90,38 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_agent_approved_github_public_issues_read_with_provenance(self):
+        expect(self.page.locator("#agent-plan-github-status")).to_contain_text(
+            "GitHub read-only tool enabled")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "List open GitHub issues from Octocat/Hello-World")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "github_public_issues")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "Octocat/Hello-World")
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        self.assertNotIn("Synthetic GitHub issue with human-readable title",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "APPROVED")
+        self.assertNotIn("GITHUB_PUBLIC_ISSUES_READ_ONLY",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "COMPLETED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "GITHUB_PUBLIC_ISSUES_READ_ONLY")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "Synthetic GitHub issue with human-readable title")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "https://github.com/Octocat/Hello-World/issues/42")
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "No selected plan")
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
