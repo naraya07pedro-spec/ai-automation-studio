@@ -7,7 +7,7 @@ restricted output, never from model-provided URLs or prose.
 import json
 
 from local_agent_github_reader import GitHubPlanReadError
-from local_ollama_agent import ollama_transport, valid_model_name
+from local_ollama_agent import AgentError, ollama_transport, valid_model_name
 
 MAX_HIGHLIGHTS = 5
 MAX_OBSERVATION = 240
@@ -120,6 +120,12 @@ def analyze_public_issue_metadata(reader, repo, approved_epoch, model, goal="",
     }
     try:
         response = (transport or ollama_transport)(request)
+    except AgentError as exc:
+        # Preserve ONLY the bounded timeout code, so a model request that may
+        # still be running quarantines the shared gate. Hide other details.
+        raise IssueAnalysisError(
+            "local_model_timeout" if str(exc) == "local_model_timeout"
+            else "local_issue_analysis_unavailable") from None
     except Exception as exc:
         # Do not disclose local model internals or potentially sensitive text.
         if isinstance(exc, IssueAnalysisError):
