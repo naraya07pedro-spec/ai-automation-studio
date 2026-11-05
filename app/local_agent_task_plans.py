@@ -32,8 +32,8 @@ PLANNING_SYSTEM = (
     "Each step must have EXACT keys 'tool' and 'args'. "
     "Allowed tool: calculate with string a,b and operation add/subtract/multiply/divide. "
     "Allowed tool: utc_now with empty args object. No other tool names or actions. "
-    "If the request cannot be fulfilled with these tools, return {\"steps\":[]}. "
-    "Do not pretend to research, send messages, modify files or use external APIs."
+    "If the request cannot be fulfilled with the tools listed here, return {\"steps\":[]}. "
+    "Do not pretend to send messages, modify files or use unrestricted external APIs."
 )
 
 
