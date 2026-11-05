@@ -15,6 +15,17 @@ Visit `http://127.0.0.1:8765`, log in, open **Ask your local AI agent**, and ent
 
 **Important:** chat history is plaintext SQLite on your machine and is unsuitable for secrets or customer PII. Ollama hardware/model compatibility has **not** been verified through a real model E2E in CI. All server access remains localhost-only and requires local operator authentication. Without the two startup flags, local inference and persisted agent history are disabled by default. See [agent conversation and migration documentation](docs/LOCAL_AGENT_CONVERSATION_ISOLATION_V1.md) and [progress log](docs/PROGRESS.md).
 
+## Check a real installed Ollama model (Slice 51)
+
+Green synthetic CI tests do **not** prove a model works on your Windows hardware. Use the new explicit **real localhost readiness probe** before treating your installation as compatible:
+
+```powershell
+python app/local_ollama_readiness.py
+python app/local_ollama_readiness.py --model qwen2.5:3b
+```
+
+The model argument above is an **example** and must be replaced with the name of an installed, tool-capable local model. Without an installed model the check reports a blocked status; it will not download one. In the authenticated browser, **Find installed Ollama models** lists local names; **Test local model & tool calling** requests one bounded calculator-tool round trip. `OBSERVED` proves that this tool call ran in the local engine during the probe, not the model's general accuracy. The probe never saves history or calls third-party business APIs. [Read the full scope and constraints](docs/REAL_OLLAMA_READINESS_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.
