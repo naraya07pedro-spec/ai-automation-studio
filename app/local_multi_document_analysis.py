@@ -257,7 +257,8 @@ def analyze_multiple_documents(documents, question, model, transport=None):
         response = (transport or ollama_transport)(request)
     except AgentError as exc:
         # Stable, non-sensitive codes. Never expose raw HTTP payloads or host internals.
-        known = {"local_model_timeout", "local_model_endpoint_missing",
+        known = {"local_model_timeout", "local_model_transport_uncertain",
+                 "local_model_endpoint_missing",
                  "local_model_server_error", "local_model_unavailable",
                  "model_response_too_large", "invalid_model_response"}
         raise LocalDocumentError(
