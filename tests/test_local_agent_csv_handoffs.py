@@ -6,7 +6,6 @@ import tempfile
 import time
 import threading
 import unittest
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
@@ -74,7 +73,7 @@ class CSVHandoffUnitTests(unittest.TestCase):
         self.assertEqual(done["csv_source"]["sha256"],
                          binding["source_csv_sha256"])
         self.assertEqual(64, len(binding["source_sha256"]))
-        self.assertEqual("EXACT" if False else 1, len(done["handoffs"]))
+        self.assertEqual(1, len(done["handoffs"]))
         self.assertNotIn("SYNTHETIC_RECORD_", json.dumps(done))
         self.store.close()
         reloaded = LocalAgentPlanStore(self.path, csv_profiler=profile_selected_csv)
