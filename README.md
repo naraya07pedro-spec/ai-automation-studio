@@ -3,6 +3,20 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Owner-curated local AI memory workspace (Slice 66)
+
+The local agent now supports a **separate, optional memory workspace** that carries owner-typed notes across chat threads and restarts, without automatically copying all saved context into every model request. This is a real user-facing capability, not another synthetic agent demonstration.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-memory
+```
+
+After authenticating in the local browser, open **Saved memory cards** under **Ask your local AI agent**. Create a note with a readable lower-case ID, view/list it, load it to edit, or explicitly delete it. A note may contain up to **600 characters**; the local store holds up to **24 cards**. Updates and deletes use revision checks to prevent unintended stale overwrites. In a chat request, enter up to **3 saved note IDs** in the **Use saved note IDs** field. The agent receives **only those selected notes**, for that request. The response returns the exact IDs used, and the next request has no selected memory unless its own request also supplies IDs.
+
+**Storage is plaintext local SQLite.** Do not save passwords, confidential records, credentials or sensitive customer data. Notes are marked `OWNER_CURATED_UNVERIFIED`, never automatically created by a model, and are not independently verified facts. Memory edits/deletes never call Ollama or contact cloud services. This does not grant file scanning, shell execution or external write permissions. [Full feature contract, auth and limitations](docs/OWNER_CURATED_MEMORY_V1.md).
+
+**Build-first:** the owner has deferred live Ollama testing on their own Windows computer while core features are being built. GitHub CI can still check deterministic storage, permissions, API semantics and synthetic browser interactions; it cannot establish live hardware compatibility. [Deferred device acceptance](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68).
+
 ## Optional local AI agent in the browser (Slices 47–50)
 
 Install Ollama separately, download a **tool-calling-capable** local model that your computer can run, and ensure Ollama is available on its default local port. After provisioning the owner's password once (see below), start the workbench with:
