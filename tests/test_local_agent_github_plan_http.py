@@ -39,8 +39,9 @@ class GitHubPlanHTTPTests(unittest.TestCase):
         self.plan_calls=[]
         def planner(goal,model):
             self.plan_calls.append((goal,model))
+            selected="github_issue_triage" if "triage" in goal.lower() else "github_public_issues"
             return {"goal":goal,"model":model,"steps":[
-                {"tool":"github_public_issues","args":{"repo":REPO}}]}
+                {"tool":selected,"args":{"repo":REPO}}]}
         self.server=ThreadingHTTPServer(("127.0.0.1",0),
             create_handler(operator_auth=self.auth,
                            local_agent_runner=lambda prompt,model: {
@@ -71,9 +72,9 @@ class GitHubPlanHTTPTests(unittest.TestCase):
         c.close()
         return result
 
-    def create(self):
+    def create(self, goal="Read public GitHub issues"):
         return self.request("POST","/api/local-agent-plan-create",
-                            {"goal":"Read public GitHub issues","model":"fixture:small"})
+                            {"goal":goal,"model":"fixture:small"})
 
     def test_default_deny_and_explicit_grant_before_model_or_fetch(self):
         code,response=self.create()
@@ -111,6 +112,28 @@ class GitHubPlanHTTPTests(unittest.TestCase):
         self.assertEqual([REPO],self.provider_calls)
         self.assertEqual(409,self.request("POST","/api/local-agent-plan-next",
                              {"plan_id":pid})[0])
+        self.assertEqual([REPO],self.provider_calls)
+
+    def test_approved_triage_returns_grounded_report_once(self):
+        self.policy.grant(REPO)
+        code,plan=self.create("Triage open issues using labels")
+        self.assertEqual(200,code)
+        self.assertEqual("github_issue_triage",plan["steps"][0]["tool"])
+        self.assertEqual([],self.provider_calls)
+        pid=plan["plan_id"]
+        self.assertEqual(409,self.request("POST","/api/local-agent-plan-next",
+                                          {"plan_id":pid})[0])
+        self.assertEqual(200,self.request("POST","/api/local-agent-plan-approve",
+                                          {"plan_id":pid})[0])
+        self.assertEqual([],self.provider_calls)
+        code,done=self.request("POST","/api/local-agent-plan-next",{"plan_id":pid})
+        self.assertEqual(200,code)
+        report=json.loads(done["results"][0]["output"])
+        self.assertEqual("GITHUB_PUBLIC_ISSUE_TRIAGE_READ_ONLY",report["source"])
+        self.assertEqual("DETERMINISTIC_LABEL_RULES_V1",report["method"])
+        self.assertEqual(1,report["returned_count"])
+        self.assertEqual("UNASSESSED",report["issues"][0]["priority_signal"])
+        self.assertEqual(0,report["external_write_count"])
         self.assertEqual([REPO],self.provider_calls)
 
     def test_policy_revoke_blocks_without_provider_read(self):
