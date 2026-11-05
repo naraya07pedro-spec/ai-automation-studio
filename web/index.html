@@ -289,11 +289,30 @@ aas:timeline:urgent
 <datalist id="local-agent-conversation-list"></datalist>
 <div id="local-agent-thread-hint" class="muted">Pick a saved ID or type a new ID using lowercase letters, numbers, _ and -. Saved conversations stay separate.</div></div>
 <div class="field" style="display:flex;gap:10px;align-items:center"><input id="local-agent-remember" type="checkbox" style="width:auto" disabled><label for="local-agent-remember" style="margin:0">Save this conversation on my PC (plain local SQLite, max 6 turns)</label></div>
+<div class="field"><label for="local-memory-use">Use saved note IDs in this next agent request (optional, max 3, comma-separated)</label>
+<input id="local-memory-use" maxlength="105" placeholder="e.g. writing_style,project_goal" autocomplete="off" disabled aria-describedby="local-memory-use-hint">
+<div class="muted" id="local-memory-use-hint">Notes are never inserted into chat automatically. Each use is explicit, local to this request and identified in the result.</div></div>
 <button id="local-agent-send" class="primary" type="button" disabled>Run local agent</button>
 <div class="core-actions" style="margin-top:12px"><button id="local-agent-history-refresh" type="button" class="secondary" disabled>View saved context</button><button id="local-agent-history-clear" type="button" class="secondary" disabled>Delete saved context</button></div>
 <pre class="trace" id="local-agent-history-display" aria-label="Saved local agent context">Local history is disabled by default.</pre>
 <div class="setup-msg" id="local-agent-status" role="status" aria-live="polite">Checking local-model permission…</div>
 <pre class="trace" id="local-agent-output" aria-label="Local agent result">No agent run yet. Model responses are unverified.</pre>
+<div class="kicker" style="margin-top:22px">OWNER-CURATED MEMORY · LOCAL ONLY</div>
+<h3>Saved memory cards</h3>
+<p class="muted">Write, review or delete up to 24 notes (600 characters each). Notes are plaintext local SQLite, unsuitable for passwords, secrets or customer data. The model cannot edit them. Use a note ID in the chat field above to include it explicitly in one request.</p>
+<div class="field"><label for="local-memory-id">Memory note ID</label>
+<input id="local-memory-id" list="local-memory-id-list" maxlength="32" placeholder="e.g. project_goal" autocomplete="off" disabled></div>
+<datalist id="local-memory-id-list"></datalist>
+<div class="field"><label for="local-memory-text">Memory note text</label>
+<textarea id="local-memory-text" maxlength="600" rows="3" style="width:100%;min-height:80px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" disabled placeholder="A fact or preference you choose to retain. It is not independently verified."></textarea></div>
+<div id="local-memory-revision" class="muted">No note loaded. Saving a new ID creates revision 1.</div>
+<div class="core-actions" style="margin:12px 0">
+<button id="local-memory-list-button" type="button" class="secondary" disabled>List saved notes</button>
+<button id="local-memory-load-button" type="button" class="secondary" disabled>Load selected note</button>
+<button id="local-memory-save-button" type="button" class="primary" disabled>Save / replace note</button>
+<button id="local-memory-delete-button" type="button" class="secondary" disabled>Delete selected note</button></div>
+<div id="local-memory-status" class="setup-msg" role="status" aria-live="polite">Memory disabled. Restart with --enable-local-agent --enable-agent-memory.</div>
+<pre id="local-memory-list" class="trace" aria-label="Locally saved memory notes">No memory notes loaded.</pre>
 </section>
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
@@ -819,6 +838,116 @@ const refreshOperatorAudit=async()=>{
 $("operator-audit-refresh").addEventListener("click",refreshOperatorAudit);
 
 let localAgentRevision=0;
+let localAgentMemoryEnabled=false;
+let localMemoryRevision=0;
+let localMemoryCards=[];
+let memoryBusy=false;
+const memoryIdField=$("local-memory-id");
+const memoryTextField=$("local-memory-text");
+const memoryUseField=$("local-memory-use");
+const memoryStatus=$("local-memory-status");
+const memoryRevisionLabel=$("local-memory-revision");
+const memoryListing=$("local-memory-list");
+const memoryButtons=["local-memory-list-button","local-memory-load-button",
+ "local-memory-save-button","local-memory-delete-button"];
+const memoryIdValid=id=>/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id);
+const memoryRevisionFor=id=>localMemoryCards.find(c=>c.id===id)?.revision||0;
+const selectedMemoryIds=()=>{
+ const raw=memoryUseField.value.trim();
+ if(!raw)return [];
+ const ids=raw.split(",").map(x=>x.trim());
+ if(ids.length>3||new Set(ids).size!==ids.length||ids.some(x=>!memoryIdValid(x)))
+  throw Error("invalid_memory_selection");
+ return ids;
+};
+const refreshMemoryButtons=()=>{
+ const on=localAgentMemoryEnabled&&!!operatorCsrf&&!memoryBusy;
+ for(const id of memoryButtons)$(id).disabled=!on;
+ memoryIdField.disabled=!on;memoryTextField.disabled=!on;
+ memoryUseField.disabled=!on;
+};
+const refreshLocalMemory=async()=>{
+ if(!localAgentMemoryEnabled||!operatorCsrf)return;
+ const revision=++localMemoryRevision;
+ try{
+  const resp=await appFetch("/api/local-agent-memory");
+  const data=await resp.json();
+  if(revision!==localMemoryRevision||!operatorCsrf)return;
+  if(!resp.ok)throw Error(data.error||"memory_unavailable");
+  localMemoryCards=data.cards||[];
+  const list=$("local-memory-id-list");list.replaceChildren();
+  for(const note of localMemoryCards){
+   const item=document.createElement("option");item.value=note.id;
+   list.appendChild(item);
+  }
+  memoryListing.textContent=localMemoryCards.length
+   ?localMemoryCards.map(c=>c.id+" · rev "+c.revision+"\n"+c.text).join("\n\n")
+   :"No memory cards saved.";
+  memoryStatus.textContent=localMemoryCards.length+" / "+data.capacity+
+   " owner-curated notes. Stored locally, never added to chat without selection.";
+ }catch(error){
+  if(revision===localMemoryRevision)
+   memoryStatus.textContent="Memory list unavailable: "+error.message;
+ }
+};
+const loadSelectedMemory=()=>{
+ const id=memoryIdField.value.trim();
+ const card=localMemoryCards.find(c=>c.id===id);
+ if(!card){memoryStatus.textContent="Note not loaded; refresh list and choose a saved ID.";return;}
+ memoryTextField.value=card.text;
+ memoryRevisionLabel.textContent="Loaded "+card.id+" · revision "+card.revision;
+ memoryStatus.textContent="Selected note loaded. Replace requires explicit confirmation.";
+};
+memoryIdField.addEventListener("input",()=>{
+ memoryRevisionLabel.textContent="No note loaded. Load existing note before replacing.";
+});
+$("local-memory-list-button").addEventListener("click",refreshLocalMemory);
+$("local-memory-load-button").addEventListener("click",loadSelectedMemory);
+$("local-memory-save-button").addEventListener("click",async()=>{
+ if(!localAgentMemoryEnabled||!operatorCsrf||memoryBusy)return;
+ const id=memoryIdField.value.trim(),body=memoryTextField.value;
+ if(!memoryIdValid(id)||!body.trim()||body.length>600){
+  memoryStatus.textContent="Use an ID of 1-32 lowercase characters and 1-600 characters of note text.";return;
+ }
+ const current=localMemoryCards.find(x=>x.id===id);
+ if(current&&!window.confirm("Replace the existing local note "+id+"?"))return;
+ memoryBusy=true;refreshMemoryButtons();
+ try{
+  const response=await appFetch("/api/local-agent-memory-save",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({id,text:body,expected_revision:current?.revision||0})});
+  const data=await response.json();
+  if(!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"memory_save_failed");
+  memoryRevisionLabel.textContent="Saved "+id+" · revision "+data.revision;
+  memoryStatus.textContent="Saved locally. No model invoked, no external writes.";
+  await refreshLocalMemory();
+ }catch(error){
+  if(operatorCsrf)memoryStatus.textContent="Memory save blocked: "+error.message;
+ }finally{memoryBusy=false;refreshMemoryButtons();}
+});
+$("local-memory-delete-button").addEventListener("click",async()=>{
+ if(!localAgentMemoryEnabled||!operatorCsrf||memoryBusy)return;
+ const id=memoryIdField.value.trim();
+ const current=localMemoryCards.find(c=>c.id===id);
+ if(!current){memoryStatus.textContent="Load or list a saved note first.";return;}
+ if(!window.confirm("Permanently delete saved local note "+id+"?"))return;
+ memoryBusy=true;refreshMemoryButtons();
+ try{
+  const response=await appFetch("/api/local-agent-memory-delete",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({id,expected_revision:current.revision})});
+  const data=await response.json();
+  if(!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"memory_delete_failed");
+  memoryTextField.value="";
+  memoryRevisionLabel.textContent="Note deleted locally.";
+  await refreshLocalMemory();
+  memoryStatus.textContent="Deleted local memory note "+id+".";
+ }catch(error){
+  if(operatorCsrf)memoryStatus.textContent="Memory deletion blocked: "+error.message;
+ }finally{memoryBusy=false;refreshMemoryButtons();}
+});
 let localAgentEnabled=false;
 let localAgentHistoryEnabled=false;
 const localAgentRemember=$("local-agent-remember");
@@ -974,6 +1103,12 @@ const refreshLocalAgent=async()=>{
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
+  localAgentMemoryEnabled=localAgentEnabled&&data.memory_cards===true;
+  refreshMemoryButtons();
+  memoryStatus.textContent=localAgentMemoryEnabled
+   ?"Local memory enabled. Only explicitly selected notes enter a model request."
+   :"Disabled. Restart with --enable-local-agent --enable-agent-memory.";
+  if(localAgentMemoryEnabled)refreshLocalMemory();
   localDocumentsEnabled=localAgentEnabled&&data.documents===true;
   multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
   deviceAcceptanceEnabled=localAgentEnabled&&data.device_acceptance===true;
@@ -1032,6 +1167,15 @@ localAgentSend.addEventListener("click",async()=>{
  const remember=localAgentRemember.checked;
  const conversationId=selectedConversation();
  if(!localAgentEnabled||!operatorCsrf)return;
+ let memoryIds=[];
+ try{memoryIds=selectedMemoryIds();}catch(error){
+  localAgentStatus.textContent="Invalid memory note IDs. Use up to 3 distinct lowercase IDs.";
+  return;
+ }
+ if(memoryIds.length&&!localAgentMemoryEnabled){
+  localAgentStatus.textContent="Memory disabled. Start server with --enable-agent-memory.";
+  return;
+ }
  if(remember&&!validConversation(conversationId)){
   localAgentStatus.textContent="Use a valid lowercase conversation ID (1-32 chars).";
   return;
@@ -1048,7 +1192,8 @@ localAgentSend.addEventListener("click",async()=>{
   const response=await appFetch("/api/local-agent-run",{
    method:"POST",headers:{"Content-Type":"application/json"},
    body:JSON.stringify({model,prompt,remember,
-    ...(remember?{conversation_id:conversationId}:{})})});
+    ...(remember?{conversation_id:conversationId}:{}),
+    ...(memoryIds.length?{memory_ids:memoryIds}:{})})});
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf
       ||(remember&&conversationId!==selectedConversation()))return;
@@ -1056,7 +1201,9 @@ localAgentSend.addEventListener("click",async()=>{
   localAgentOutput.textContent=data.answer||"Empty model response";
   if(data.remembered){refreshAgentHistory();refreshConversations();}
   localAgentStatus.textContent="Local model responded. Tools: "+
-    ((data.tools_used||[]).join(", ")||"none")+". Verify generated claims.";
+    ((data.tools_used||[]).join(", ")||"none")+
+    ". Selected local notes: "+((data.memory_ids_used||[]).join(", ")||"none")+
+    ". Memory text is unverified reference, not checked evidence.";
  }catch(error){
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentStatus.textContent="Local run failed: "+error.message;
@@ -1695,6 +1842,16 @@ const lockOperatorUI=message=>{
  refreshDocumentButton();
  localAgentEnabled=false;
  localAgentHistoryEnabled=false;
+ localAgentMemoryEnabled=false;
+ localMemoryRevision++;
+ memoryBusy=false;
+ localMemoryCards=[];
+ memoryIdField.value="";memoryTextField.value="";memoryUseField.value="";
+ memoryRevisionLabel.textContent="Session locked; no note loaded.";
+ memoryListing.textContent="Session locked; saved memory hidden.";
+ memoryStatus.textContent="Session locked; memory unavailable.";
+ $("local-memory-id-list").replaceChildren();
+ refreshMemoryButtons();
  agentPlanEnabled=false;
  agentPlanBusy=false;
  agentPlanRevision++;
