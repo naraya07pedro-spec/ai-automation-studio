@@ -52,4 +52,4 @@ Authenticated plan responses include `document_set_sources` metadata (name, byte
 
 Ordinary CI verifies deterministic validation, owner/CSRF authorization, SQLite migration/restart and corruption checks, synthetic model payload boundaries, and Chromium browser interactions against **explicitly synthetic fixture responses**. These do **not** establish real Ollama compatibility, device latency, reliability or quality on the owner's Windows computer. The owner's **build-first decision** continues: real Windows/Ollama acceptance stays deferred on [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68).
 
-See [single-file task-plan sources](SELECTED_DOCUMENT_PLAN_WORKFLOW_V1.md), [transient multi-file retrieval](LOCAL_MULTI_DOCUMENT_ANALYSIS_V1.md), and [evidence-backed Task Deliverables](COMPLETED_TASK_DELIVERABLES_V1.md).
+See [single-file task-plan sources](SELECTED_DOCUMENT_PLAN_WORKFLOW_V1.md), [transient multi-file retrieval](LOCAL_MULTI_DOCUMENT_RETRIEVAL_V1.md), and [evidence-backed Task Deliverables](COMPLETED_TASK_DELIVERABLES_V1.md).
