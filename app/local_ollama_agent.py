@@ -48,8 +48,17 @@ def safe_local_opener():
 
 
 def valid_model_name(model):
-    return (type(model) is str and 1 <= len(model) <= 80
-            and all(c.isascii() and (c.isalnum() or c in "._:-") for c in model))
+    if (type(model) is not str or not 1 <= len(model) <= 80
+            or any(not c.isascii() or not (c.isalnum() or c in "._:-/")
+                   for c in model)
+            or model.count(":") > 1
+            or model.endswith(":")):
+        return False
+    # Namespaced installed Ollama models may contain slashes, but never
+    # accept empty, dot or parent-directory segments.
+    parts = model.split("/")
+    return all(part not in ("", ".", "..") and part[0].isalnum()
+               for part in parts)
 
 
 def calculate(args):
