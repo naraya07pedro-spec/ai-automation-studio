@@ -117,7 +117,7 @@ def _require_id(value):
 
 class LocalAgentPlanStore:
     """Persistent state machine. No automatic dispatch on restart or approval."""
-    def __init__(self, database=":memory:", github_reader=None):
+    def __init__(self, database=":memory:", github_reader=None, issue_analyzer=None):
         location = str(database)
         if location != ":memory:":
             path = Path(database).expanduser()
@@ -127,6 +127,7 @@ class LocalAgentPlanStore:
             location = str(path)
         self.lock = threading.RLock()
         self.github_reader = github_reader
+        self.issue_analyzer = issue_analyzer or analyze_public_issue_metadata
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -291,7 +292,7 @@ class LocalAgentPlanStore:
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
                 if step["tool"] == "github_issue_analysis":
-                    output = analyze_public_issue_metadata(
+                    output = self.issue_analyzer(
                         self.github_reader, step["args"]["repo"],
                         old["approval_epoch"], old["model"], old["goal"])
                 elif step["tool"] == "github_issue_triage":
