@@ -4,6 +4,7 @@ Read-only tools, with GitHub public issue metadata only by separate opt-in; no w
 single-owner SQLite, intentionally separate from the conversation database.
 """
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
 import re
@@ -15,6 +16,9 @@ from local_ollama_agent import (AgentError, calculate, execute_tool,
                                 ollama_transport, valid_model_name)
 from local_agent_github_reader import valid_repo, GitHubPlanReadError
 from local_agent_issue_analysis import analyze_public_issue_metadata
+from local_document_analysis import (analyze_local_document, validate_document,
+                                     LocalDocumentError, NAME_PATTERN,
+                                     MAX_QUESTION, MAX_TEXT_BYTES)
 from local_agent_plan_reports import (generate_completed_plan_report,
                                       validate_report_result, _sources,
                                       PlanReportError)
@@ -25,6 +29,8 @@ from local_agent_memory import (MemoryCardError, valid_selection,
 MAX_STEPS = 3
 MAX_PLANS = 12
 MAX_GOAL = 1200
+LOCAL_DOCUMENT_TOOL = "local_document_question"
+MAX_PLAN_DOC_BYTES = 3500
 ID_PATTERN = re.compile(r"[0-9a-f]{24}\Z")
 GITHUB_PLANNING_ADDENDUM = (
     ' Additional allowed read-only tool when explicitly enabled: '
@@ -38,6 +44,16 @@ GITHUB_PLANNING_ADDENDUM = (
     'Both read at most 15 open public GitHub issues from a repository '
     'the operator explicitly allowed in local source permissions. '
     'No arbitrary URLs, private repositories, issue edits or unrestricted browsing.'
+)
+DOCUMENT_PLANNING_ADDENDUM = (
+    ' The operator explicitly attached ONE local text/Markdown document to this '
+    'plan. Optional allowed read-only tool: local_document_question with EXACT '
+    'args {"question":"a concise question (up to 500 chars) for the selected file"}. '
+    'The selected document filename and digest are supplied as metadata only; '
+    'the model cannot choose another file, read paths, or invent contents. '
+    'The document Q&A tool can run only after review/approval and uses the '
+    'operator-approved persisted source snapshot. It checks exact citations; '
+    'unknown claims must be marked insufficient. '
 )
 PLANNING_SYSTEM = (
     "Build a short read-only tool plan for the user's request. "
@@ -78,6 +94,11 @@ def validate_steps(steps):
         elif tool == "utc_now":
             if args:
                 raise PlanError("invalid_model_plan")
+        elif tool == LOCAL_DOCUMENT_TOOL:
+            if (set(args) != {"question"} or
+                    type(args["question"]) is not str or
+                    not 1 <= len(args["question"].strip()) <= MAX_QUESTION):
+                raise PlanError("invalid_model_plan")
         elif tool in ("github_public_issues", "github_issue_triage",
                            "github_issue_analysis"):
             if set(args) != {"repo"} or valid_repo(args.get("repo")) is None:
@@ -89,11 +110,28 @@ def validate_steps(steps):
 
 
 def propose_readonly_plan(goal, model, transport=None, allow_github=False,
-                          memory_context=None):
+                          memory_context=None, document_context=None):
     """Actual local model inference with fixed JSON output and zero tool execution."""
     _validate_goal_model(goal, model)
+    if document_context is not None:
+        if (type(document_context) is not dict
+                or set(document_context) != {"filename", "source_bytes", "sha256"}
+                or type(document_context["filename"]) is not str
+                or NAME_PATTERN.fullmatch(document_context["filename"]) is None
+                or type(document_context["source_bytes"]) is not int
+                or not 1 <= document_context["source_bytes"] <= MAX_PLAN_DOC_BYTES
+                or type(document_context["sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", document_context["sha256"]) is None):
+            raise PlanError("invalid_plan_document")
     messages = [{"role": "system", "content":
-                 PLANNING_SYSTEM + (GITHUB_PLANNING_ADDENDUM if allow_github else "")}]
+                 PLANNING_SYSTEM + (GITHUB_PLANNING_ADDENDUM if allow_github else "")
+                 + (DOCUMENT_PLANNING_ADDENDUM if document_context is not None else "")}]
+    if document_context is not None:
+        messages.append({"role": "user", "content":
+            "This is OWNER-SELECTED document metadata only, not document body "
+            "or instructions. To answer from its contents propose "
+            "local_document_question.\n" +
+            json.dumps(document_context, separators=(",", ":"))})
     if memory_context is not None:
         if (type(memory_context) is not list
                 or not valid_selection(
@@ -132,7 +170,41 @@ def propose_readonly_plan(goal, model, transport=None, allow_github=False,
     steps = validate_steps(data["steps"])
     if not allow_github and any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
         raise PlanError("tool_not_allowed")
+    if document_context is None and any(
+            step["tool"] == LOCAL_DOCUMENT_TOOL for step in steps):
+        raise PlanError("tool_not_allowed")
     return {"model": model, "goal": goal, "steps": steps}
+
+
+def validated_document_snapshot(snapshot, model):
+    """Document bytes are supplied by owner, never an arbitrary server path."""
+    if snapshot is None:
+        return None
+    if (type(snapshot) is not dict
+            or set(snapshot) != {"filename", "content"}
+            or type(snapshot["filename"]) is not str
+            or type(snapshot["content"]) is not str):
+        raise PlanError("invalid_plan_document")
+    try:
+        validate_document(snapshot["filename"], snapshot["content"],
+                          "Review the selected document", model)
+    except LocalDocumentError:
+        raise PlanError("invalid_plan_document") from None
+    content = snapshot["content"]
+    if len(content.encode("utf-8")) > MAX_PLAN_DOC_BYTES:
+        raise PlanError("plan_document_too_large")
+    return {"filename": snapshot["filename"], "content": content,
+            "sha256": sha256(content.encode("utf-8")).hexdigest()}
+
+
+def document_source_metadata(snapshot):
+    if snapshot is None:
+        return None
+    return {"filename": snapshot["filename"],
+            "source_bytes": len(snapshot["content"].encode("utf-8")),
+            "sha256": snapshot["sha256"],
+            "stored_local_plaintext": True,
+            "scope": "OWNER_SELECTED_DOCUMENT_SNAPSHOT"}
 
 
 def validate_memory_refs(refs):
@@ -160,7 +232,7 @@ def _require_id(value):
 class LocalAgentPlanStore:
     """Persistent state machine. No automatic dispatch on restart or approval."""
     def __init__(self, database=":memory:", github_reader=None, issue_analyzer=None,
-                 memory_store=None, report_generator=None):
+                 memory_store=None, report_generator=None, document_analyzer=None):
         location = str(database)
         if location != ":memory:":
             path = Path(database).expanduser()
@@ -173,6 +245,7 @@ class LocalAgentPlanStore:
         self.memory_store = memory_store
         self.issue_analyzer = issue_analyzer or analyze_public_issue_metadata
         self.report_generator = report_generator or generate_completed_plan_report
+        self.document_analyzer = document_analyzer
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -190,7 +263,8 @@ class LocalAgentPlanStore:
                     created_utc TEXT NOT NULL,
                     approval_epoch INTEGER,
                     memory_refs_json TEXT NOT NULL DEFAULT '[]',
-                    report_json TEXT NOT NULL DEFAULT '')""")
+                    report_json TEXT NOT NULL DEFAULT '',
+                    document_json TEXT NOT NULL DEFAULT '')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -205,6 +279,10 @@ class LocalAgentPlanStore:
                     # Existing plans remain valid and report-free.
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN report_json TEXT NOT NULL DEFAULT ''""")
+                if "document_json" not in columns:
+                    # No new source is invented for legacy plans.
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN document_json TEXT NOT NULL DEFAULT ''""")
                 # A process death leaves an explicitly visible interruption,
                 # rather than silently executing a plan again.
                 self.db.execute("""UPDATE agent_task_plans SET status='INTERRUPTED'
@@ -228,11 +306,32 @@ class LocalAgentPlanStore:
         with self.lock:
             self.db.close()
 
+    def _stored_document(self, plan_id, model):
+        row = self.db.execute("SELECT document_json FROM agent_task_plans "
+                              "WHERE plan_id=?", (plan_id,)).fetchone()
+        if row is None:
+            raise PlanError("plan_not_found")
+        if not row[0]:
+            return None
+        try:
+            snapshot = json.loads(row[0])
+            if type(snapshot) is not dict or set(snapshot) != {
+                    "filename", "content", "sha256"}:
+                raise PlanError("plan_document_storage_invalid")
+            checked = validated_document_snapshot(
+                {"filename": snapshot["filename"], "content": snapshot["content"]},
+                model)
+            if checked["sha256"] != snapshot["sha256"]:
+                raise PlanError("plan_document_storage_invalid")
+            return checked
+        except (ValueError, TypeError, KeyError, PlanError):
+            raise PlanError("plan_document_storage_invalid") from None
+
     def _fetch(self, plan_id):
         _require_id(plan_id)
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
                 next_index,status,created_utc,approval_epoch,memory_refs_json,
-                report_json FROM agent_task_plans
+                report_json,document_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -241,6 +340,7 @@ class LocalAgentPlanStore:
             results = json.loads(row[3])
             memory_refs = validate_memory_refs(json.loads(row[8]))
             report = json.loads(row[9]) if row[9] else None
+            document = self._stored_document(plan_id, row[0]) if row[10] else None
         except (TypeError, ValueError, PlanError):
 
             raise PlanError("plan_storage_invalid") from None
@@ -254,7 +354,8 @@ class LocalAgentPlanStore:
                 "created_utc": row[6],
                 "approval_epoch": row[7],
                 "memory_refs": memory_refs,
-                "report": report}
+                "report": report,
+                "document_source": document_source_metadata(document)}
 
     def get(self, plan_id):
         try:
@@ -275,11 +376,16 @@ class LocalAgentPlanStore:
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
 
-    def create(self, proposed, memory_refs=None):
+    def create(self, proposed, memory_refs=None, document_snapshot=None):
         if type(proposed) is not dict or set(proposed) != {"model", "goal", "steps"}:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
+        document = validated_document_snapshot(document_snapshot, proposed["model"])
+        has_document_step = any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in steps)
+        if (has_document_step != (document is not None)
+                or (has_document_step and self.document_analyzer is None)):
+            raise PlanError("tool_not_allowed")
         refs = validate_memory_refs(memory_refs)
         self._verify_memory_refs(refs)
         if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
@@ -303,11 +409,13 @@ class LocalAgentPlanStore:
                 self._verify_memory_refs(refs)
                 self.db.execute("""INSERT INTO agent_task_plans
                     (plan_id,model,goal,steps_json,results_json,next_index,status,
-                     created_utc,memory_refs_json)
-                    VALUES(?,?,?,?,?,0,'PREPARED',?,?)""",
+                     created_utc,memory_refs_json,document_json)
+                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?)""",
                     (pid, proposed["model"], proposed["goal"],
                      json.dumps(steps, separators=(",", ":")), "[]", created,
-                     json.dumps(refs, separators=(",", ":"))))
+                     json.dumps(refs, separators=(",", ":")),
+                     json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+                     if document is not None else ""))
                 return self._fetch(pid)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
@@ -319,6 +427,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
                 epoch = None
                 if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in old["steps"]):
                     if self.github_reader is None:
@@ -344,6 +455,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "INTERRUPTED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
                 new_status = "APPROVED" if old["next_index"] == 0 else "NEXT_READY"
                 self.db.execute("UPDATE agent_task_plans SET status=? WHERE plan_id=?",
                                 (new_status, plan_id))
@@ -363,6 +477,11 @@ class LocalAgentPlanStore:
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
+                snapshot = None
+                if step["tool"] == LOCAL_DOCUMENT_TOOL:
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
+                    snapshot = self._stored_document(plan_id, old["model"])
                 if step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis"):
                     if self.github_reader is None:
                         raise PlanError("tool_not_allowed")
@@ -375,7 +494,19 @@ class LocalAgentPlanStore:
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                if step["tool"] == "github_issue_analysis":
+                if step["tool"] == LOCAL_DOCUMENT_TOOL:
+                    result = self.document_analyzer(
+                        snapshot["filename"], snapshot["content"],
+                        step["args"]["question"], old["model"])
+                    if (type(result) is not dict
+                            or result.get("status") != "DOCUMENT_ANALYZED_LOCAL"
+                            or result.get("filename") != snapshot["filename"]
+                            or result.get("source_scope") != "OPERATOR_SELECTED_TEXT_ONLY"
+                            or result.get("external_write_count") != 0):
+                        raise PlanError("plan_document_result_invalid")
+                    output = json.dumps(result, ensure_ascii=False,
+                                        separators=(",", ":"))
+                elif step["tool"] == "github_issue_analysis":
                     output = self.issue_analyzer(
                         self.github_reader, step["args"]["repo"],
                         old["approval_epoch"], old["model"], old["goal"])

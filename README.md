@@ -3,6 +3,20 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Owner-selected document research inside approved task plans (Slice 69)
+
+The local agent can now include **one explicitly selected text/Markdown document** in a durable, human-reviewed task plan, rather than handling every document only as an isolated one-shot Q&A. This is a substantive source expansion for core agent tasks.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-local-documents
+```
+
+Under **Plan a small local task**, choose a single UTF-8 `.txt` or `.md` file of at most **3,500 bytes**, then **explicitly consent to saving its text in the plan's local plaintext SQLite**. A plan may propose the new bounded, read-only `local_document_question` tool against **only this owner-selected snapshot**, never an arbitrary file path. During proposal the model sees file metadata and the goal, **not the document body**. The full text is used only when the owner reviews/approves the plan and presses **Execute next step** for that document question. The answer uses the existing exact-quote checks, and the finished plan can produce the previous Task Deliverable and Markdown export.
+
+Source document bodies are **not returned by plan list/get APIs**, although the task-plan SQLite intentionally stores the chosen source until deletion. Plan responses show filename, byte count, SHA-256 digest and whether a snapshot is stored; restarts reuse that frozen version without opening PC files. No folders are scanned and no files are uploaded to cloud models. This feature does not support PDFs, secrets, private customer records or automatic file discovery. The owner has **deferred actual Ollama-on-Windows acceptance**; CI checks use labeled synthetic inference.
+
+[See the complete consent, API, storage and security contract](docs/SELECTED_DOCUMENT_PLAN_WORKFLOW_V1.md).
+
 ## Completed-plan Task Deliverables (Slice 68)
 
 AI Automation Studio now offers a **final, reusable deliverable** after an owner-approved read-only plan finishes. Previously, completed task plans exposed only raw tool results. This workflow synthesizes those **already recorded results** into a bounded, explicitly requested local AI report with checkable quotes. There is no automatic new tool call, crawl or external fetch.

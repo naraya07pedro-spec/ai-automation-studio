@@ -325,6 +325,10 @@ aas:timeline:urgent
 <div class="field"><label for="agent-plan-memory-ids">Memory IDs for THIS proposed task plan (optional, max 3, comma-separated)</label>
 <input id="agent-plan-memory-ids" maxlength="105" autocomplete="off" placeholder="e.g. project_goal,working_rules" disabled>
 <div class="muted">The owner-selected notes are unverified context for proposing steps, not new permissions. The reviewed plan freezes their IDs, versions and content fingerprints. Changed/deleted notes block later approval and step execution.</div></div>
+<div class="field"><label for="agent-plan-document-file">Optional document for this task plan (.txt/.md, max 3,500 UTF-8 bytes)</label>
+<input id="agent-plan-document-file" type="file" accept=".txt,.md,text/plain,text/markdown" disabled>
+<div class="muted">Only the file you select in this browser is read; no folder scanning. The full selected snapshot is persisted in your local plaintext task-plan SQLite until the plan is deleted. Avoid passwords, private records and customer data.</div></div>
+<div class="field"><label><input id="agent-plan-document-consent" type="checkbox" disabled> I explicitly authorize storing this selected document text in this task plan for reviewed read-only analysis.</label></div>
 <div class="core-actions" style="margin:12px 0">
 <button id="agent-plan-propose" type="button" class="primary" disabled>Propose a plan (no execution)</button>
 <button id="agent-plan-list" type="button" class="secondary" disabled>List saved plans</button>
@@ -1147,6 +1151,7 @@ const refreshLocalAgent=async()=>{
     :"Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.";
   refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
+  agentPlanDocumentsEnabled=agentPlanEnabled&&data.plan_documents===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
@@ -1231,11 +1236,14 @@ localAgentSend.addEventListener("click",async()=>{
 
 // Slice 52: every effectful transition requires its own owner-authorized button.
 let agentPlanEnabled=false;
+let agentPlanDocumentsEnabled=false;
 let agentPlanBusy=false;
 let agentPlanRevision=0;
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planMemoryField=$("agent-plan-memory-ids");
+const planDocumentField=$("agent-plan-document-file");
+const planDocumentConsent=$("agent-plan-document-consent");
 const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
@@ -1288,6 +1296,7 @@ const renderPlan=plan=>{
   status:plan.status,goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
   selected_memory_refs:plan.memory_refs||[],
+  selected_document:plan.document_source||null,
   memory_policy:"OWNER_CURATED_UNVERIFIED · subject to revision and content checks"
  },null,2):"No selected plan.";
  const reports=[];
@@ -1353,6 +1362,8 @@ const renderPlan=plan=>{
 const refreshPlanButtons=()=>{
  const ready=agentPlanEnabled&&operatorCsrf&&!agentPlanBusy;
  planMemoryField.disabled=!ready||!localAgentMemoryEnabled;
+ planDocumentField.disabled=!ready||!agentPlanDocumentsEnabled;
+ planDocumentConsent.disabled=!ready||!agentPlanDocumentsEnabled;
  const id=planIdInput.value.trim();
  const same=selectedPlan&&selectedPlan.plan_id===id;
  const status=same?selectedPlan.status:null;
@@ -1393,8 +1404,14 @@ const planRequest=async(path,body)=>{
   if(!response.ok)throw Error(result.error||"plan_request_failed");
   renderPlan(result.status==="DELETED"?null:result);
   if(result.status==="DELETED")planIdInput.value="";
+  if(path==="/api/local-agent-plan-create"&&result.status==="PREPARED"){
+   planDocumentField.value="";
+   planDocumentConsent.checked=false;
+  }
   planStatus.textContent=result.status==="PREPARED"
-   ?"Plan proposed. Review every tool and argument before approving."
+   ?(result.document_source
+     ?"Plan proposed. Review selected document provenance, tool and question before approving. Any attached document is stored locally in plaintext."
+     :"Plan proposed. Review every tool and argument before approving.")
    :result.status==="APPROVED"
    ?"Approved. Nothing executed yet. Click Execute next step."
    :result.status==="NEXT_READY"
@@ -1413,7 +1430,8 @@ const planRequest=async(path,body)=>{
   if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
  }
 };
-$("agent-plan-propose").addEventListener("click",()=>{
+$("agent-plan-propose").addEventListener("click",async()=>{
+ if(agentPlanBusy||!operatorCsrf)return;
  const goal=$("agent-plan-goal").value.trim();
  const model=$("local-agent-model").value.trim();
  if(!goal||goal.length>1200||!model){
@@ -1429,8 +1447,32 @@ $("agent-plan-propose").addEventListener("click",()=>{
   planStatus.textContent="Selected memory is not enabled for this task plan.";
   return;
  }
- planRequest("/api/local-agent-plan-create",{goal,model,
-  ...(selectedIds.length?{memory_ids:selectedIds}:{})});
+ const payload={goal,model,...(selectedIds.length?{memory_ids:selectedIds}:{})};
+ const file=planDocumentField.files?.[0];
+ if(file){
+  if(!agentPlanDocumentsEnabled||!planDocumentConsent.checked){
+   planStatus.textContent="Explicit document-storage consent is required for the selected task file.";
+   return;
+  }
+  if(!/^[\w.() -]{1,80}\.(txt|md)$/i.test(file.name) ||
+     file.size===0||file.size>3500){
+   planStatus.textContent="Only one nonempty .txt/.md file up to 3,500 UTF-8 bytes is accepted.";
+   return;
+  }
+  try{
+   // Read only the file explicitly chosen by the owner; reject invalid UTF-8.
+   const text=new TextDecoder("utf-8",{fatal:true}).decode(await file.arrayBuffer());
+   if(!operatorCsrf)return;
+   payload.document={filename:file.name,content:text};
+  }catch(error){
+   planStatus.textContent="Could not decode the selected file as UTF-8.";
+   return;
+  }
+ }else if(planDocumentConsent.checked){
+  planStatus.textContent="Choose a document file or untick document-storage consent.";
+  return;
+ }
+ planRequest("/api/local-agent-plan-create",payload);
 });
 $("agent-plan-list").addEventListener("click",async()=>{
  if(!agentPlanEnabled||agentPlanBusy||!operatorCsrf)return;
@@ -1954,6 +1996,11 @@ const lockOperatorUI=message=>{
  $("local-memory-id-list").replaceChildren();
  refreshMemoryButtons();
  agentPlanEnabled=false;
+ agentPlanDocumentsEnabled=false;
+ planDocumentField.value="";
+ planDocumentConsent.checked=false;
+ planDocumentField.disabled=true;
+ planDocumentConsent.disabled=true;
  planMemoryField.value="";
  planMemoryField.disabled=true;
  agentPlanBusy=false;
