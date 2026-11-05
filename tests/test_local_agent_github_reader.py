@@ -82,8 +82,8 @@ class GitHubReaderTests(unittest.TestCase):
         for bad in ("https://github.com/Octocat/Hello-World",
                     "https://internal/secret","../private","a/..","/a",
                     "a//b","a/b/extra","a/%2e%2e",True,{}):
-            with self.subTest(bad=str(bad)),self.assertIsNone(valid_repo(bad)):
-                pass
+            with self.subTest(bad=str(bad)):
+                self.assertIsNone(valid_repo(bad))
         self.policy.grant(REPO)
         reader=AllowedGitHubIssuesReader(
             self.policy,fetcher=lambda _:[make_issue(i) for i in range(1,17)])
@@ -173,8 +173,6 @@ class AuthorizedPlansTests(unittest.TestCase):
             disabled.close()
 
     def test_legacy_database_migrates_without_data_loss(self):
-        self.store.close()
-        self.addCleanup(lambda:None)
         old=Path(self.temp.name)/"old.sqlite3"
         db=sqlite3.connect(old)
         with db:
