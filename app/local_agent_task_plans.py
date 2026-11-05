@@ -424,6 +424,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
                 epoch = None
                 if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in old["steps"]):
                     if self.github_reader is None:
@@ -449,6 +452,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "INTERRUPTED":
                     raise PlanError("plan_state_conflict")
                 self._verify_memory_refs(old["memory_refs"])
+                if any(step["tool"] == LOCAL_DOCUMENT_TOOL for step in old["steps"]):
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
                 new_status = "APPROVED" if old["next_index"] == 0 else "NEXT_READY"
                 self.db.execute("UPDATE agent_task_plans SET status=? WHERE plan_id=?",
                                 (new_status, plan_id))
@@ -468,6 +474,11 @@ class LocalAgentPlanStore:
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
+                snapshot = None
+                if step["tool"] == LOCAL_DOCUMENT_TOOL:
+                    if self.document_analyzer is None or old["document_source"] is None:
+                        raise PlanError("plan_document_unavailable")
+                    snapshot = self._stored_document(plan_id, old["model"])
                 if step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis"):
                     if self.github_reader is None:
                         raise PlanError("tool_not_allowed")
@@ -480,7 +491,19 @@ class LocalAgentPlanStore:
                     SET status='IN_FLIGHT' WHERE plan_id=?""", (plan_id,))
             # The durable IN_FLIGHT marker is committed before tool invocation.
             try:
-                if step["tool"] == "github_issue_analysis":
+                if step["tool"] == LOCAL_DOCUMENT_TOOL:
+                    result = self.document_analyzer(
+                        snapshot["filename"], snapshot["content"],
+                        step["args"]["question"], old["model"])
+                    if (type(result) is not dict
+                            or result.get("status") != "DOCUMENT_ANALYZED_LOCAL"
+                            or result.get("filename") != snapshot["filename"]
+                            or result.get("source_scope") != "OPERATOR_SELECTED_TEXT_ONLY"
+                            or result.get("external_write_count") != 0):
+                        raise PlanError("plan_document_result_invalid")
+                    output = json.dumps(result, ensure_ascii=False,
+                                        separators=(",", ":"))
+                elif step["tool"] == "github_issue_analysis":
                     output = self.issue_analyzer(
                         self.github_reader, step["args"]["repo"],
                         old["approval_epoch"], old["model"], old["goal"])
