@@ -3,6 +3,12 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Server-owned execution of reviewed plans (Slice 73)
+
+After reviewing and explicitly approving a bounded, read-only 1–3-step task plan, the owner can click **Run reviewed steps on local server** and confirm the exact remaining tool names and arguments. One server worker executes steps sequentially using the existing model gate, records each result in the SQLite ledger, and continues while the **local server remains alive even if the browser closes**. Reload the plan ID for live saved status or use **Request server stop after current step** to prevent later steps.
+
+A service crash **never automatically replays work**; any uncertain in-flight action is marked for inspection. The tool allowlist stays read-only; this is **not** a persistent OS service, unattended scheduling, external write connector, or an agent that survives server shutdown. Windows/Ollama live acceptance remains deferred. [Full contract and limitations](docs/SERVER_OWNED_READONLY_BATCH_V1.md).
+
 ## Typed numeric handoffs across approved task steps (Slice 71)
 
 Reviewed task plans can **reuse a saved numeric result in a later calculator step** without the owner copying values by hand. For example, the local agent may propose `7 × 8` followed by `previous output × 2`, and each step still requires a separate owner click. A stricter example reads visible-label counts from **previously permissioned** public GitHub issue triage and calculates a flagged-share percentage, without additional GitHub requests or model-generated data interpretation between the steps.
