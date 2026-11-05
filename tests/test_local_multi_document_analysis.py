@@ -152,10 +152,25 @@ class MultiDocumentTests(unittest.TestCase):
         report=smoke("fixture:model",catalog=lambda:["fixture:model"],
                      transport=synthetic,clock=lambda:next(times),
                      memory=lambda:{"available_ram_mb":2048})
-        self.assertEqual("REAL_LOCAL_MULTI_DOCUMENT_SMOKE_PASSED",report["status"])
+        self.assertEqual("SYNTHETIC_MODEL_SMOKE_PASSED",report["status"])
+        self.assertEqual("INJECTED_TEST_TRANSPORT",report["inference_source"])
+        self.assertIn("checked_at_utc",report)
+        self.assertTrue(report["source_evidence_verified"])
         self.assertEqual("schedule.md",report["citations"][0]["filename"])
         self.assertEqual(2048,report["available_ram_before_mb"])
         self.assertEqual(0,report["external_write_count"])
+
+    def test_smoke_rejects_right_quote_with_wrong_answer(self):
+        def wrong_answer(payload):
+            return {"message":{"content":json.dumps({
+                "answer":"The meeting starts at 09:00 WIB",
+                "insufficient_evidence":False,
+                "citations":[{"chunk_id":"F2C1",
+                    "quote":"Maintenance review meeting starts at 18:30 WIB"}]})}}
+        with self.assertRaisesRegex(LocalDocumentError,
+                                    "smoke_source_evidence_not_verified"):
+            smoke("fixture:model",catalog=lambda:["fixture:model"],
+                  transport=wrong_answer,memory=lambda:None)
 
     def test_smoke_rejects_missing_model_or_unsupported_quote(self):
         with self.assertRaisesRegex(AgentError,"model_not_installed"):
