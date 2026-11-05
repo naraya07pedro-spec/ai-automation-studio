@@ -6,7 +6,7 @@ local paths, persists document content, calls cloud models, or executes tools.
 import json
 import re
 
-from local_ollama_agent import ollama_transport, valid_model_name
+from local_ollama_agent import AgentError, ollama_transport, valid_model_name
 
 MAX_TEXT_BYTES = 6000
 MAX_QUESTION = 500
@@ -98,6 +98,12 @@ def analyze_local_document(filename, content, question, model, transport=None):
     }
     try:
         response = (transport or ollama_transport)(request)
+    except AgentError as exc:
+        # Preserve the one timeout signal needed for the global inference
+        # quarantine; do not expose any raw model/server response details.
+        raise LocalDocumentError(
+            "local_model_timeout" if str(exc) == "local_model_timeout"
+            else "local_document_model_unavailable") from None
     except Exception:
         raise LocalDocumentError("local_document_model_unavailable") from None
     if (type(response) is not dict or type(response.get("message")) is not dict
