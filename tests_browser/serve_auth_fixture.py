@@ -17,6 +17,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_github_reader import AllowedGitHubIssuesReader
+from local_document_analysis import analyze_local_document
 from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_server import create_handler
 
@@ -84,6 +85,14 @@ def main():
         return {"mode": "LOCAL_MODEL", "answer": "Fixture answer: " + str(len(prompt)),
                 "tools_used": ["calculate"], "external_dispatch_count": 0}
 
+    def fixture_document(filename,content,question,model):
+        return analyze_local_document(
+            filename,content,question,model,
+            transport=lambda _:{"message":{"content":
+                '{"answer":"The desk opens at 09:00.",'
+                '"insufficient_evidence":false,'
+                '"citations":[{"chunk_id":"S1","quote":"opens at 09:00"}]}'}})
+
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
@@ -93,7 +102,8 @@ def main():
                        local_agent_models=fixture_models,
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
-                       local_agent_plan_store=plans))
+                       local_agent_plan_store=plans,
+                       local_document_analyzer=fixture_document))
     try:
         server.serve_forever()
     finally:
