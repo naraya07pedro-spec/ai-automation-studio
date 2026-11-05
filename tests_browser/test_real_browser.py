@@ -616,6 +616,53 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
             "Local Agent Task Deliverable")
 
+    def test_owner_consented_csv_sum_handoff_and_durable_audit(self):
+        """Reviewed CSV data is never a model command; saved sum feeds calc."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "CSV handoff: double the total revenue from selected data")
+        self.page.locator("#agent-plan-csv-file").set_input_files({
+            "name": "synthetic-ledger.csv", "mimeType": "text/csv",
+            "buffer": (b"revenue,stage\n10,SYNTHETIC_PERSON_1\n"
+                       b"20,SYNTHETIC_PERSON_2\n,SYNTHETIC_PERSON_3\n")
+        })
+        self.page.locator("#agent-plan-csv-consent").check()
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"column_sum"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"from_step": 1')
+        self.assertNotIn("SYNTHETIC_PERSON_",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    "/api/local-agent-plan-next")) as first:
+            self.page.locator("#agent-plan-next").click()
+        self.assertEqual(200, first.value.status)
+        first_saved = first.value.json()
+        self.assertEqual("NEXT_READY", first_saved["status"])
+        self.assertEqual(1, len(first_saved["results"]))
+        self.assertEqual([], first_saved["handoffs"])
+        with self.page.expect_response(
+                lambda response: response.url.endswith(
+                    "/api/local-agent-plan-next")) as second:
+            self.page.locator("#agent-plan-next").click()
+        self.assertEqual(200, second.value.status)
+        done = second.value.json()
+        self.assertEqual("COMPLETED", done["status"])
+        self.assertEqual("60", done["results"][1]["output"])
+        self.assertEqual("revenue", done["handoffs"][0]["bindings"][0]["column"])
+        self.assertEqual("30", done["handoffs"][0]["bindings"][0]["value"])
+        self.assertEqual(done["csv_source"]["sha256"],
+                         done["handoffs"][0]["bindings"][0]["source_csv_sha256"])
+        self.assertNotIn("SYNTHETIC_PERSON_", json.dumps(done))
+        self.page.locator("#agent-plan-load").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"source_csv_sha256"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "60"')
+
     def test_cross_step_numeric_handoff_requires_click_and_reloads_lineage(self):
         self.page.locator("#local-agent-model").fill("fixture:model")
         self.page.locator("#agent-plan-goal").fill(
