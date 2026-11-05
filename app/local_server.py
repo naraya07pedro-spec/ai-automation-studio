@@ -31,6 +31,7 @@ from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
 from local_windows_preflight import preflight as check_local_device_preflight
+from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
 
@@ -65,7 +66,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_document_analyzer=None,
                    local_multi_document_analyzer=None,
                    local_device_acceptance=None,
-                   local_device_preflight=None):
+                   local_device_preflight=None, model_safety_state=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -80,9 +81,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
     agent_gate = threading.BoundedSemaphore(1)
-    # A client timeout does not prove the Ollama backend stopped. Keep
-    # uncertain work latched until an explicit owner inspection acknowledgment.
-    agent_timeout_uncertain = threading.Event()
+    # Production injects a durable local SQLite checkpoint. Tests default to
+    # isolated in-memory state and may explicitly supply a disk-backed store.
+    model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
     agent_state_lock = threading.Lock()
     public_github = PublicGitHubReadOnlyIntake(core, batch,
                                                fetcher=github_fetcher,
@@ -96,6 +97,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def _send(self, code, payload, content_type="application/json; charset=utf-8",
                   cookie_header=None):
+            # Fully commit completion and release inference gate BEFORE the
+            # client observes the response. A next sequential call must not
+            # race a slow SQLite fsync from the previous finished request.
+            if getattr(self, "_agent_gate_acquired", False):
+                if not self._leave_agent_gate():
+                    code, payload = 503, {"error": "model_safety_storage_unavailable"}
             body = (payload.encode("utf-8") if isinstance(payload, str)
                     else json.dumps(payload, sort_keys=True).encode("utf-8"))
             self.send_response(code)
@@ -165,30 +172,72 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             return True
 
         def _enter_agent_gate(self, *, allow_uncertain=False):
+            self._model_checkpoint_started = False
+            self._agent_gate_acquired = False
             with agent_state_lock:
-                if agent_timeout_uncertain.is_set() and not allow_uncertain:
-                    self._send(423, {"error": "local_ollama_timeout_unresolved"})
-                    return False
                 if not agent_gate.acquire(blocking=False):
                     self._send(429, {"error": "local_agent_busy"})
                     return False
+                self._agent_gate_acquired = True
+                if allow_uncertain:
+                    return True
+                try:
+                    # Durable commit BEFORE any model callback, including
+                    # injected callbacks. In-flight after crash blocks restart.
+                    model_safety.begin()
+                    self._model_checkpoint_started = True
+                    return True
+                except ModelSafetyError as exc:
+                    self._agent_gate_acquired = False
+                    agent_gate.release()
+                    self._send(423 if str(exc) == "model_safety_quarantined"
+                               else 503,
+                               {"error": "local_ollama_timeout_unresolved"
+                                if str(exc) == "model_safety_quarantined"
+                                else "model_safety_storage_unavailable"})
+                    return False
+
+        def _leave_agent_gate(self):
+            if not getattr(self, "_agent_gate_acquired", False):
                 return True
+            self._agent_gate_acquired = False
+            checkpoint_ok = True
+            try:
+                if getattr(self, "_model_checkpoint_started", False):
+                    # If marked UNCERTAIN, finish never clears it.
+                    model_safety.finish()
+            except ModelSafetyError:
+                # Do not send HTTP 200 if final checkpoint commit failed.
+                # Further model dispatch also fails closed.
+                checkpoint_ok = False
+            finally:
+                agent_gate.release()
+            return checkpoint_ok
 
         @staticmethod
         def _mark_model_timeout(exc):
             if str(exc) == "local_model_timeout":
-                agent_timeout_uncertain.set()
+                try:
+                    model_safety.timeout()
+                except ModelSafetyError:
+                    # Database failures latch a fail-closed state.
+                    pass
 
         def _timeout_status(self):
-            blocked = agent_timeout_uncertain.is_set()
+            phase = model_safety.phase()
+            blocked = phase == "UNCERTAIN"
             return {"status": ("OPERATOR_INSPECTION_REQUIRED" if blocked
+                               else "MODEL_OPERATION_IN_FLIGHT" if phase == "IN_FLIGHT"
                                else "NO_UNRESOLVED_TIMEOUT"),
                     "timeout_unresolved": blocked,
+                    "checkpoint_state": phase,
                     "backend_stopped_verified": False,
                     "next_action": ("Inspect Ollama's actual running work before "
                                     "acknowledging. The application cannot prove "
                                     "the backend request has stopped." if blocked else
-                                    "No unresolved timeout recorded by this server.")}
+                                    "Another model operation is in progress." if
+                                    phase == "IN_FLIGHT" else
+                                    "No unresolved timeout/crash checkpoint recorded.")}
 
         def _audit_event(self, action, outcome, repo=None):
             if security_audit is None:
@@ -269,7 +318,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 elif local_agent_runner is None:
                     self._send(403, {"error": "local_agent_disabled"})
                 else:
-                    self._send(200, self._timeout_status())
+                    try:
+                        self._send(200, self._timeout_status())
+                    except ModelSafetyError:
+                        self._send(503, {"error": "model_safety_storage_unavailable"})
                 return
             if route.path == "/api/local-agent-device-preflight":
                 if route.query:
@@ -457,7 +509,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         self._send(429, {"error": "local_agent_busy"})
                         return
                     try:
-                        agent_timeout_uncertain.clear()
+                        try:
+                            model_safety.acknowledge()
+                        except ModelSafetyError as exc:
+                            self._send(423 if str(exc) == "model_safety_active"
+                                       else 503,
+                                       {"error": "local_ollama_timeout_unresolved"
+                                        if str(exc) == "model_safety_active"
+                                        else "model_safety_storage_unavailable"})
+                            return
                     finally:
                         agent_gate.release()
                 self._send(200, {"status": "OPERATOR_ACKNOWLEDGED",
@@ -505,7 +565,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "local_device_acceptance_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/local-agent-multi-document-analyze":
                 if local_agent_runner is None or local_multi_document_analyzer is None:
@@ -550,7 +610,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "local_multi_document_model_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/local-agent-document-analyze":
                 if local_agent_runner is None or local_document_analyzer is None:
@@ -595,7 +655,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "local_document_model_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path.startswith("/api/local-agent-plan-"):
                 if local_agent_planner is None or local_agent_plan_store is None:
@@ -646,7 +706,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "agent_plan_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/local-agent-probe":
                 if local_agent_runner is None or local_agent_probe is None:
@@ -674,7 +734,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "local_model_probe_failed"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/local-agent-clear":
                 if local_agent_runner is None or agent_conversation is None:
@@ -697,7 +757,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except ConversationError:
                     self._send(503, {"error": "conversation_storage_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/local-agent-run":
                 if local_agent_runner is None:
@@ -764,7 +824,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except Exception:
                         self._send(503, {"error": "local_agent_unavailable"})
                 finally:
-                    agent_gate.release()
+                    self._leave_agent_gate()
                 return
             if self.path == "/api/operator-login":
                 if operator_auth is None:
@@ -1000,6 +1060,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             home / "agent-task-plans.sqlite3", github_reader=reader)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
+    model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
+                    if enable_local_agent else None)
     try:
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
@@ -1021,13 +1083,16 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_device_acceptance=(
                                run_local_device_acceptance if enable_multi_documents else None),
                            local_device_preflight=(
-                               check_local_device_preflight if enable_multi_documents else None)))
+                               check_local_device_preflight if enable_multi_documents else None),
+                           model_safety_state=model_safety))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if model_safety is not None:
+            model_safety.close()
         if plan_store is not None:
             plan_store.close()
         if conversation is not None:

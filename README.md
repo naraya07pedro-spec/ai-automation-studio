@@ -139,6 +139,12 @@ To test the actual device, start `python app/local_server.py --enable-local-agen
 
 GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## Durable restart and crash recovery (Slice 64)
+
+The model timeout safety latch now persists locally in a minimal SQLite checkpoint (`~/.ai-automation-studio/ollama-safety.sqlite3`). The server commits `IN_FLIGHT` **before** dispatching each model-backed workbench operation. A recognized timeout changes it to `UNCERTAIN`; an unfinished `IN_FLIGHT` record discovered on restart is also treated as `UNCERTAIN`, never assumed completed. New model requests are blocked with 423 until the owner checks Ollama and explicitly acknowledges. The status UI distinguishes `IDLE`, `IN_FLIGHT` and `UNCERTAIN`. Invalid/unreadable safety storage is fail-closed, not silently recreated.
+
+This does **not** track arbitrary third-party Ollama calls or prove the backend has stopped. Deleting the local safety file manually defeats this safeguard; do not delete it to bypass quarantine. [Details, state transitions, tests and recovery limitations](docs/OLLAMA_CRASH_RECOVERY_V1.md). Actual Ollama acceptance on the owner's Windows PC is still unverified ([Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68)).
+
 ## Timeout quarantine for real local Ollama requests (Slice 63)
 
 A timed-out Ollama request may still be running in the backend after the HTTP client gives up. A new owner-gated safety latch now blocks further model inferences after an observed timeout, responding with `local_ollama_timeout_unresolved` (HTTP 423) instead of allowing rapid manual retries. Authenticated **Check timeout safety state (no inference)** remains available; an operator must inspect local Ollama before explicitly selecting **I inspected Ollama; re-enable inference**. The acknowledgement requires owner login, CSRF and a confirmation; it **does not cancel Ollama, prove the backend stopped, or execute another inference**. Other local applications and workbench restarts are outside this in-process latch's guarantee.
