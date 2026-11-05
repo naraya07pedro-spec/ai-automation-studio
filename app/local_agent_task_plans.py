@@ -1,6 +1,6 @@
 """Opt-in bounded AI task planning with explicit human approval and durable steps.
 
-Only read-only calculator/UTC tools, no plugins or business writes. Plaintext
+Read-only tools, with GitHub public issue metadata only by separate opt-in; no writes. Plaintext
 single-owner SQLite, intentionally separate from the conversation database.
 """
 from datetime import datetime, timezone
@@ -31,7 +31,7 @@ PLANNING_SYSTEM = (
     "Return ONLY JSON with a single key 'steps', an array of 1 to 3 objects. "
     "Each step must have EXACT keys 'tool' and 'args'. "
     "Allowed tool: calculate with string a,b and operation add/subtract/multiply/divide. "
-    "Allowed tool: utc_now with empty args object. No other tool names or actions. "
+    "Allowed tool: utc_now with empty args object. "
     "If the request cannot be fulfilled with the tools listed here, return {\"steps\":[]}. "
     "Do not pretend to send messages, modify files or use unrestricted external APIs."
 )
