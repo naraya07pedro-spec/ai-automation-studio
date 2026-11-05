@@ -25,6 +25,9 @@ from local_multi_document_analysis import (
 from local_agent_plan_reports import (generate_completed_plan_report,
                                       validate_report_result, _sources,
                                       PlanReportError)
+from local_agent_handoffs import (
+    HandoffError, validate_calculator_handoffs,
+    resolve_calculator_handoffs, validate_handoff_history)
 from local_agent_memory import (MemoryCardError, valid_selection,
                                 validate_memory_text, valid_memory_id,
                                 MAX_SELECTED_MEMORY)
@@ -70,6 +73,18 @@ MULTI_DOCUMENT_PLANNING_ADDENDUM = (
     'Quoted text must be checked against each exact source; lexical matching '
     'may miss synonyms or relevant context.'
 )
+HANDOFF_PLANNING_ADDENDUM = (
+    ' For a LATER calculate step only, operand a or b may reference a '
+    'previous numeric result using EXACT object '
+    '{"from_step":1,"field":"output"} (from prior calculate), or '
+    '{"from_step":1,"field":"review_flagged_count"} (from prior '
+    'github_issue_triage). Other allowed triage fields are '
+    'returned_count and unassessed_count. Step references are ONE-BASED '
+    'and MUST point strictly backward within this same short plan. '
+    'Do not reference document answers, arbitrary JSON paths or '
+    'free-form model text. These are read-only typed numbers; each '
+    'step STILL requires explicit owner approval/click. '
+)
 PLANNING_SYSTEM = (
     "Build a short read-only tool plan for the user's request. "
     "Return ONLY JSON with a single key 'steps', an array of 1 to 3 objects. "
@@ -103,8 +118,8 @@ def validate_steps(steps):
         tool, args = item["tool"], item["args"]
         if tool == "calculate":
             try:
-                calculate(args)  # Arithmetic preflight only; no side effects.
-            except AgentError:
+                validate_calculator_handoffs(args, checked)
+            except HandoffError:
                 raise PlanError("invalid_model_plan") from None
         elif tool == "utc_now":
             if args:
@@ -158,7 +173,8 @@ def propose_readonly_plan(goal, model, transport=None, allow_github=False,
                    > MAX_TOTAL_BYTES):
             raise PlanError("invalid_plan_document_set")
     messages = [{"role": "system", "content":
-                 PLANNING_SYSTEM + (GITHUB_PLANNING_ADDENDUM if allow_github else "")
+                 PLANNING_SYSTEM + HANDOFF_PLANNING_ADDENDUM
+                 + (GITHUB_PLANNING_ADDENDUM if allow_github else "")
                  + (DOCUMENT_PLANNING_ADDENDUM if document_context is not None else "")
                  + (MULTI_DOCUMENT_PLANNING_ADDENDUM
                     if document_set_context is not None else "")}]
@@ -334,7 +350,8 @@ class LocalAgentPlanStore:
                     memory_refs_json TEXT NOT NULL DEFAULT '[]',
                     report_json TEXT NOT NULL DEFAULT '',
                     document_json TEXT NOT NULL DEFAULT '',
-                    document_set_json TEXT NOT NULL DEFAULT '')""")
+                    document_set_json TEXT NOT NULL DEFAULT '',
+                    handoff_log_json TEXT NOT NULL DEFAULT '[]')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -357,6 +374,10 @@ class LocalAgentPlanStore:
                     # Legacy plans remain source-free, never silently opt in.
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN document_set_json TEXT NOT NULL DEFAULT ''""")
+                if "handoff_log_json" not in columns:
+                    # Old plans do not acquire new dependencies or executions.
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN handoff_log_json TEXT NOT NULL DEFAULT '[]'""")
                 # A process death leaves an explicitly visible interruption,
                 # rather than silently executing a plan again.
                 self.db.execute("""UPDATE agent_task_plans SET status='INTERRUPTED'
@@ -430,7 +451,8 @@ class LocalAgentPlanStore:
         _require_id(plan_id)
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
                 next_index,status,created_utc,approval_epoch,memory_refs_json,
-                report_json,document_json,document_set_json FROM agent_task_plans
+                report_json,document_json,document_set_json,
+                handoff_log_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -441,6 +463,7 @@ class LocalAgentPlanStore:
             report = json.loads(row[9]) if row[9] else None
             document = self._stored_document(plan_id, row[0]) if row[10] else None
             document_set = self._stored_document_set(plan_id, row[0]) if row[11] else None
+            handoffs = json.loads(row[12])
             if document is not None and document_set is not None:
                 raise PlanError("plan_storage_invalid")
         except (TypeError, ValueError, PlanError):
@@ -450,12 +473,17 @@ class LocalAgentPlanStore:
                 or type(row[4]) is not int or not 0 <= row[4] <= len(steps)
                 or len(results) != row[4]):
             raise PlanError("plan_storage_invalid")
+        try:
+            handoffs = validate_handoff_history(handoffs, steps, results)
+        except (HandoffError, IndexError, KeyError, TypeError):
+            raise PlanError("plan_storage_invalid") from None
         return {"plan_id": plan_id, "model": row[0], "goal": row[1],
                 "steps": steps, "results": results,
                 "next_index": row[4], "status": row[5],
                 "created_utc": row[6],
                 "approval_epoch": row[7],
                 "memory_refs": memory_refs,
+                "handoffs": handoffs,
                 "report": report,
                 "document_source": document_source_metadata(document),
                 "document_set_sources": document_set_source_metadata(document_set)}
@@ -598,6 +626,16 @@ class LocalAgentPlanStore:
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
                 step = old["steps"][index]
+                concrete_args = None
+                handoff_entry = None
+                if step["tool"] == "calculate":
+                    try:
+                        concrete_args, handoff_entry = resolve_calculator_handoffs(
+                            step, old["steps"][:index], old["results"])
+                    except HandoffError:
+                        # Missing, tampered or unrepresentable numeric evidence
+                        # never starts a new step or consumes an approval.
+                        raise PlanError("plan_handoff_invalid_source") from None
                 snapshot = None
                 document_set = None
                 if step["tool"] == MULTI_DOCUMENT_TOOL:
@@ -662,7 +700,9 @@ class LocalAgentPlanStore:
                     output = self.github_reader.read(
                         step["args"]["repo"], old["approval_epoch"])
                 else:
-                    output = execute_tool(step["tool"], step["args"])
+                    output = execute_tool(
+                        step["tool"], concrete_args if concrete_args is not None
+                        else step["args"])
             except Exception as exc:
                 with self.lock, self.db:
                     self.db.execute("""UPDATE agent_task_plans
@@ -678,10 +718,13 @@ class LocalAgentPlanStore:
                 results = old["results"] + [{"tool": step["tool"], "output": output}]
                 new_index = index + 1
                 state = "COMPLETED" if new_index == len(old["steps"]) else "NEXT_READY"
+                handoffs = old["handoffs"] + (
+                    [handoff_entry] if handoff_entry is not None else [])
                 self.db.execute("""UPDATE agent_task_plans
-                    SET results_json=?,next_index=?,status=?
+                    SET results_json=?,next_index=?,status=?,handoff_log_json=?
                     WHERE plan_id=? AND status='IN_FLIGHT'""",
-                    (json.dumps(results), new_index, state, plan_id))
+                    (json.dumps(results), new_index, state,
+                     json.dumps(handoffs, separators=(",", ":")), plan_id))
                 return self._fetch(plan_id)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
