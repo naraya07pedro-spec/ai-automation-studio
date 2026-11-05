@@ -15,6 +15,9 @@ from local_ollama_agent import (AgentError, calculate, execute_tool,
                                 ollama_transport, valid_model_name)
 from local_agent_github_reader import valid_repo, GitHubPlanReadError
 from local_agent_issue_analysis import analyze_public_issue_metadata
+from local_agent_plan_reports import (generate_completed_plan_report,
+                                      validate_report_result, _sources,
+                                      PlanReportError)
 from local_agent_memory import (MemoryCardError, valid_selection,
                                 validate_memory_text, valid_memory_id,
                                 MAX_SELECTED_MEMORY)
@@ -157,7 +160,7 @@ def _require_id(value):
 class LocalAgentPlanStore:
     """Persistent state machine. No automatic dispatch on restart or approval."""
     def __init__(self, database=":memory:", github_reader=None, issue_analyzer=None,
-                 memory_store=None):
+                 memory_store=None, report_generator=None):
         location = str(database)
         if location != ":memory:":
             path = Path(database).expanduser()
@@ -169,6 +172,7 @@ class LocalAgentPlanStore:
         self.github_reader = github_reader
         self.memory_store = memory_store
         self.issue_analyzer = issue_analyzer or analyze_public_issue_metadata
+        self.report_generator = report_generator or generate_completed_plan_report
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -185,7 +189,8 @@ class LocalAgentPlanStore:
                     status TEXT NOT NULL,
                     created_utc TEXT NOT NULL,
                     approval_epoch INTEGER,
-                    memory_refs_json TEXT NOT NULL DEFAULT '[]')""")
+                    memory_refs_json TEXT NOT NULL DEFAULT '[]',
+                    report_json TEXT NOT NULL DEFAULT '')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -196,6 +201,10 @@ class LocalAgentPlanStore:
                     # their goals, steps, results or approvals.
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN memory_refs_json TEXT NOT NULL DEFAULT '[]'""")
+                if "report_json" not in columns:
+                    # Existing plans remain valid and report-free.
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN report_json TEXT NOT NULL DEFAULT ''""")
                 # A process death leaves an explicitly visible interruption,
                 # rather than silently executing a plan again.
                 self.db.execute("""UPDATE agent_task_plans SET status='INTERRUPTED'
@@ -222,7 +231,8 @@ class LocalAgentPlanStore:
     def _fetch(self, plan_id):
         _require_id(plan_id)
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
-                next_index,status,created_utc,approval_epoch,memory_refs_json FROM agent_task_plans
+                next_index,status,created_utc,approval_epoch,memory_refs_json,
+                report_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -230,7 +240,9 @@ class LocalAgentPlanStore:
             steps = validate_steps(json.loads(row[2]))
             results = json.loads(row[3])
             memory_refs = validate_memory_refs(json.loads(row[8]))
+            report = json.loads(row[9]) if row[9] else None
         except (TypeError, ValueError, PlanError):
+
             raise PlanError("plan_storage_invalid") from None
         if (type(results) is not list or len(results) > MAX_STEPS
                 or type(row[4]) is not int or not 0 <= row[4] <= len(steps)
@@ -241,7 +253,8 @@ class LocalAgentPlanStore:
                 "next_index": row[4], "status": row[5],
                 "created_utc": row[6],
                 "approval_epoch": row[7],
-                "memory_refs": memory_refs}
+                "memory_refs": memory_refs,
+                "report": report}
 
     def get(self, plan_id):
         try:
@@ -393,6 +406,48 @@ class LocalAgentPlanStore:
                     SET results_json=?,next_index=?,status=?
                     WHERE plan_id=? AND status='IN_FLIGHT'""",
                     (json.dumps(results), new_index, state, plan_id))
+                return self._fetch(plan_id)
+        except sqlite3.Error:
+            raise PlanError("plan_storage_unavailable") from None
+
+    def synthesize_report(self, plan_id):
+        """One owner-triggered final deliverable; no background report model work.
+
+        The server's durable model gate covers this one inference. The plan
+        lock prevents a concurrent delete or duplicate report generation.
+        """
+        try:
+            with self.lock:
+                old = self._fetch(plan_id)
+                if old["status"] != "COMPLETED":
+                    raise PlanError("plan_report_requires_completed")
+                if old["report"] is not None:
+                    # Idempotent retrieval, zero additional model calls.
+                    return old
+                try:
+                    outcome = self.report_generator(old)
+                    # The callback may be injected in tests; the store itself
+                    # rechecks exact evidence and the supported report schema.
+                    validated = validate_report_result(
+                        {"summary": outcome["summary"],
+                         "findings": [
+                             {"step_index": f["step_index"],
+                              "quote": f["quote"],
+                              "interpretation": f["interpretation"]}
+                             for f in outcome["findings"]]},
+                        _sources(old))
+                    if outcome != validated:
+                        raise PlanReportError("invalid_plan_report")
+                except PlanReportError as exc:
+                    raise PlanError(str(exc)) from None
+                except (KeyError, TypeError, ValueError):
+                    raise PlanError("invalid_plan_report") from None
+                except Exception:
+                    raise PlanError("local_plan_report_model_unavailable") from None
+                with self.db:
+                    self.db.execute("""UPDATE agent_task_plans SET report_json=?
+                        WHERE plan_id=? AND status='COMPLETED' AND report_json=''""",
+                        (json.dumps(validated, separators=(",", ":")), plan_id))
                 return self._fetch(plan_id)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None

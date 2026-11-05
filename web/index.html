@@ -339,6 +339,14 @@ aas:timeline:urgent
 <button id="agent-plan-cancel" type="button" class="secondary" disabled>Cancel plan</button>
 <button id="agent-plan-delete" type="button" class="secondary" disabled>Delete terminal plan</button>
 </div>
+<div class="kicker">FINAL DELIVERABLE · OWNER-TRIGGERED</div>
+<p class="muted">Only completed read-only plans can create a final report. A new explicit local Ollama request summarizes stored tool outputs. Exact quotes are checked, but interpretations are still unverified. Nothing is generated in the background. Report copy/download is an explicit browser action.</p>
+<div class="core-actions" style="margin:12px 0">
+<button id="agent-plan-report-generate" type="button" class="primary" disabled>Generate final report</button>
+<button id="agent-plan-report-copy" type="button" class="secondary" disabled>Copy report</button>
+<button id="agent-plan-report-download" type="button" class="secondary" disabled>Download .md</button>
+</div>
+<pre id="agent-plan-report-display" class="trace" aria-label="Completed task final report">No report. Complete the plan before generating one.</pre>
 <div id="agent-plan-status" class="setup-msg" role="status" aria-live="polite">Plan execution is disabled by default.</div>
 <pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
 <div class="kicker">SOURCE-BACKED ISSUE TRIAGE · LABEL EVIDENCE ONLY</div>
@@ -1232,12 +1240,49 @@ const planDetails=$("agent-plan-details");
 const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
 const planListOutput=$("agent-plan-list-output");
+const planReportDisplay=$("agent-plan-report-display");
+let selectedPlanReportMarkdown="";
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
  "agent-plan-approve","agent-plan-next","agent-plan-resume","agent-plan-cancel",
- "agent-plan-delete"];
+ "agent-plan-delete","agent-plan-report-generate","agent-plan-report-copy",
+ "agent-plan-report-download"];
+const buildPlanReportMarkdown=plan=>{
+ const report=plan?.report;
+ if(!plan||!report)return "";
+ const lines=[
+  "# Local Agent Task Deliverable",
+  "",
+  "Goal: "+plan.goal,
+  "Plan ID: "+plan.plan_id,
+  "Status: "+plan.status,
+  "Model: "+plan.model,
+  "Evidence: "+report.evidence_check+" (quote membership only)",
+  "AI interpretation verified: NO",
+  "",
+  "## Summary (unverified AI interpretation)",
+  report.summary, "",
+  "## Findings"
+ ];
+ for(const [i,f] of report.findings.entries()){
+  lines.push("### "+(i+1)+". Step "+f.step_index+" · "+f.tool,
+   "Exact stored-output quote:",
+   "> "+f.quote.replace(/\n/g,"\n> "),
+   "AI interpretation (unverified): "+f.interpretation,"");
+ }
+ lines.push("## Limits",report.limits,
+  "The report is from already stored step outputs; no new tools or external fetches.");
+ return lines.join("\n");
+};
 const renderPlan=plan=>{
  selectedPlan=plan;
+ selectedPlanReportMarkdown=buildPlanReportMarkdown(plan);
+ // The logout flow also calls renderPlan(null); never replace the
+ // locked-session placeholder with an unauthenticated normal-state message.
+ planReportDisplay.textContent=!operatorCsrf
+  ?"Session locked; completed report hidden."
+  :selectedPlanReportMarkdown||
+   "No report. Complete the plan before generating one.";
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,goal:plan.goal,model:plan.model,
@@ -1321,12 +1366,18 @@ const refreshPlanButtons=()=>{
   !["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(status);
  $("agent-plan-delete").disabled=!ready||
   !["COMPLETED","CANCELLED","BLOCKED"].includes(status);
+ $("agent-plan-report-generate").disabled=!ready||status!=="COMPLETED"
+    ||selectedPlan.report!==null;
+ $("agent-plan-report-copy").disabled=!ready||!selectedPlanReportMarkdown;
+ $("agent-plan-report-download").disabled=!ready||!selectedPlanReportMarkdown;
 };
 planIdInput.addEventListener("input",()=>{
  agentPlanRevision++;selectedPlan=null;
  planDetails.textContent="Load this ID before approving any action.";
  planTriageReport.textContent="No selected triage report.";
  planAnalysisReport.textContent="No selected analysis report.";
+ selectedPlanReportMarkdown="";
+ planReportDisplay.textContent="No report for the selected plan.";
  refreshPlanButtons();
 });
 const planRequest=async(path,body)=>{
@@ -1348,6 +1399,10 @@ const planRequest=async(path,body)=>{
    ?"Approved. Nothing executed yet. Click Execute next step."
    :result.status==="NEXT_READY"
    ?"One step completed. Click Execute next step to continue."
+   :result.status==="COMPLETED"&&result.report
+   ?"Evidence-linked final report saved locally. Verify all interpretations."
+   :result.status==="COMPLETED"
+   ?"All plan steps finished. Generate a final deliverable explicitly."
    :"Plan status: "+result.status+". No background execution.";
  }catch(error){
   if(rev===agentPlanRevision&&operatorCsrf)
@@ -1414,6 +1469,30 @@ $("agent-plan-load").addEventListener("click",async()=>{
  }finally{
   if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
  }
+});
+$("agent-plan-report-generate").addEventListener("click",()=>{
+ const id=planIdInput.value.trim();
+ if(!selectedPlan||selectedPlan.plan_id!==id
+    ||selectedPlan.status!=="COMPLETED"||selectedPlan.report!==null)return;
+ planRequest("/api/local-agent-plan-report",{plan_id:id});
+});
+$("agent-plan-report-copy").addEventListener("click",async()=>{
+ if(!operatorCsrf||!selectedPlanReportMarkdown)return;
+ try{
+  await navigator.clipboard.writeText(selectedPlanReportMarkdown);
+  planStatus.textContent="Report copied. Its AI interpretations remain unverified.";
+ }catch(error){planStatus.textContent="Clipboard unavailable; select and copy the report text manually.";}
+});
+$("agent-plan-report-download").addEventListener("click",()=>{
+ if(!operatorCsrf||!selectedPlanReportMarkdown||!selectedPlan)return;
+ const file=new Blob([selectedPlanReportMarkdown],{type:"text/markdown;charset=utf-8"});
+ const url=URL.createObjectURL(file);
+ try{
+  const link=document.createElement("a");link.href=url;
+  link.download="local-agent-report-"+selectedPlan.plan_id+".md";
+  link.click();
+  planStatus.textContent="Markdown report download requested by owner. Check its claims.";
+ }finally{URL.revokeObjectURL(url);}
 });
 for(const [id,endpoint] of [
  ["agent-plan-approve","approve"],["agent-plan-next","next"],
@@ -1882,6 +1961,8 @@ const lockOperatorUI=message=>{
  planIdInput.value="";
  $("agent-plan-goal").value="";
  planListOutput.textContent="Session locked; plan list hidden.";
+ planReportDisplay.textContent="Session locked; completed report hidden.";
+ selectedPlanReportMarkdown="";
  planStatus.textContent="Session locked; task plans unavailable.";
  $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
  renderPlan(null);

@@ -3,6 +3,18 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Completed-plan Task Deliverables (Slice 68)
+
+AI Automation Studio now offers a **final, reusable deliverable** after an owner-approved read-only plan finishes. Previously, completed task plans exposed only raw tool results. This workflow synthesizes those **already recorded results** into a bounded, explicitly requested local AI report with checkable quotes. There is no automatic new tool call, crawl or external fetch.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans
+```
+
+In the authenticated local UI, finish a plan as usual, then click **Generate final report**. A single local Ollama call proposes a short summary and 1–3 findings. Every finding must cite an **exact substring from the corresponding saved step output**, checked by the server. Interpretations remain **UNVERIFIED**, even if those quotes match. The report persists in the existing SQLite plan record, can be reloaded without model inference, and is available with explicit **Copy report** and **Download .md** buttons. Older completed plans can also request a report without replaying steps. Invalid reports are rejected without being stored.
+
+Only the first 3,500 characters from each completed step are supplied to the model. The app does **not** add external write authority or broaden permitted tools. SQLite report content remains local plaintext and should not contain secrets. GitHub CI tests browser and protocol with labeled synthetic models, not an actual Windows Ollama installation; the owner has explicitly deferred live device acceptance. [Full implementation, validation and trust boundaries](docs/COMPLETED_TASK_DELIVERABLES_V1.md).
+
 ## Memory-backed, owner-reviewed agent plans (Slice 67)
 
 The local workbench now links **explicitly selected memory cards** to its persistent, human-reviewed read-only task plans. Enable both opt-in features:

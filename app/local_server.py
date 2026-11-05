@@ -290,6 +290,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                      and local_device_preflight is not None),
                                  "planning": (local_agent_planner is not None
                                               and local_agent_plan_store is not None),
+                                 "plan_reports": (local_agent_planner is not None
+                                                  and local_agent_plan_store is not None),
                                  "plan_memory": (local_agent_planner is not None
                                                  and local_agent_plan_store is not None
                                                  and agent_memory_store is not None),
@@ -491,7 +493,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-next",
                                  "/api/local-agent-plan-cancel",
                                  "/api/local-agent-plan-resume",
-                                 "/api/local-agent-plan-delete"):
+                                 "/api/local-agent-plan-delete",
+                                 "/api/local-agent-plan-report"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -732,7 +735,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         self._send(403, {"error": "agent_memory_disabled"})
                         return
                 if not self._enter_agent_gate(allow_uncertain=(not creating and
-                        self.path != "/api/local-agent-plan-next")):
+                        self.path not in ("/api/local-agent-plan-next",
+                                          "/api/local-agent-plan-report"))):
                     return
                 try:
                     try:
@@ -760,6 +764,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 "/api/local-agent-plan-cancel": local_agent_plan_store.cancel,
                                 "/api/local-agent-plan-resume": local_agent_plan_store.resume_interrupted,
                                 "/api/local-agent-plan-delete": local_agent_plan_store.delete,
+                                "/api/local-agent-plan-report": local_agent_plan_store.synthesize_report,
                             }[self.path]
                             outcome = action(data["plan_id"])
                         self._send(200, outcome)
@@ -776,7 +781,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 else 404 if err == "plan_not_found"
                                 else 409 if err in ("plan_state_conflict", "plan_capacity_reached",
                                                      "public_source_permission_changed",
-                                                     "memory_context_changed")
+                                                     "memory_context_changed",
+                                                     "plan_report_requires_completed")
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:

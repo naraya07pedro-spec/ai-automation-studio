@@ -412,6 +412,46 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-cancel").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text("CANCELLED")
 
+    def test_completed_plan_generates_durable_citable_report_and_download(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Synthetic: calculate 7 by 8 and check UTC")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        expect(self.page.locator("#agent-plan-report-generate")).to_be_disabled()
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("NEXT_READY")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("COMPLETED")
+        expect(self.page.locator("#agent-plan-report-generate")).to_be_enabled()
+        expect(self.page.locator("#agent-plan-report-copy")).to_be_disabled()
+        self.page.locator("#agent-plan-report-generate").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "# Local Agent Task Deliverable")
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "Exact stored-output quote:")
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "AI interpretation verified: NO")
+        expect(self.page.locator("#agent-plan-report-generate")).to_be_disabled()
+        expect(self.page.locator("#agent-plan-report-download")).to_be_enabled()
+        with self.page.expect_download() as info:
+            self.page.locator("#agent-plan-report-download").click()
+        self.assertRegex(info.value.suggested_filename,
+                         r"local-agent-report-[0-9a-f]{24}\.md")
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "Markdown report download requested")
+
+        # Reload from durable server-side plan storage, no model rerun needed.
+        self.page.locator("#agent-plan-load").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "The saved read-only steps finished")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "Session locked")
+        expect(self.page.locator("#agent-plan-report-download")).to_be_disabled()
+
     def test_agent_plan_requires_review_and_one_click_per_step(self):
         expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
