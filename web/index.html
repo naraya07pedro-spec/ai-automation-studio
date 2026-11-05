@@ -279,6 +279,10 @@ aas:timeline:urgent
 <div class="field"><label for="local-agent-model">Installed Ollama model</label><input id="local-agent-model" maxlength="80" placeholder="e.g. qwen2.5:3b" autocomplete="off"></div>
 <div class="field"><label for="local-agent-mode">Allowed tools</label><input id="local-agent-mode" value="Calculator and UTC time only" disabled></div></div>
 <div class="field"><label for="local-agent-prompt">Your request (max 3,000 characters)</label><textarea id="local-agent-prompt" maxlength="3000" rows="4" style="width:100%;min-height:110px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="Ask a question or request a calculation. Do not enter secrets or customer records."></textarea></div>
+<div class="field"><label for="local-agent-conversation">Conversation ID (local only, maximum 8 saved threads)</label>
+<input id="local-agent-conversation" list="local-agent-conversation-list" value="default" maxlength="32" autocomplete="off" disabled aria-describedby="local-agent-thread-hint">
+<datalist id="local-agent-conversation-list"></datalist>
+<div id="local-agent-thread-hint" class="muted">Pick a saved ID or type a new ID using lowercase letters, numbers, _ and -. Saved conversations stay separate.</div></div>
 <div class="field" style="display:flex;gap:10px;align-items:center"><input id="local-agent-remember" type="checkbox" style="width:auto" disabled><label for="local-agent-remember" style="margin:0">Save this conversation on my PC (plain local SQLite, max 6 turns)</label></div>
 <button id="local-agent-send" class="primary" type="button" disabled>Run local agent</button>
 <div class="core-actions" style="margin-top:12px"><button id="local-agent-history-refresh" type="button" class="secondary" disabled>View saved context</button><button id="local-agent-history-clear" type="button" class="secondary" disabled>Delete saved context</button></div>
@@ -738,13 +742,39 @@ let localAgentEnabled=false;
 let localAgentHistoryEnabled=false;
 const localAgentRemember=$("local-agent-remember");
 const agentHistoryDisplay=$("local-agent-history-display");
-const refreshAgentHistory=async()=>{
+const conversationField=$("local-agent-conversation");
+const selectedConversation=()=>conversationField.value.trim();
+const validConversation=id=>/^[a-z0-9][a-z0-9_-]{0,31}$/.test(id);
+const refreshConversations=async()=>{
  if(!localAgentHistoryEnabled||!operatorCsrf)return;
  const revision=localAgentRevision;
  try{
-  const response=await appFetch("/api/local-agent-history");
-  const data=await response.json();
+  const res=await appFetch("/api/local-agent-conversations");
+  const data=await res.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(!res.ok)throw Error(data.error||"conversations_unavailable");
+  const list=$("local-agent-conversation-list");
+  list.replaceChildren();
+  for(const id of (data.conversation_ids||[])){
+   const option=document.createElement("option");
+   option.value=id;list.appendChild(option);
+  }
+ }catch(error){
+  if(revision===localAgentRevision)
+   localAgentStatus.textContent="Conversation list unavailable: "+error.message;
+ }
+};
+const refreshAgentHistory=async()=>{
+ if(!localAgentHistoryEnabled||!operatorCsrf)return;
+ const revision=localAgentRevision;
+ const id=selectedConversation();
+ if(!validConversation(id)){
+  agentHistoryDisplay.textContent="Invalid conversation ID.";return;
+ }
+ try{
+  const response=await appFetch("/api/local-agent-history?conversation_id="+encodeURIComponent(id));
+  const data=await response.json();
+  if(revision!==localAgentRevision||!operatorCsrf||id!==selectedConversation())return;
   if(!response.ok)throw Error(data.error||"history_unavailable");
   agentHistoryDisplay.textContent=(data.turns||[]).length
     ?(data.turns||[]).map((p,i)=>(i+1)+". User: "+p.prompt+"\nAgent: "+p.answer).join("\n\n")
@@ -756,15 +786,19 @@ const refreshAgentHistory=async()=>{
 $("local-agent-history-refresh").addEventListener("click",refreshAgentHistory);
 $("local-agent-history-clear").addEventListener("click",async()=>{
  if(!localAgentHistoryEnabled||!operatorCsrf)return;
+ const id=selectedConversation();
+ if(!validConversation(id)){localAgentStatus.textContent="Invalid conversation ID.";return;}
  const revision=++localAgentRevision;
  try{
   const response=await appFetch("/api/local-agent-clear",{
-   method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({conversation_id:id})});
   const data=await response.json();
-  if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(revision!==localAgentRevision||!operatorCsrf||id!==selectedConversation())return;
   if(!response.ok)throw Error(data.error||"history_clear_failed");
   agentHistoryDisplay.textContent="No saved turns.";
-  localAgentStatus.textContent="Local context deleted. Previous model memory will not be replayed.";
+  localAgentStatus.textContent="Selected conversation deleted locally.";
+  refreshConversations();
  }catch(error){
   if(revision===localAgentRevision)localAgentStatus.textContent="Delete failed: "+error.message;
  }
@@ -772,13 +806,22 @@ $("local-agent-history-clear").addEventListener("click",async()=>{
 const localAgentSend=$("local-agent-send");
 const localAgentStatus=$("local-agent-status");
 const localAgentOutput=$("local-agent-output");
-const invalidateLocalAgent=()=>{localAgentRevision++;localAgentSend.disabled=!localAgentEnabled||!operatorCsrf;};
+const invalidateLocalAgent=()=>{
+ localAgentRevision++;
+ localAgentSend.disabled=!localAgentEnabled||!operatorCsrf;
+};
+conversationField.addEventListener("input",()=>{
+ invalidateLocalAgent();
+ agentHistoryDisplay.textContent="Select View saved context for this conversation.";
+ localAgentOutput.textContent="No answer for this selected conversation.";
+});
 $("local-agent-model").addEventListener("input",invalidateLocalAgent);
 $("local-agent-prompt").addEventListener("input",invalidateLocalAgent);
 const refreshLocalAgent=async()=>{
  const revision=++localAgentRevision;
  localAgentEnabled=false;localAgentHistoryEnabled=false;
- localAgentRemember.disabled=true;localAgentSend.disabled=true;
+ localAgentRemember.disabled=true;
+ conversationField.disabled=true;localAgentSend.disabled=true;
  try{
   const response=await appFetch("/api/local-agent-capabilities");
   const data=await response.json();
@@ -786,6 +829,7 @@ const refreshLocalAgent=async()=>{
   localAgentEnabled=response.ok&&data.enabled===true;
   localAgentHistoryEnabled=localAgentEnabled&&data.persisted===true;
   localAgentRemember.disabled=!localAgentHistoryEnabled;
+  conversationField.disabled=!localAgentHistoryEnabled;
   if(!localAgentHistoryEnabled)localAgentRemember.checked=false;
   $("local-agent-history-refresh").disabled=!localAgentHistoryEnabled;
   $("local-agent-history-clear").disabled=!localAgentHistoryEnabled;
@@ -793,6 +837,7 @@ const refreshLocalAgent=async()=>{
   localAgentStatus.textContent=localAgentEnabled
     ?"Enabled locally. Only calculator and UTC clock tools are permitted."
     :"Disabled. Restart the local server with --enable-local-agent to opt in.";
+  if(localAgentHistoryEnabled)refreshConversations();
  }catch(error){
   if(revision!==localAgentRevision)return;
   localAgentStatus.textContent="Local agent capabilities unavailable.";
@@ -801,7 +846,13 @@ const refreshLocalAgent=async()=>{
 localAgentSend.addEventListener("click",async()=>{
  const model=$("local-agent-model").value.trim();
  const prompt=$("local-agent-prompt").value.trim();
+ const remember=localAgentRemember.checked;
+ const conversationId=selectedConversation();
  if(!localAgentEnabled||!operatorCsrf)return;
+ if(remember&&!validConversation(conversationId)){
+  localAgentStatus.textContent="Use a valid lowercase conversation ID (1-32 chars).";
+  return;
+ }
  if(!model||!prompt||prompt.length>3000){
   localAgentStatus.textContent="Enter a model name and a prompt (up to 3,000 characters).";
   return;
@@ -813,12 +864,14 @@ localAgentSend.addEventListener("click",async()=>{
  try{
   const response=await appFetch("/api/local-agent-run",{
    method:"POST",headers:{"Content-Type":"application/json"},
-   body:JSON.stringify({model,prompt,remember:localAgentRemember.checked})});
+   body:JSON.stringify({model,prompt,remember,
+    ...(remember?{conversation_id:conversationId}:{})})});
   const data=await response.json();
-  if(revision!==localAgentRevision||!operatorCsrf)return;
+  if(revision!==localAgentRevision||!operatorCsrf
+      ||(remember&&conversationId!==selectedConversation()))return;
   if(!response.ok)throw Error(data.error||"local_agent_failed");
   localAgentOutput.textContent=data.answer||"Empty model response";
-  if(data.remembered)refreshAgentHistory();
+  if(data.remembered){refreshAgentHistory();refreshConversations();}
   localAgentStatus.textContent="Local model responded. Tools: "+
     ((data.tools_used||[]).join(", ")||"none")+". Verify generated claims.";
  }catch(error){
@@ -847,6 +900,9 @@ const lockOperatorUI=message=>{
  localAgentHistoryEnabled=false;
  localAgentRemember.checked=false;
  localAgentRemember.disabled=true;
+ conversationField.value="default";
+ conversationField.disabled=true;
+ $("local-agent-conversation-list").replaceChildren();
  $("local-agent-history-refresh").disabled=true;
  $("local-agent-history-clear").disabled=true;
  agentHistoryDisplay.textContent="Session locked. Saved content hidden.";
