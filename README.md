@@ -3,6 +3,12 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Verified CSV-to-calculator numeric handoffs (Slice 76)
+
+An owner-approved task plan can now use numeric aggregates from a **prior, explicitly selected and executed CSV profiling step** as typed calculator operands. Example reviewed plan: profile `revenue`, then multiply `{"from_step":1,"field":"column_sum","column":"revenue"}` by `2`. Strict supported fields are `row_count`, `column_sum`, `column_nonempty_count`, `column_missing_count` and `column_distinct_count`, all bound to an earlier approved `local_csv_profile` step; column metrics require a column name previously selected in that step.
+
+The executor checks the original frozen CSV digest and **recomputes the full saved deterministic profile** before accepting any numeric reference. Tampered output, nonexistent fields/columns, disabled CSV permission, nonnumeric sums, zero divisors and out-of-bounds operands are blocked **before the calculator dispatch**, with a persisted audit including source-output SHA-256 and CSV SHA-256. The existing approval, one-step/manual execution or separately confirmed bounded server-run semantics remain unchanged. No model-selected path, CSV row echo, remote write, autonomous planning or new source permission is introduced. [Contract and limits](docs/CSV_TYPED_HANDOFFS_V1.md).
+
 ## Owner-selected CSV profiling inside reviewed task plans (Slice 75)
 
 The authenticated local workbench can now perform **deterministic column profiling on one explicitly owner-selected, short UTF-8 CSV**, as a persistent reviewed plan step. Opt in with:

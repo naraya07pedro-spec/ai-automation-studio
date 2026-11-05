@@ -8,12 +8,19 @@ from hashlib import sha256
 import json
 
 from local_ollama_agent import AgentError, calculate
+from local_csv_profile import CSVProfileError, profile_selected_csv
 
 ALLOWED_NUMERIC_FIELDS = {
     "calculate": frozenset(("output",)),
     "github_issue_triage": frozenset((
-        "returned_count", "review_flagged_count", "unassessed_count"))
+        "returned_count", "review_flagged_count", "unassessed_count")),
+    "local_csv_profile": frozenset((
+        "row_count", "column_nonempty_count", "column_missing_count",
+        "column_distinct_count", "column_sum"))
 }
+CSV_COLUMN_FIELDS = frozenset((
+    "column_nonempty_count", "column_missing_count",
+    "column_distinct_count", "column_sum"))
 MAX_ISSUES = 15
 
 
@@ -24,13 +31,20 @@ class HandoffError(Exception):
 def _binding(value, previous_steps):
     """A typed, 1-based reference to an earlier compatible result field."""
     if (type(value) is not dict
-            or set(value) != {"from_step", "field"}
-            or type(value["from_step"]) is not int
+            or type(value.get("from_step")) is not int
             or not 1 <= value["from_step"] <= len(previous_steps)
-            or type(value["field"]) is not str):
+            or type(value.get("field")) is not str):
         raise HandoffError("invalid_model_plan")
     source = previous_steps[value["from_step"] - 1]
-    if value["field"] not in ALLOWED_NUMERIC_FIELDS.get(source["tool"], ()):
+    field = value["field"]
+    if field not in ALLOWED_NUMERIC_FIELDS.get(source["tool"], ()):
+        raise HandoffError("invalid_model_plan")
+    if field in CSV_COLUMN_FIELDS:
+        if (set(value) != {"from_step", "field", "column"}
+                or type(value["column"]) is not str
+                or value["column"] not in source["args"]["columns"]):
+            raise HandoffError("invalid_model_plan")
+    elif set(value) != {"from_step", "field"}:
         raise HandoffError("invalid_model_plan")
     return value
 
@@ -83,7 +97,45 @@ def _triage_count(raw, source, field):
     return str(data[field])
 
 
-def resolve_calculator_handoffs(step, previous_steps, previous_results):
+def _csv_metric(raw, source, binding, csv_snapshot):
+    """Compare the COMPLETE saved output to a fresh deterministic re-profile.
+
+    The original approved source digest is checked by LocalAgentPlanStore on
+    every fetch. The recomputed result stops source-output substitution.
+    """
+    if (csv_snapshot is None or type(raw) is not str
+            or len(raw) > 32768):
+        raise HandoffError("plan_handoff_invalid_source")
+    try:
+        saved = json.loads(raw)
+        recomputed = profile_selected_csv(csv_snapshot, source["args"]["columns"])
+    except (CSVProfileError, ValueError, TypeError, KeyError):
+        raise HandoffError("plan_handoff_invalid_source") from None
+    if (type(saved) is not dict or saved != recomputed
+            or csv_snapshot["sha256"] != recomputed["sha256"]):
+        raise HandoffError("plan_handoff_invalid_source")
+    field = binding["field"]
+    if field == "row_count":
+        return str(recomputed["row_count"])
+    column = binding["column"]
+    matches = [entry for entry in recomputed["column_stats"]
+               if entry["column"] == column]
+    if len(matches) != 1:
+        raise HandoffError("plan_handoff_invalid_source")
+    metric = field.removeprefix("column_")
+    if metric == "sum":
+        numbers = matches[0]["numeric_summary"]
+        if type(numbers) is not dict or type(numbers.get("sum")) is not str:
+            raise HandoffError("plan_handoff_invalid_source")
+        return numbers["sum"]
+    value = matches[0].get(metric)
+    if type(value) is not int:
+        raise HandoffError("plan_handoff_invalid_source")
+    return str(value)
+
+
+def resolve_calculator_handoffs(step, previous_steps, previous_results,
+                                csv_snapshot=None):
     """Return (concrete calculator args, immutable audit entry or None).
 
     Fail before the next durable IN_FLIGHT transition if a saved result is
@@ -113,17 +165,23 @@ def resolve_calculator_handoffs(step, previous_steps, previous_results):
             numeric = raw
         elif source_step["tool"] == "github_issue_triage":
             numeric = _triage_count(raw, source_step, value["field"])
+        elif source_step["tool"] == "local_csv_profile":
+            numeric = _csv_metric(raw, source_step, value, csv_snapshot)
         else:
             raise HandoffError("plan_handoff_invalid_source")
         resolved[operand] = numeric
-        refs.append({
+        lineage = {
             "operand": operand,
             "from_step": value["from_step"],
             "source_tool": source_step["tool"],
             "field": value["field"],
             "value": numeric,
             "source_sha256": sha256(raw.encode("utf-8")).hexdigest()
-        })
+        }
+        if source_step["tool"] == "local_csv_profile":
+            lineage["column"] = value.get("column")
+            lineage["source_csv_sha256"] = csv_snapshot["sha256"]
+        refs.append(lineage)
     try:
         calculate(resolved)
     except (AgentError, TypeError, ValueError):
@@ -134,7 +192,7 @@ def resolve_calculator_handoffs(step, previous_steps, previous_results):
     return resolved, entry
 
 
-def validate_handoff_history(history, steps, results):
+def validate_handoff_history(history, steps, results, csv_snapshot=None):
     """Recompute exact lineage from durable results; detect corrupted audit log."""
     if type(history) is not list or type(steps) is not list or type(results) is not list:
         raise HandoffError("plan_handoff_log_invalid")
@@ -145,7 +203,8 @@ def validate_handoff_history(history, steps, results):
             continue
         try:
             _, entry = resolve_calculator_handoffs(
-                step, steps[:index], results[:index])
+                step, steps[:index], results[:index],
+                csv_snapshot=csv_snapshot)
         except HandoffError:
             raise HandoffError("plan_handoff_log_invalid") from None
         if entry is not None:
