@@ -86,6 +86,9 @@ class ServerReviewedBatchTests(unittest.TestCase):
         self.assertEqual("IDLE", self.safety.phase())
         with self.assertRaises(PlanError):
             self.runner.stop(self.pid)
+        # Wait until the completed worker actually releases its execution gate.
+        self.assertTrue(self.gate.acquire(timeout=2))
+        self.gate.release()
         # A fresh owner-authorized run is required for the one saved step.
         self.assertEqual("RUNNING", self.runner.start(self.pid)["batch_run_status"])
         self.assertEqual("COMPLETED", self.wait_for("COMPLETED")["status"])
