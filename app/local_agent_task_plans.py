@@ -33,6 +33,9 @@ from local_agent_memory import (MemoryCardError, valid_selection,
                                 MAX_SELECTED_MEMORY)
 
 MAX_STEPS = 3
+BATCH_READ_TOOLS = frozenset(("calculate", "utc_now", "github_public_issues",
+    "github_issue_triage", "github_issue_analysis", "local_document_question",
+    "local_multi_document_question"))
 MAX_PLANS = 12
 MAX_GOAL = 1200
 LOCAL_DOCUMENT_TOOL = "local_document_question"
@@ -351,7 +354,8 @@ class LocalAgentPlanStore:
                     report_json TEXT NOT NULL DEFAULT '',
                     document_json TEXT NOT NULL DEFAULT '',
                     document_set_json TEXT NOT NULL DEFAULT '',
-                    handoff_log_json TEXT NOT NULL DEFAULT '[]')""")
+                    handoff_log_json TEXT NOT NULL DEFAULT '[]',
+                    batch_run_status TEXT NOT NULL DEFAULT 'IDLE')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -378,6 +382,13 @@ class LocalAgentPlanStore:
                     # Old plans do not acquire new dependencies or executions.
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN handoff_log_json TEXT NOT NULL DEFAULT '[]'""")
+                if "batch_run_status" not in columns:
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN batch_run_status TEXT NOT NULL DEFAULT 'IDLE'""")
+                # Never redispatch a persisted server run after service restart.
+                self.db.execute("""UPDATE agent_task_plans SET
+                    batch_run_status='INTERRUPTED' WHERE
+                    batch_run_status IN ('RUNNING','STOPPING')""")
                 # A process death leaves an explicitly visible interruption,
                 # rather than silently executing a plan again.
                 self.db.execute("""UPDATE agent_task_plans SET status='INTERRUPTED'
@@ -452,7 +463,7 @@ class LocalAgentPlanStore:
         row = self.db.execute("""SELECT model,goal,steps_json,results_json,
                 next_index,status,created_utc,approval_epoch,memory_refs_json,
                 report_json,document_json,document_set_json,
-                handoff_log_json FROM agent_task_plans
+                handoff_log_json,batch_run_status FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -484,6 +495,7 @@ class LocalAgentPlanStore:
                 "approval_epoch": row[7],
                 "memory_refs": memory_refs,
                 "handoffs": handoffs,
+                "batch_run_status": row[13],
                 "report": report,
                 "document_source": document_source_metadata(document),
                 "document_set_sources": document_set_source_metadata(document_set)}
@@ -614,13 +626,18 @@ class LocalAgentPlanStore:
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
 
-    def advance(self, plan_id):
-        """One explicitly triggered, preapproved read-only action only."""
+    def advance(self, plan_id, *, from_batch=False):
+        """One preapproved step. Batch worker holds the global model gate."""
         try:
             with self.lock, self.db:
                 old = self._fetch(plan_id)
                 if old["status"] not in ("APPROVED", "NEXT_READY"):
                     raise PlanError("plan_state_conflict")
+                if (old["batch_run_status"] in ("RUNNING", "STOPPING")
+                        and not from_batch):
+                    raise PlanError("plan_batch_active")
+                if from_batch and old["batch_run_status"] not in ("RUNNING", "STOPPING"):
+                    raise PlanError("plan_batch_not_active")
                 self._verify_memory_refs(old["memory_refs"])
                 index = old["next_index"]
                 if index >= len(old["steps"]):
@@ -738,6 +755,55 @@ class LocalAgentPlanStore:
                     WHERE plan_id=? AND status='IN_FLIGHT'""",
                     (json.dumps(results), new_index, state,
                      json.dumps(handoffs, separators=(",", ":")), plan_id))
+                return self._fetch(plan_id)
+        except sqlite3.Error:
+            raise PlanError("plan_storage_unavailable") from None
+
+    def begin_batch(self, plan_id):
+        """Persist owner run intent before dispatch; no automatic restarts."""
+        try:
+            with self.lock, self.db:
+                old = self._fetch(plan_id)
+                if (old["status"] not in ("APPROVED", "NEXT_READY")
+                        or old["batch_run_status"] in ("RUNNING", "STOPPING")):
+                    raise PlanError("plan_state_conflict")
+                if (not old["steps"] or len(old["steps"]) > MAX_STEPS
+                        or any(s["tool"] not in BATCH_READ_TOOLS
+                               for s in old["steps"][old["next_index"]:])):
+                    raise PlanError("tool_not_allowed")
+                self._verify_memory_refs(old["memory_refs"])
+                self.db.execute("""UPDATE agent_task_plans SET batch_run_status='RUNNING'
+                    WHERE plan_id=?""", (plan_id,))
+                return self._fetch(plan_id)
+        except sqlite3.Error:
+            raise PlanError("plan_storage_unavailable") from None
+
+    def stop_batch(self, plan_id):
+        """Cooperative durable stop; does not terminate in-flight step."""
+        try:
+            with self.lock, self.db:
+                old = self._fetch(plan_id)
+                if old["batch_run_status"] != "RUNNING":
+                    raise PlanError("plan_state_conflict")
+                self.db.execute("""UPDATE agent_task_plans SET
+                    batch_run_status='STOPPING' WHERE plan_id=?""", (plan_id,))
+                return self._fetch(plan_id)
+        except sqlite3.Error:
+            raise PlanError("plan_storage_unavailable") from None
+
+    def finish_batch(self, plan_id, outcome):
+        """Worker finalizes only an active, persisted run."""
+        if outcome not in ("COMPLETED", "STOPPED", "FAILED"):
+            raise PlanError("invalid_batch_outcome")
+        try:
+            with self.lock, self.db:
+                old = self._fetch(plan_id)
+                if old["batch_run_status"] not in ("RUNNING", "STOPPING"):
+                    raise PlanError("plan_state_conflict")
+                if old["batch_run_status"] == "STOPPING" and outcome != "COMPLETED":
+                    outcome = "STOPPED"
+                self.db.execute("""UPDATE agent_task_plans SET batch_run_status=?
+                    WHERE plan_id=?""", (outcome, plan_id))
                 return self._fetch(plan_id)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
