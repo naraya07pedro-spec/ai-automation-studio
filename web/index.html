@@ -295,6 +295,30 @@ aas:timeline:urgent
 <div class="setup-msg" id="local-agent-status" role="status" aria-live="polite">Checking local-model permission…</div>
 <pre class="trace" id="local-agent-output" aria-label="Local agent result">No agent run yet. Model responses are unverified.</pre>
 </section>
+<section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
+<div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
+<h2>Plan a small local task</h2>
+<p class="muted">The local model can propose at most three read-only calculator/clock steps. Nothing executes when a plan is created or approved. Review the exact steps; trigger execution one step at a time. Not enabled unless the server starts with --enable-agent-plans.</p>
+<div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
+<textarea id="agent-plan-goal" maxlength="1200" rows="3" style="width:100%;min-height:90px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="For example, calculate 75 × 28, then tell me the current UTC time."></textarea></div>
+<div class="core-actions" style="margin:12px 0">
+<button id="agent-plan-propose" type="button" class="primary" disabled>Propose a plan (no execution)</button>
+<button id="agent-plan-list" type="button" class="secondary" disabled>List saved plans</button>
+</div>
+<div class="field"><label for="agent-plan-id">Saved plan ID</label>
+<input id="agent-plan-id" maxlength="24" spellcheck="false" autocomplete="off" placeholder="Select a listed plan ID or paste it"></div>
+<div class="core-actions" style="margin:12px 0">
+<button id="agent-plan-load" type="button" class="secondary" disabled>Load plan</button>
+<button id="agent-plan-approve" type="button" class="secondary" disabled>Approve reviewed plan</button>
+<button id="agent-plan-next" type="button" class="primary" disabled>Execute next step</button>
+<button id="agent-plan-resume" type="button" class="secondary" disabled>Resume interrupted plan</button>
+<button id="agent-plan-cancel" type="button" class="secondary" disabled>Cancel plan</button>
+<button id="agent-plan-delete" type="button" class="secondary" disabled>Delete terminal plan</button>
+</div>
+<div id="agent-plan-status" class="setup-msg" role="status" aria-live="polite">Plan execution is disabled by default.</div>
+<pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
+<pre id="agent-plan-list-output" class="trace" aria-label="Saved plans">No plan list loaded.</pre>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -898,6 +922,11 @@ const refreshLocalAgent=async()=>{
   const data=await response.json();
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
+  agentPlanEnabled=localAgentEnabled&&data.planning===true;
+  planStatus.textContent=agentPlanEnabled
+   ?"Ready to propose a bounded read-only plan. Nothing is executed automatically."
+   :"Task plans disabled. Start with --enable-local-agent --enable-agent-plans.";
+  refreshPlanButtons();
   agentReadinessEnabled=localAgentEnabled&&data.readiness===true;
   agentModelsButton.disabled=!agentReadinessEnabled;
   agentProbeButton.disabled=!agentReadinessEnabled;
@@ -958,6 +987,135 @@ localAgentSend.addEventListener("click",async()=>{
  }
 });
 
+
+// Slice 52: every effectful transition requires its own owner-authorized button.
+let agentPlanEnabled=false;
+let agentPlanBusy=false;
+let agentPlanRevision=0;
+let selectedPlan=null;
+const planStatus=$("agent-plan-status");
+const planDetails=$("agent-plan-details");
+const planListOutput=$("agent-plan-list-output");
+const planIdInput=$("agent-plan-id");
+const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
+ "agent-plan-approve","agent-plan-next","agent-plan-resume","agent-plan-cancel",
+ "agent-plan-delete"];
+const renderPlan=plan=>{
+ selectedPlan=plan;
+ if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
+ planDetails.textContent=plan ? JSON.stringify({
+  status:plan.status,goal:plan.goal,model:plan.model,
+  steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index
+ },null,2):"No selected plan.";
+ refreshPlanButtons();
+};
+const refreshPlanButtons=()=>{
+ const ready=agentPlanEnabled&&operatorCsrf&&!agentPlanBusy;
+ const id=planIdInput.value.trim();
+ const same=selectedPlan&&selectedPlan.plan_id===id;
+ const status=same?selectedPlan.status:null;
+ $("agent-plan-propose").disabled=!ready;
+ $("agent-plan-list").disabled=!ready;
+ $("agent-plan-load").disabled=!ready||!/^[0-9a-f]{24}$/.test(id);
+ $("agent-plan-approve").disabled=!ready||status!=="PREPARED";
+ $("agent-plan-next").disabled=!ready||!["APPROVED","NEXT_READY"].includes(status);
+ $("agent-plan-resume").disabled=!ready||status!=="INTERRUPTED";
+ $("agent-plan-cancel").disabled=!ready||
+  !["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(status);
+ $("agent-plan-delete").disabled=!ready||
+  !["COMPLETED","CANCELLED","BLOCKED"].includes(status);
+};
+planIdInput.addEventListener("input",()=>{
+ agentPlanRevision++;selectedPlan=null;
+ planDetails.textContent="Load this ID before approving any action.";
+ refreshPlanButtons();
+});
+const planRequest=async(path,body)=>{
+ if(!agentPlanEnabled||!operatorCsrf||agentPlanBusy)return;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;refreshPlanButtons();
+ planStatus.textContent="Processing local plan request…";
+ try{
+  const response=await appFetch(path,{method:"POST",
+   headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const result=await response.json();
+  if(rev!==agentPlanRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(result.error||"plan_request_failed");
+  renderPlan(result.status==="DELETED"?null:result);
+  if(result.status==="DELETED")planIdInput.value="";
+  planStatus.textContent=result.status==="PREPARED"
+   ?"Plan proposed. Review every tool and argument before approving."
+   :result.status==="APPROVED"
+   ?"Approved. Nothing executed yet. Click Execute next step."
+   :result.status==="NEXT_READY"
+   ?"One step completed. Click Execute next step to continue."
+   :"Plan status: "+result.status+". No background execution.";
+ }catch(error){
+  if(rev===agentPlanRevision&&operatorCsrf)
+   planStatus.textContent="Plan request failed: "+error.message;
+ }finally{
+  if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
+ }
+};
+$("agent-plan-propose").addEventListener("click",()=>{
+ const goal=$("agent-plan-goal").value.trim();
+ const model=$("local-agent-model").value.trim();
+ if(!goal||goal.length>1200||!model){
+  planStatus.textContent="Enter a goal (max 1,200 characters) and an installed model above.";
+  return;
+ }
+ planRequest("/api/local-agent-plan-create",{goal,model});
+});
+$("agent-plan-list").addEventListener("click",async()=>{
+ if(!agentPlanEnabled||agentPlanBusy||!operatorCsrf)return;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;refreshPlanButtons();
+ try{
+  const response=await appFetch("/api/local-agent-plans");
+  const data=await response.json();
+  if(rev!==agentPlanRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(data.error||"plan_list_unavailable");
+  planListOutput.textContent=data.plans.length
+   ?data.plans.map(p=>p.plan_id+" · "+p.status+" · "+p.goal).join("\n")
+   :"No plans saved. The storage limit is "+data.capacity+".";
+  planStatus.textContent="Local plan listing retrieved. Select a plan ID to load.";
+ }catch(error){
+  if(rev===agentPlanRevision&&operatorCsrf)
+   planStatus.textContent="Could not list plans: "+error.message;
+ }finally{
+  if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
+ }
+});
+$("agent-plan-load").addEventListener("click",async()=>{
+ const id=planIdInput.value.trim();
+ if(!agentPlanEnabled||agentPlanBusy||!operatorCsrf||!/^[0-9a-f]{24}$/.test(id))return;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;refreshPlanButtons();
+ try{
+  const response=await appFetch("/api/local-agent-plan?plan_id="+encodeURIComponent(id));
+  const data=await response.json();
+  if(rev!==agentPlanRevision||!operatorCsrf||id!==planIdInput.value.trim())return;
+  if(!response.ok)throw Error(data.error||"plan_not_found");
+  renderPlan(data);
+  planStatus.textContent="Plan loaded. Inspect its status and exact steps.";
+ }catch(error){
+  if(rev===agentPlanRevision&&operatorCsrf)planStatus.textContent="Load failed: "+error.message;
+ }finally{
+  if(rev===agentPlanRevision&&operatorCsrf){agentPlanBusy=false;refreshPlanButtons();}
+ }
+});
+for(const [id,endpoint] of [
+ ["agent-plan-approve","approve"],["agent-plan-next","next"],
+ ["agent-plan-resume","resume"],["agent-plan-cancel","cancel"],
+ ["agent-plan-delete","delete"]
+]){
+ $(id).addEventListener("click",()=>{
+  const plan_id=planIdInput.value.trim();
+  if(!selectedPlan||selectedPlan.plan_id!==plan_id)return;
+  planRequest("/api/local-agent-plan-"+endpoint,{plan_id});
+ });
+}
+
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
@@ -972,6 +1130,14 @@ const lockOperatorUI=message=>{
  operatorCsrf=null;
  localAgentEnabled=false;
  localAgentHistoryEnabled=false;
+ agentPlanEnabled=false;
+ agentPlanBusy=false;
+ agentPlanRevision++;
+ planIdInput.value="";
+ $("agent-plan-goal").value="";
+ planListOutput.textContent="Session locked; plan list hidden.";
+ planStatus.textContent="Session locked; task plans unavailable.";
+ renderPlan(null);
  agentReadinessEnabled=false;
  agentModelsButton.disabled=true;agentProbeButton.disabled=true;
  $("local-agent-installed-model-list").replaceChildren();

@@ -15,6 +15,7 @@ from local_source_policy import LocalPublicSourcePolicy
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
+from local_agent_task_plans import LocalAgentPlanStore
 from local_server import create_handler
 
 
@@ -30,6 +31,13 @@ def main():
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
     conversation = LocalAgentConversation(":memory:")
+    plans = LocalAgentPlanStore(":memory:")
+    def fixture_planner(goal, model):
+        return {"model": model, "goal": goal,
+                "steps": [{"tool": "calculate",
+                           "args": {"a": "7", "b": "8", "operation": "multiply"}},
+                          {"tool": "utc_now", "args": {}}]}
+
     def fixture_models():
         # CI does not install Ollama; tests only browser/API wiring here.
         return ["fixture:model"]
@@ -50,13 +58,16 @@ def main():
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
                        local_agent_models=fixture_models,
-                       local_agent_probe=fixture_probe))
+                       local_agent_probe=fixture_probe,
+                       local_agent_planner=fixture_planner,
+                       local_agent_plan_store=plans))
     try:
         server.serve_forever()
     finally:
         server.server_close()
         core.close()
         conversation.close()
+        plans.close()
         audit.close()
         home.cleanup()
 

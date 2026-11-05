@@ -90,6 +90,43 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_agent_plan_requires_review_and_one_click_per_step(self):
+        expect(self.page.locator("#agent-plan-propose")).to_be_enabled()
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Synthetic: multiply 7 by 8 and read UTC")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "Review every tool")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "PREPARED")
+        self.assertIn("calculate",self.page.locator("#agent-plan-details").inner_text())
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        expect(self.page.locator("#agent-plan-approve")).to_be_enabled()
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "APPROVED")
+        expect(self.page.locator("#agent-plan-next")).to_be_enabled()
+        self.assertNotIn('"output": "56"',
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "NEXT_READY")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"output": "56"')
+        self.assertEqual(1,
+            self.page.locator("#agent-plan-details").inner_text().count('"output":'))
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "COMPLETED")
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "No selected plan")
+        self.page.locator("#agent-plan-list").click()
+        expect(self.page.locator("#agent-plan-list-output")).to_contain_text(
+            "No plans saved")
+
     def test_operator_model_discovery_and_explicit_tool_probe(self):
         expect(self.page.locator("#local-agent-find-models")).to_be_enabled()
         expect(self.page.locator("#local-agent-test-model")).to_be_enabled()

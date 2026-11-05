@@ -1,6 +1,6 @@
 # AI Automation Studio
 
-AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
+AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
 ## Optional local AI agent in the browser (Slices 47–50)
@@ -25,6 +25,16 @@ python app/local_ollama_readiness.py --model qwen2.5:3b
 ```
 
 The model argument above is an **example** and must be replaced with the name of an installed, tool-capable local model. Without an installed model the check reports a blocked status; it will not download one. In the authenticated browser, **Find installed Ollama models** lists local names; **Test local model & tool calling** requests one bounded calculator-tool round trip. `OBSERVED` proves that this tool call ran in the local engine during the probe, not the model's general accuracy. The probe never saves history or calls third-party business APIs. [Read the full scope and constraints](docs/REAL_OLLAMA_READINESS_V1.md).
+
+## Opt-in AI task planning with human approval (Slice 52)
+
+The browser now offers **Plan a small local task**, backed by real optional Ollama model inference and a durable SQLite plan ledger. The model can propose up to **3 explicitly bounded read-only steps** (calculator or UTC clock), but **nothing executes when the plan is proposed or approved**. The owner reviews exact arguments, approves the plan and manually triggers each step. State survives restart; interrupted operations never silently resume.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans
+```
+
+Task plans are **disabled by default**, separate from the optional conversation history. The plan DB stores goal text, arguments and results as **plaintext** and is not suitable for credentials or customer data. CI exercises the real state machine with model fixtures; it does not replace testing an installed model on your Windows PC. [Read the task plan contract and security limits](docs/LOCAL_AGENT_TASK_PLANS_V1.md).
 
 ## Run the demo
 
