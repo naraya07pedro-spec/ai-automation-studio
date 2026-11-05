@@ -74,12 +74,20 @@ def main():
                                 issue_analyzer=fixture_issue_analyzer,
                                 memory_store=memory_cards,
                                 report_generator=fixture_final_report)
-    def fixture_planner(goal, model, memory_context=None, document_context=None):
+    def fixture_planner(goal, model, memory_context=None, document_context=None,
+                        document_set_context=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
         if memory_context:
             assert all(set(c)=={"id","text"} for c in memory_context)
             assert all(c["id"].startswith("fixture_") for c in memory_context)
+        if document_set_context is not None:
+            assert [d["filename"] for d in document_set_context] == [
+                "fixture-runbook.txt", "fixture-meeting.md"]
+            assert all(d["source_bytes"] > 0 for d in document_set_context)
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool":"local_multi_document_question",
+                               "args":{"question":"When does the review meeting start?"}}]}
         if document_context is not None:
             assert document_context["filename"] == "fixture-plan-notes.txt"
             assert document_context["source_bytes"] > 0
@@ -138,6 +146,8 @@ def main():
                 '"insufficient_evidence":false,'
                 '"citations":[{"chunk_id":"F2C1",'
                 '"quote":"meeting starts at 18:30 WIB"}]}'}})
+
+    plans.multi_document_analyzer = fixture_multi_document
 
     def fixture_device_acceptance(model):
         if model == "fixture:timeout":
