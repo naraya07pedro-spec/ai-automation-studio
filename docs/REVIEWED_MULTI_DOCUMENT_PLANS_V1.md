@@ -4,11 +4,11 @@ This adds a practical multi-source read-only task to AI Automation Studio's dura
 
 ## Start with separate explicit opt-ins
 
-\`\`\`powershell
+```powershell
 python app/local_server.py --enable-local-agent --enable-agent-plans --enable-multi-documents
-\`\`\`
+```
 
-Log into the existing localhost owner UI. Under **Plan a small local task**, select **either** one text/Markdown file in the existing single-document picker **or** 2–3 distinct files in the new comparison picker. Do **not** select both. The comparison set allows at most 3 files, up to **2,500 UTF-8 bytes each** and **6,000 bytes total**. Files must have safe \`.txt\`/\`.md\` basenames, no duplicate filenames (case-insensitive), empty files, invalid control characters, invalid UTF-8, or nested paths.
+Log into the existing localhost owner UI. Under **Plan a small local task**, select **either** one text/Markdown file in the existing single-document picker **or** 2–3 distinct files in the new comparison picker. Do **not** select both. The comparison set allows at most 3 files, up to **2,500 UTF-8 bytes each** and **6,000 bytes total**. Files must have safe `.txt`/`.md` basenames, no duplicate filenames (case-insensitive), empty files, invalid control characters, invalid UTF-8, or nested paths.
 
 Explicitly check **I authorize storing all selected comparison files**. Only selected file contents are read by the browser and sent to the authenticated loopback API. The browser checks payload size against the existing 8,192-byte HTTP body limit. The backend independently validates every source, and **no planner inference occurs if selection is invalid**.
 
@@ -18,9 +18,9 @@ Explicitly check **I authorize storing all selected comparison files**. Only sel
 
 The local planner is given the **goal plus safe source metadata only**: filename, UTF-8 byte count and exact SHA-256 digest for every file. It is **not** given source bodies during plan proposal. A fixed additional allowed step is:
 
-\`\`\`json
+```json
 {"tool":"local_multi_document_question","args":{"question":"What time is the meeting in the selected project documents?"}}
-\`\`\`
+```
 
 The model cannot choose file paths, fetch arbitrary URLs or provide additional tool arguments. It may include calculator, UTC clock or separately operator-granted public GitHub issue steps in a **maximum three-step** plan. Existing note-memory references remain optional and separately owner-selected. The comparison set must actually be used by the plan; otherwise the request is rejected rather than silently saving unrelated documents. Source metadata and exact planned question appear in the owner review screen. No source body appears in initial plan GET/list responses.
 
@@ -28,11 +28,11 @@ The owner must click **Approve reviewed plan**, then manually **Execute next ste
 
 The verified-shape result is saved in the plan ledger and displayed in the plan detail. **Source-exact quote matching does not prove the interpretation is factually correct**. The stored result may expose excerpts from the operator's files in its citations and retrieval evidence; the raw snapshots are never separately returned by the plan listing API. Once steps are completed, the existing **Task Deliverable** can produce a bounded report with evidence quote membership and explicitly **unverified** interpretations, with copy and owner-triggered Markdown download.
 
-Restart recovery retains snapshots and completed results. An interrupted operation never auto-retries; it requires explicit owner resume. If the app is restarted without \`--enable-multi-documents\`, the multi-source step fails closed rather than silently granting access.
+Restart recovery retains snapshots and completed results. An interrupted operation never auto-retries; it requires explicit owner resume. If the app is restarted without `--enable-multi-documents`, the multi-source step fails closed rather than silently granting access.
 
 ## API
 
-\`\`\`http
+```http
 POST /api/local-agent-plan-create
 {
   "model": "YOUR_INSTALLED_MODEL",
@@ -42,11 +42,11 @@ POST /api/local-agent-plan-create
     {"filename":"runbook.md","content":"Check the briefing before scheduling."}
   ]
 }
-\`\`\`
+```
 
-The optional \`documents\` key can coexist with existing explicit \`memory_ids\` but **cannot** coexist with the existing single-file \`document\` key. It is rejected (422) when both are provided, malformed, duplicate, invalid or oversized. Without the multi-document opt-in it is rejected (403). Source contents are revalidated inside SQLite storage, and per-file SHA-256 digests are verified on each plan retrieval/execution. Existing plans migrate by adding an empty \`document_set_json\` column and retain all prior data and read permissions.
+The optional `documents` key can coexist with existing explicit `memory_ids` but **cannot** coexist with the existing single-file `document` key. It is rejected (422) when both are provided, malformed, duplicate, invalid or oversized. Without the multi-document opt-in it is rejected (403). Source contents are revalidated inside SQLite storage, and per-file SHA-256 digests are verified on each plan retrieval/execution. Existing plans migrate by adding an empty `document_set_json` column and retain all prior data and read permissions.
 
-Authenticated plan responses include \`document_set_sources\` metadata (name, byte count, digest, plaintext flag) or an empty array. There is no additional unauthenticated file reading, filesystem scan, PDF extraction, vector index, cloud model, shell execution, GitHub write, automatic email, autonomous loop or network permission. This is a bounded read-only comparison tool, not unrestricted agent access.
+Authenticated plan responses include `document_set_sources` metadata (name, byte count, digest, plaintext flag) or an empty array. There is no additional unauthenticated file reading, filesystem scan, PDF extraction, vector index, cloud model, shell execution, GitHub write, automatic email, autonomous loop or network permission. This is a bounded read-only comparison tool, not unrestricted agent access.
 
 ## Verification boundaries
 
