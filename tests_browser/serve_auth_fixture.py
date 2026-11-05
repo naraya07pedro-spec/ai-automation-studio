@@ -74,12 +74,18 @@ def main():
                                 issue_analyzer=fixture_issue_analyzer,
                                 memory_store=memory_cards,
                                 report_generator=fixture_final_report)
-    def fixture_planner(goal, model, memory_context=None):
+    def fixture_planner(goal, model, memory_context=None, document_context=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
         if memory_context:
             assert all(set(c)=={"id","text"} for c in memory_context)
             assert all(c["id"].startswith("fixture_") for c in memory_context)
+        if document_context is not None:
+            assert document_context["filename"] == "fixture-plan-notes.txt"
+            assert document_context["source_bytes"] > 0
+            return {"model": model, "goal": goal,
+                    "steps": [{"tool":"local_document_question",
+                               "args":{"question":"When does the service desk open?"}}]}
         if "analy" in goal.lower():
             return {"model": model, "goal": goal,
                     "steps": [{"tool": "github_issue_analysis",
@@ -120,6 +126,9 @@ def main():
                 '{"answer":"The desk opens at 09:00.",'
                 '"insufficient_evidence":false,'
                 '"citations":[{"chunk_id":"S1","quote":"opens at 09:00"}]}'}})
+
+    # The fixture has opt-in document analysis enabled; it never reads a path.
+    plans.document_analyzer = fixture_document
 
     def fixture_multi_document(documents,question,model):
         return analyze_multiple_documents(
