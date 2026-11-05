@@ -298,7 +298,9 @@ aas:timeline:urgent
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
-<p class="muted">The local model can propose at most three read-only calculator/clock steps. Nothing executes when a plan is created or approved. Review the exact steps; trigger execution one step at a time. Not enabled unless the server starts with --enable-agent-plans.</p>
+<p class="muted">The local model can propose at most three read-only steps. Nothing executes when a plan is created or approved. Review every tool argument, then trigger execution one step at a time.</p>
+<div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
+<p class="muted">Example: "List open GitHub issues from Octocat/Hello-World". Before running this, grant that public repository in Public Source Permissions. The agent reads only the first 15 open issues, never private data or issue edits.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
 <textarea id="agent-plan-goal" maxlength="1200" rows="3" style="width:100%;min-height:90px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="For example, calculate 75 × 28, then tell me the current UTC time."></textarea></div>
 <div class="core-actions" style="margin:12px 0">
@@ -923,6 +925,9 @@ const refreshLocalAgent=async()=>{
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
+  $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
+   ?"GitHub read-only tool enabled. Only operator-allowed public repositories can be used; each plan still needs approval and a separate next-step click."
+   :"GitHub agent reads disabled. Start with --enable-agent-github-read and allow the repository under Public Source Permissions.";
   planStatus.textContent=agentPlanEnabled
    ?"Ready to propose a bounded read-only plan. Nothing is executed automatically."
    :"Task plans disabled. Start with --enable-local-agent --enable-agent-plans.";
@@ -1137,6 +1142,7 @@ const lockOperatorUI=message=>{
  $("agent-plan-goal").value="";
  planListOutput.textContent="Session locked; plan list hidden.";
  planStatus.textContent="Session locked; task plans unavailable.";
+ $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
  renderPlan(null);
  agentReadinessEnabled=false;
  agentModelsButton.disabled=true;agentProbeButton.disabled=true;
