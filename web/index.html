@@ -356,7 +356,9 @@ aas:timeline:urgent
 <button id="agent-plan-report-generate" type="button" class="primary" disabled>Generate final report</button>
 <button id="agent-plan-report-copy" type="button" class="secondary" disabled>Copy report</button>
 <button id="agent-plan-report-download" type="button" class="secondary" disabled>Download .md</button>
+<button id="agent-plan-report-export" type="button" class="secondary" disabled>Save .md into local workspace</button>
 </div>
+<pre id="agent-plan-export-result" class="trace" aria-label="Local artifact export status">No file saved to the local workspace.</pre>
 <pre id="agent-plan-report-display" class="trace" aria-label="Completed task final report">No report. Complete the plan before generating one.</pre>
 <div id="agent-plan-status" class="setup-msg" role="status" aria-live="polite">Plan execution is disabled by default.</div>
 <pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
@@ -1158,6 +1160,7 @@ const refreshLocalAgent=async()=>{
     :"Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.";
   refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
+  agentPlanArtifactsEnabled=agentPlanEnabled&&data.plan_artifact_export===true;
   agentPlanDocumentsEnabled=agentPlanEnabled&&data.plan_documents===true;
   agentPlanMultiDocumentsEnabled=agentPlanEnabled&&data.plan_multi_documents===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
@@ -1244,6 +1247,7 @@ localAgentSend.addEventListener("click",async()=>{
 
 // Slice 52: every effectful transition requires its own owner-authorized button.
 let agentPlanEnabled=false;
+let agentPlanArtifactsEnabled=false;
 let agentPlanDocumentsEnabled=false;
 let agentPlanMultiDocumentsEnabled=false;
 let agentPlanBusy=false;
@@ -1290,13 +1294,14 @@ const planTriageReport=$("agent-plan-triage-report");
 const planAnalysisReport=$("agent-plan-analysis-report");
 const planListOutput=$("agent-plan-list-output");
 const planReportDisplay=$("agent-plan-report-display");
+const planExportResult=$("agent-plan-export-result");
 let selectedPlanReportMarkdown="";
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
  "agent-plan-approve","agent-plan-next","agent-plan-run-remaining",
  "agent-plan-resume","agent-plan-cancel",
  "agent-plan-delete","agent-plan-report-generate","agent-plan-report-copy",
- "agent-plan-report-download"];
+ "agent-plan-report-download","agent-plan-report-export"];
 const buildPlanReportMarkdown=plan=>{
  const report=plan?.report;
  if(!plan||!report)return "";
@@ -1451,6 +1456,8 @@ const refreshPlanButtons=()=>{
     ||selectedPlan.report!==null;
  $("agent-plan-report-copy").disabled=!ready||!selectedPlanReportMarkdown;
  $("agent-plan-report-download").disabled=!ready||!selectedPlanReportMarkdown;
+ $("agent-plan-report-export").disabled=!ready||!agentPlanArtifactsEnabled||
+   !same||status!=="COMPLETED"||!selectedPlan?.report;
 };
 planIdInput.addEventListener("input",()=>{
  agentPlanRevision++;selectedPlan=null;
@@ -1459,6 +1466,7 @@ planIdInput.addEventListener("input",()=>{
  planAnalysisReport.textContent="No selected analysis report.";
  selectedPlanReportMarkdown="";
  planReportDisplay.textContent="No report for the selected plan.";
+ planExportResult.textContent="No file saved for the currently selected plan.";
  refreshPlanButtons();
 });
 const planRequest=async(path,body)=>{
@@ -1657,6 +1665,47 @@ $("agent-plan-report-download").addEventListener("click",()=>{
   planStatus.textContent="Markdown report download requested by owner. Check its claims.";
  }finally{URL.revokeObjectURL(url);}
 });
+// Slice 74: one separately approved write to a fixed server-owned directory.
+// No client path/body and no model-generated destination may be submitted.
+$("agent-plan-report-export").addEventListener("click",async()=>{
+ const pid=planIdInput.value.trim();
+ if(!operatorCsrf||!agentPlanEnabled||!agentPlanArtifactsEnabled||agentPlanBusy||
+    !selectedPlan||selectedPlan.plan_id!==pid||
+    selectedPlan.status!=="COMPLETED"||!selectedPlan.report)return;
+ const filename="local-agent-report-"+pid+".md";
+ if(!window.confirm("Save the existing reviewed report as PLAINTEXT on THIS PC?\n\n"+
+   "Home/.ai-automation-studio/exports/"+filename+
+   "\n\nNo overwrite, no provider calls or new tool execution. "+
+   "AI interpretations are NOT independently verified."))return;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;refreshPlanButtons();
+ planExportResult.textContent="Saving approved local artifact…";
+ try{
+  const response=await appFetch("/api/local-agent-plan-export",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({plan_id:pid})});
+  const result=await response.json();
+  if(!operatorCsrf||rev!==agentPlanRevision||planIdInput.value.trim()!==pid)return;
+  if(!response.ok)throw Error(result.error||"artifact_export_failed");
+  if(!["CREATED","EXISTS_IDENTICAL"].includes(result.status)||
+     result.filename!==filename||result.external_write_count!==0)
+   throw Error("unexpected_artifact_response");
+  planExportResult.textContent=result.status+" · "+result.relative_workspace+
+   "/"+result.filename+" · "+result.bytes+" bytes · SHA-256 "+result.sha256+
+   "\nPlaintext on this PC; review the factual accuracy of the report.";
+  planStatus.textContent="Local artifact "+(result.status==="CREATED"?"saved":"already exists unchanged")+
+   ". No network upload or model call.";
+ }catch(error){
+  if(operatorCsrf&&rev===agentPlanRevision){
+   planExportResult.textContent="No verified new artifact: "+error.message+
+    ". Inspect the local workspace before retrying.";
+   planStatus.textContent="Local artifact export rejected.";
+  }
+ }finally{
+  if(rev===agentPlanRevision){agentPlanBusy=false;refreshPlanButtons();}
+ }
+});
+
 // Slice 73: owner explicitly authorizes a server-owned, bounded run.
 // The local server continues while it is alive even if this browser closes.
 // Process restart is NEVER an automatic resume.
@@ -2164,6 +2213,7 @@ const lockOperatorUI=message=>{
  $("agent-plan-goal").value="";
  planListOutput.textContent="Session locked; plan list hidden.";
  planReportDisplay.textContent="Session locked; completed report hidden.";
+ planExportResult.textContent="Session locked; local artifact metadata hidden.";
  selectedPlanReportMarkdown="";
  planStatus.textContent="Session locked; task plans unavailable.";
  $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
