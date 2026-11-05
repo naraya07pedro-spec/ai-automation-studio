@@ -6,6 +6,7 @@ Synthetic data only; no third-party hosts or provider connectors.
 """
 import os
 import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
