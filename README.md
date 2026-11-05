@@ -139,6 +139,23 @@ To test the actual device, start `python app/local_server.py --enable-local-agen
 
 GitHub CI uses injected errors/model fixtures and does **not** establish a genuine Windows Ollama pass. See [the diagnostic code matrix and real device acceptance rules](docs/REAL_LOCAL_MODEL_ACCEPTANCE_UI_V1.md).
 
+## One-click Windows host prerequisites and optional live model evidence (Slice 61)
+
+AI Automation Studio now distinguishes a safe **read-only preflight** from actual Ollama inference. This is useful before trying to run local models on constrained Windows hardware: the preflight checks only fixed-localhost Ollama model names and current system RAM, without loading model weights, scanning files, downloading models or modifying anything.
+
+```powershell
+python app/local_windows_preflight.py
+python app/local_windows_preflight.py --model YOUR_INSTALLED_MODEL
+```
+
+The preflight reports whether Ollama is reachable, models are installed, the requested model exists, and how much **system-wide** RAM is currently available. It does **not** prove the model can run. The **explicit** one-request genuine Ollama source-citation challenge is:
+
+```powershell
+python app/local_windows_preflight.py --model YOUR_INSTALLED_MODEL --run-smoke
+```
+
+Alternatively, start `python app/local_server.py --enable-local-agent --enable-multi-documents`, authenticate at `http://127.0.0.1:8765`, then click **Check Windows & Ollama readiness (no inference)**. The existing **Run real Ollama acceptance on this PC** button is separate and actually invokes Ollama only when clicked. Missing models, unreachable API, low memory warnings and real model failures are kept distinct. **CI mocks do not count as successful Windows-device acceptance.** [Read the complete operator preflight guide](docs/WINDOWS_OLLAMA_PREFLIGHT_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.
