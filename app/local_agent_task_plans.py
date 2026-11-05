@@ -303,12 +303,16 @@ class LocalAgentPlanStore:
                         step["args"]["repo"], old["approval_epoch"])
                 else:
                     output = execute_tool(step["tool"], step["args"])
-            except Exception:
+            except Exception as exc:
                 with self.lock, self.db:
                     self.db.execute("""UPDATE agent_task_plans
                         SET status='BLOCKED' WHERE plan_id=? AND status='IN_FLIGHT'""",
                         (plan_id,))
-                raise PlanError("plan_step_failed") from None
+                # Do not swallow an Ollama timeout: HTTP must latch uncertain
+                # backend execution even though this durable step is blocked.
+                raise PlanError(
+                    "local_model_timeout" if str(exc) == "local_model_timeout"
+                    else "plan_step_failed") from None
             with self.lock, self.db:
                 results = old["results"] + [{"tool": step["tool"], "output": output}]
                 new_index = index + 1
