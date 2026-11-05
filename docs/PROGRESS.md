@@ -1467,3 +1467,20 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **7/7 GitHub CI jobs passed on that PR head:** complete Python suites on Python 3.11/3.12/3.13, Chromium real-browser acceptance (including opt-in save/view/delete), both actual public GitHub read-only jobs, and disposable Windows PowerShell ACL diagnostic.
 - **Functional delivery:** opt-in SQLite conversation continuity and explicit deletion, capped at six saved turns; default stateless; separate agent-history flag and per-turn consent. Authenticated browser and API; old workflow core and tool permissions unchanged.
 - **Limits remain:** only local plaintext single-owner short conversation memory; no real Ollama model E2E in CI, no OS-level encryption or secure forensic deletion, no multiuser or full semantic long-term memory, no autonomous externally effectful tools. This progress completion update is documentation-only.
+
+
+## Slice 50 · 2026-11-05 · Isolated agent conversations and safe legacy migration
+
+**Product goal:** advance the real, optional Ollama-backed **open-source local agent**, not SaaS monetization or more synthetic templates. Slice 49 stored one global shared six-turn context; this caused accidental mixing between unrelated tasks. Slice 50 adds selected per-conversation isolation without making unsupported multiuser/security claims.
+
+**Changes in `feat/isolated-agent-conversations-slice-50`:**
+- `app/local_agent_conversation.py`: in-place non-destructive SQLite migration of Slice 49 records into `conversation_id='default'`; bounded 8 saved thread IDs and 6 recent pairs *per thread*; deterministic list, snapshot, append and selected deletion, with legacy clear-all preserved for callers.
+- `app/local_server.py`: authenticated list endpoint and ID-scoped GET history; owner-CSRF protected selected delete; `remember:true` + validated optional ID for replay and persist; fail-closed invalid ID/model mismatch/capacity checks before invoking an AI model.
+- `web/index.html`: list/enter conversation ID, request selected history, save in selected conversation, delete only selected conversation, hide saved identities and messages on logout, reject late responses after ID switch.
+- `tests/test_local_agent_thread_isolation.py`: tests for original schema migration and restart, no cross-thread replay, per-thread bounds, capacity gate, selected deletion, invalid identifiers, authentication/CSRF and backwards compatibility.
+- `tests_browser/test_real_browser.py`: additional real Chromium UI scenario using deterministic model fixture for two distinct conversation IDs and deletion isolation.
+- `docs/LOCAL_AGENT_CONVERSATION_ISOLATION_V1.md`: upgrade and API contract, explicit risk and local-only scope.
+
+**Verification gate:** require all exact-head GitHub checks (Python 3.11/3.12/3.13, Chromium, two actual public GitHub read-only jobs, Windows ACL fixture) to pass before merge. No installed Ollama model E2E or real external action is demonstrated by CI.
+
+**Scope boundaries:** single-owner plaintext local SQLite, no secure erase, no durable in-flight job queue, no multi-user ID separation, no autonomous business writes. Recommended next high-value validation: real model smoke on Windows and permissioned task execution rather than more mock-only orchestration.
