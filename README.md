@@ -78,6 +78,18 @@ After owner login and granting the exact repository under **Public Source Permis
 
 CI validates this using injected fake model/provider fixtures, not a real installed Ollama model on your Windows computer. [Read the source/citation verification and limits](docs/LOCAL_GITHUB_ISSUE_ANALYSIS_V1.md).
 
+## Ask about an operator-selected local text file (Slice 56)
+
+Beyond GitHub, AI Automation Studio now supports **explicitly selected local UTF-8 `.txt` and `.md` files** for evidence-linked local Ollama Q&A. This feature is separate from persistent agent plans and does **not** scan the PC or save document contents to the app's SQLite history.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-local-documents
+```
+
+After owner login at `http://127.0.0.1:8765`, enter your installed local model name, choose a text/Markdown file of up to **6 KB**, and ask a question. The model's answer must include **exact quotes from numbered source chunks** that the server validates as verbatim substrings. If the quote doesn't exist, the response is rejected. The model's *interpretation* is still unverified, even when the quote matches exactly. Only the selected file's text is sent to the local Ollama endpoint; no cloud model, filesystem scanning, or external writes are enabled.
+
+This is not PDF support or full-document RAG. GitHub CI uses fake Ollama inference; **a real model and Windows hardware acceptance are still outstanding**. [Read the selected document scope and security/evidence contract](docs/LOCAL_DOCUMENT_ANALYSIS_V1.md).
+
 ## Run the demo
 
 Requires Python 3.11+ with SQLite available. No external provider credentials or API billing. Starting the server creates a local database at `~/.ai-automation-studio/local-workflows.sqlite3` for rule workflows and pseudonymous event history; it does not persist the five mock example runs.
