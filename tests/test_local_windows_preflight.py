@@ -115,6 +115,17 @@ class WindowsHostPreflightTests(unittest.TestCase):
         self.assertIn("number or time",result["next_action"])
         self.assertNotEqual("local_model_unavailable",result["error"])
 
+    def test_uncertain_connection_loss_has_safe_actionable_diagnostic(self):
+        def interrupted(model):
+            raise LocalDocumentError("local_model_transport_uncertain")
+        result=diagnose("fixture:model",run_smoke=True,
+                        catalog=lambda:["fixture:model"],memory=lambda:RAM,
+                        system="Windows",live_smoke=interrupted)
+        self.assertEqual("DEVICE_SMOKE_BLOCKED",result["status"])
+        self.assertEqual("local_model_transport_uncertain",result["error"])
+        self.assertIn("Inspect the backend",result["next_action"])
+        self.assertNotEqual("REAL_DEVICE_SMOKE_PASSED",result["status"])
+
     def test_cli_without_run_smoke_never_invokes_model(self):
         import local_windows_preflight as pre
         with patch.object(pre,"preflight",return_value={
