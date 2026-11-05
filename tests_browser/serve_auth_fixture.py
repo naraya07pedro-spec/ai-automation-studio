@@ -5,6 +5,7 @@ it requires offline one-time owner provisioning.
 """
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+import json
 import sys
 import tempfile
 
@@ -24,6 +25,7 @@ from local_multi_document_analysis import analyze_multiple_documents
 from local_multi_doc_smoke import smoke as device_smoke
 from local_windows_preflight import preflight as device_preflight
 from local_agent_issue_analysis import analyze_public_issue_metadata
+from local_agent_plan_reports import generate_completed_plan_report
 from local_server import create_handler
 
 
@@ -58,9 +60,20 @@ def main():
             reader, repo, epoch, model, goal,
             transport=fixture_analysis_transport)
 
+    def fixture_final_report(plan):
+        # Explicit CI-only model fixture: quote must appear in a real stored
+        # tool result. No Ollama backend is contacted.
+        quote = plan["results"][0]["output"][:48]
+        return generate_completed_plan_report(
+            plan, transport=lambda _:{"message":{"content":json.dumps({
+                "summary":"The saved read-only steps finished. Interpretations are unverified.",
+                "findings":[{"step_index":1,"quote":quote,
+                             "interpretation":"This is a saved tool-output excerpt."}]
+            })}})
     plans = LocalAgentPlanStore(":memory:",github_reader=github_reader,
                                 issue_analyzer=fixture_issue_analyzer,
-                                memory_store=memory_cards)
+                                memory_store=memory_cards,
+                                report_generator=fixture_final_report)
     def fixture_planner(goal, model, memory_context=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
