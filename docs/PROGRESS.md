@@ -1493,3 +1493,22 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - `README.md` was updated on `main` in documentation-only commit `ef077650fe77df69096e330e0e46796044d5083b` to reflect the actual Ollama-backed agent CLI/browser, current quick start, open-source intent and known security/inference limitations.
 - **Honest validation boundary:** all CI model/browser interactions use isolated synthetic transport fixtures; a real installed Ollama model, its weights and hardware compatibility on Windows remain **unverified**. This local plaintext single-owner context ledger is not long-term semantic memory, secure erasure, multi-user segregation or durable background task execution.
 - **Next high-value slice:** real Ollama model + Windows hardware acceptance and practical agent job planning/permissions, rather than unverified autonomous claims.
+
+
+## Slice 51 · 2026-11-05 · Real local Ollama model discovery and opt-in tool-calling readiness
+
+**Reason:** Stages 47–50 delivered an opt-in Ollama agent, authenticated browser controls and isolated plaintext conversations, but no **actual installed Ollama model/hardware** acceptance. This slice adds a manually triggered runtime acceptance path and rejects HTTP redirects, rather than incorrectly treating fake CI transport as real-model proof. Project remains open-source, local-first, **not SaaS**.
+
+**Implemented on `feat/real-ollama-readiness-slice-51`:**
+- `app/local_ollama_readiness.py`: real fixed-loopback `GET /api/tags` discovery with bounded catalog/response, filtered model names, and a one-shot explicit `POST /api/chat` compatibility probe through the existing read-only agent tool engine (a synthetic 7 × 8 calculator request). CLI commands for a user's real local machine. `MODEL_RESPONDED` + `tool_calling=OBSERVED` means an actual calculator tool execution was observed; `NOT_OBSERVED` means text inference alone did not prove the tool protocol. No chat history persisted.
+- `app/local_ollama_agent.py`: shared model name validator (safe namespaced installed Ollama names supported); reject redirects and bypass environment proxies for `/api/chat` as for the catalog. No new agent permissions.
+- `app/local_server.py`: auth-gated installed-model discovery and CSRF-protected opt-in model probe endpoints, disabled unless explicitly enabled with local agent flag; probe shares the existing single-in-flight AI execution gate and never reads conversation history.
+- `web/index.html`: beginner-friendly Find installed Ollama models and Test local model & tool calling buttons; meaningful 'reachable / model responded / tool call observed or not observed' results, no false 'ready' success for text-only outputs; sensitive status hidden on lock.
+- `tests/test_local_ollama_readiness.py`: deterministic catalog and protocol unit tests plus actual disposable HTTP loopback redirect/body-limit tests; no Ollama weights installed in CI.
+- `tests/test_local_agent_readiness_http.py`: owner, origin, CSRF, default-deny, validation and concurrency HTTP tests.
+- `tests_browser`: isolated fake catalog/probe fixture and real Chromium UI interaction test.
+- `README.md` and `docs/REAL_OLLAMA_READINESS_V1.md`: CLI/UI usage, model-readiness evidence semantics, Windows constraints, privacy and remaining work.
+
+**Verification status at first report:** exact PR-head GitHub Actions pending. Require all Python 3.11/3.12/3.13, Chromium, two real GitHub read-only checks and Windows PowerShell fixture green before merge. CI only proves code/protocol handling, not actual installed Ollama inference; the user must run the manual probe on their own computer for that claim.
+
+**Outstanding:** installed real Ollama model E2E on the user's Windows PC, hardware compatibility measurements, durable agent job queue, user-approved real-world tool effects and cross-process isolation. Do not call this a general autonomous agent or a production SaaS.

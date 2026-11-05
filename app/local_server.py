@@ -21,6 +21,7 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
+from local_ollama_readiness import installed_models, probe_model
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
                                       valid_conversation_id, DEFAULT_CONVERSATION)
 
@@ -49,7 +50,8 @@ _REQUIRED = ["service_requested", "budget_range", "timeline"]
 
 def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock=None,
                    operator_auth=None, source_policy=None, security_audit=None,
-                   local_agent_runner=None, agent_conversation=None):
+                   local_agent_runner=None, agent_conversation=None,
+                   local_agent_models=None, local_agent_probe=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -177,7 +179,22 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 self._send(200, {"enabled": local_agent_runner is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
-                                 "persisted": agent_conversation is not None})
+                                 "persisted": agent_conversation is not None,
+                                 "readiness": (local_agent_models is not None
+                                               and local_agent_probe is not None)})
+                return
+            if route.path == "/api/local-agent-models" and not route.query:
+                if local_agent_runner is None or local_agent_models is None:
+                    self._send(403, {"error": "local_agent_probe_disabled"})
+                    return
+                try:
+                    models = local_agent_models()
+                    self._send(200, {"status": "OLLAMA_REACHABLE", "models": models,
+                                     "external_dispatch_count": 0})
+                except AgentError as exc:
+                    self._send(503, {"error": str(exc)})
+                except Exception:
+                    self._send(503, {"error": "local_model_unavailable"})
                 return
             if route.path in ("/api/local-agent-history",
                               "/api/local-agent-conversations"):
@@ -275,7 +292,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/operator-rotate", "/api/local-github-source-grant",
                                  "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
-                                 "/api/local-agent-run", "/api/local-agent-clear"):
+                                 "/api/local-agent-run", "/api/local-agent-clear",
+                                 "/api/local-agent-probe"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -306,6 +324,34 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/local-agent-probe":
+                if local_agent_runner is None or local_agent_probe is None:
+                    self._send(403, {"error": "local_agent_probe_disabled"})
+                    return
+                if type(data) is not dict or set(data) != {"model"} or type(data["model"]) is not str:
+                    self._send(422, {"error": "invalid_probe_request"})
+                    return
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return
+                try:
+                    try:
+                        result = local_agent_probe(data["model"])
+                        if (type(result) is not dict
+                                or result.get("status") != "MODEL_RESPONDED"
+                                or result.get("external_dispatch_count") != 0):
+                            self._send(502, {"error": "invalid_model_probe_result"})
+                        else:
+                            self._send(200, result)
+                    except AgentError as exc:
+                        code = (422 if str(exc).startswith("invalid_") else
+                                409 if str(exc) == "model_not_installed" else 503)
+                        self._send(code, {"error": str(exc)})
+                    except Exception:
+                        self._send(503, {"error": "local_model_probe_failed"})
+                finally:
+                    agent_gate.release()
                 return
             if self.path == "/api/local-agent-clear":
                 if local_agent_runner is None or agent_conversation is None:
@@ -621,7 +667,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             create_handler(local_core=core, operator_auth=operator,
                            source_policy=source_policy, security_audit=audit,
                            local_agent_runner=run_agent if enable_local_agent else None,
-                           agent_conversation=conversation))
+                           agent_conversation=conversation,
+                           local_agent_models=installed_models if enable_local_agent else None,
+                           local_agent_probe=probe_model if enable_local_agent else None))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         try:
             server.serve_forever()
