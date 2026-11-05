@@ -779,9 +779,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 kwargs["document_context"] = source_metadata
                             proposal = local_agent_planner(
                                 data["goal"], data["model"], **kwargs)
+                            # The plan store independently validates the exact
+                            # owner-supplied two-field source. The transport's
+                            # enriched (hashed) metadata must not be passed as
+                            # though it were the raw input contract.
                             outcome = local_agent_plan_store.create(
                                 proposal, memory_refs=refs,
-                                document_snapshot=source_snapshot)
+                                document_snapshot=(data["document"]
+                                                   if source_snapshot is not None
+                                                   else None))
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
