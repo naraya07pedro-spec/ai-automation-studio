@@ -100,6 +100,14 @@ HANDOFF_PLANNING_ADDENDUM = (
     'github_issue_triage). Other allowed triage fields are '
     'returned_count and unassessed_count. Step references are ONE-BASED '
     'and MUST point strictly backward within this same short plan. '
+    'If the owner attached a CSV and an EARLIER local_csv_profile step '
+    'explicitly selected the column, a LATER calculate operand can reference '
+    '{"from_step":1,"field":"row_count"} for total data rows, or '
+    '{"from_step":1,"field":"column_sum","column":"revenue"} for '
+    'a numeric column sum. Other exact column fields are '
+    'column_nonempty_count, column_missing_count, column_distinct_count. '
+    'Only a column already selected by the earlier reviewed profile step '
+    'may be referenced. CSV contents are NEVER inserted in the planner prompt. '
     'Do not reference document answers, arbitrary JSON paths or '
     'free-form model text. These are read-only typed numbers; each '
     'step STILL requires explicit owner approval/click. '
@@ -583,7 +591,8 @@ class LocalAgentPlanStore:
                 or len(results) != row[4]):
             raise PlanError("plan_storage_invalid")
         try:
-            handoffs = validate_handoff_history(handoffs, steps, results)
+            handoffs = validate_handoff_history(
+                handoffs, steps, results, csv_snapshot=selected_csv)
         except (HandoffError, IndexError, KeyError, TypeError):
             raise PlanError("plan_storage_invalid") from None
         return {"plan_id": plan_id, "model": row[0], "goal": row[1],
@@ -769,8 +778,20 @@ class LocalAgentPlanStore:
                 handoff_entry = None
                 if step["tool"] == "calculate":
                     try:
+                        if (any(
+                                old["steps"][ref["from_step"] - 1]["tool"]
+                                    == CSV_PROFILE_TOOL
+                                for item in (step["args"]["a"], step["args"]["b"])
+                                if type(item) is dict
+                                for ref in (item,))):
+                            if self.csv_profiler is None:
+                                raise PlanError("plan_csv_unavailable")
+                            csv_handoff_source = self._stored_csv(plan_id)
+                        else:
+                            csv_handoff_source = None
                         concrete_args, handoff_entry = resolve_calculator_handoffs(
-                            step, old["steps"][:index], old["results"])
+                            step, old["steps"][:index], old["results"],
+                            csv_snapshot=csv_handoff_source)
                     except HandoffError:
                         # Missing, tampered or unrepresentable numeric evidence
                         # never starts a new step or consumes an approval.
