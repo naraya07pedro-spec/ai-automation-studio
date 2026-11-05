@@ -338,6 +338,21 @@ aas:timeline:urgent
 <div id="local-document-status" class="setup-msg" role="status" aria-live="polite">Local document analysis disabled. Start with --enable-local-agent --enable-local-documents.</div>
 <pre id="local-document-result" class="trace" aria-label="Verified document citations and local AI answer">No document analyzed yet.</pre>
 </section>
+<section class="panel" id="local-multidoc-panel" aria-label="Selected multi-document research" style="margin:22px 0">
+<div class="kicker">MULTIPLE LOCAL DOCUMENTS · EXPLICIT SELECTION</div>
+<h2>Ask across 2–3 selected documents</h2>
+<p class="muted">Choose two or three UTF-8 .txt/.md files, each up to 2,500 bytes and 6,000 bytes total. The server selects up to five short passages by matching question words; only those passages are sent to local Ollama. No folders are scanned, indexed, or saved.</p>
+<div class="field"><label for="local-multidoc-files">Selected source documents (2–3)</label>
+<input id="local-multidoc-files" type="file" accept=".txt,.md,text/plain,text/markdown" multiple disabled></div>
+<div class="field"><label for="local-multidoc-question">Question about the selected documents</label>
+<textarea id="local-multidoc-question" maxlength="500" rows="3" style="width:100%;min-height:85px;background:#0b131f;color:#f2f6fd;border:1px solid #344357;border-radius:10px;padding:12px;font:inherit" placeholder="Which document mentions the workshop time?"></textarea></div>
+<div class="core-actions">
+<button id="local-multidoc-analyze" type="button" class="primary" disabled>Analyze selected documents locally</button>
+<button id="local-multidoc-reset" type="button" class="secondary">Clear documents and answer</button>
+</div>
+<div id="local-multidoc-status" class="setup-msg" role="status" aria-live="polite">Disabled. Start with --enable-local-agent --enable-multi-documents.</div>
+<pre id="local-multidoc-result" class="trace" aria-label="Multi-document evidence and local answer">No multi-document answer yet.</pre>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -942,6 +957,12 @@ const refreshLocalAgent=async()=>{
   if(revision!==localAgentRevision||!operatorCsrf)return;
   localAgentEnabled=response.ok&&data.enabled===true;
   localDocumentsEnabled=localAgentEnabled&&data.documents===true;
+  multiDocumentsEnabled=localAgentEnabled&&data.multi_documents===true;
+  multiFiles.disabled=!multiDocumentsEnabled;
+  multiStatus.textContent=multiDocumentsEnabled
+    ?"Ready. Choose 2–3 distinct UTF-8 text files."
+    :"Disabled. Start with --enable-local-agent --enable-multi-documents.";
+  refreshMultiButton();
   documentFile.disabled=!localDocumentsEnabled;
   documentStatus.textContent=localDocumentsEnabled
     ?"Ready. Select a UTF-8 .txt or .md file, then ask a question."
@@ -1284,6 +1305,103 @@ documentAnalyze.addEventListener("click",async()=>{
  }
 });
 
+
+// Slice 57: transient, bounded lexical retrieval across ONLY user-selected files.
+let multiDocumentsEnabled=false;
+let multiDocumentsBusy=false;
+let multiDocumentsRevision=0;
+const multiFiles=$("local-multidoc-files");
+const multiQuestion=$("local-multidoc-question");
+const multiButton=$("local-multidoc-analyze");
+const multiStatus=$("local-multidoc-status");
+const multiResult=$("local-multidoc-result");
+const refreshMultiButton=()=>{
+ multiButton.disabled=!multiDocumentsEnabled||!operatorCsrf||multiDocumentsBusy
+  ||!multiQuestion.value.trim()||multiFiles.files?.length<2
+  ||multiFiles.files?.length>3;
+};
+const invalidateMulti=()=>{
+ multiDocumentsRevision++;
+ multiResult.textContent="No answer for this selection.";
+ refreshMultiButton();
+};
+multiFiles.addEventListener("change",invalidateMulti);
+multiQuestion.addEventListener("input",invalidateMulti);
+$("local-agent-model").addEventListener("input",invalidateMulti);
+$("local-multidoc-reset").addEventListener("click",()=>{
+ multiDocumentsRevision++;
+ multiFiles.value="";
+ multiQuestion.value="";
+ multiResult.textContent="No multi-document answer yet.";
+ multiStatus.textContent="Selected files, question and answer cleared.";
+ refreshMultiButton();
+});
+multiButton.addEventListener("click",async()=>{
+ if(!multiDocumentsEnabled||multiDocumentsBusy||!operatorCsrf)return;
+ const files=Array.from(multiFiles.files||[]);
+ const model=$("local-agent-model").value.trim();
+ const question=multiQuestion.value.trim();
+ if(files.length<2||files.length>3||!question||!model){
+  multiStatus.textContent="Select 2–3 files, enter a question and select your installed model above.";
+  return;
+ }
+ const seen=new Set();
+ let total=0;
+ for(const file of files){
+  const name=file.name;
+  if(!/^[\w.() -]{1,80}\.(txt|md)$/i.test(name)
+     ||seen.has(name.toLowerCase())||file.size===0||file.size>2500){
+   multiStatus.textContent="Only 2–3 distinct nonempty .txt/.md files, max 2,500 bytes each.";
+   return;
+  }
+  seen.add(name.toLowerCase());
+  total+=file.size;
+ }
+ if(total>6000){multiStatus.textContent="Selected files exceed the 6,000-byte total.";return;}
+ const revision=++multiDocumentsRevision;
+ multiDocumentsBusy=true;refreshMultiButton();
+ multiStatus.textContent="Reading only selected files in your browser…";
+ try{
+  const documents=[];
+  for(const file of files){
+   const content=new TextDecoder("utf-8",{fatal:true}).decode(await file.arrayBuffer());
+   if(revision!==multiDocumentsRevision||!operatorCsrf)return;
+   documents.push({filename:file.name,content});
+  }
+  const payload=JSON.stringify({documents,question,model});
+  if(new TextEncoder().encode(payload).length>8192)
+   throw Error("JSON request too large. Use shorter selected files.");
+  multiStatus.textContent="Local retrieval and model inference in progress…";
+  const response=await appFetch("/api/local-agent-multi-document-analyze",{
+   method:"POST",headers:{"Content-Type":"application/json"},body:payload});
+  const result=await response.json();
+  if(revision!==multiDocumentsRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(result.error||"multi_document_failed");
+  const lines=[
+   "Source files: "+(result.selected_files||[]).join(", "),
+   "Retrieval: "+result.retrieval+"; selected passages: "+result.selected_passages,
+   "Local model calls: "+result.model_calls,
+   "Answer (interpretation NOT independently verified): "+result.answer,
+   "Insufficient evidence: "+(result.insufficient_evidence?"yes":"no"),
+   "Exact source quotes:"
+  ];
+  for(const c of result.citations||[]){
+   lines.push(c.filename+" ["+c.chunk_id+"] chars "+
+     c.start_char+"–"+c.end_char+": "+c.quote);
+  }
+  lines.push("No application document history or external writes.");
+  multiResult.textContent=lines.join("\n");
+  multiStatus.textContent="Done. "+(result.citations||[]).length+
+   " quote(s) verified in explicitly selected files.";
+ }catch(error){
+  if(revision===multiDocumentsRevision&&operatorCsrf)
+   multiStatus.textContent="Analysis blocked: "+error.message;
+ }finally{
+  multiDocumentsBusy=false;
+  refreshMultiButton();
+ }
+});
+
 const operatorReady=()=>{
  $("operator-gate").style.display="none";
  $("operator-password").value="";
@@ -1296,6 +1414,15 @@ const operatorReady=()=>{
 };
 const lockOperatorUI=message=>{
  operatorCsrf=null;
+ multiDocumentsEnabled=false;
+ multiDocumentsBusy=false;
+ multiDocumentsRevision++;
+ multiFiles.value="";
+ multiFiles.disabled=true;
+ multiQuestion.value="";
+ multiResult.textContent="Session locked; documents and answer cleared.";
+ multiStatus.textContent="Session locked; multi-document analysis disabled.";
+ refreshMultiButton();
  localDocumentsEnabled=false;
  documentBusy=false;
  documentRevision++;
