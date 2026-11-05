@@ -412,6 +412,56 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-cancel").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text("CANCELLED")
 
+    def test_owner_reviewed_multi_document_comparison_to_final_report(self):
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        self.page.locator("#agent-plan-goal").fill(
+            "Compare the selected runbook and project meeting notes")
+        files = [
+            {"name":"fixture-runbook.txt","mimeType":"text/plain",
+             "buffer":b"Operations runbook: onboarding completed at 16:00 WIB.\n"},
+            {"name":"fixture-meeting.md","mimeType":"text/markdown",
+             "buffer":b"Project briefing: review meeting starts at 18:30 WIB on Monday.\n"}
+        ]
+        picker=self.page.locator("#agent-plan-multi-files")
+        expect(picker).to_be_enabled()
+        picker.set_input_files(files)
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "Explicit comparison-file storage consent is required")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "No selected plan")
+
+        self.page.locator("#agent-plan-multi-consent").check()
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("PREPARED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "fixture-runbook.txt")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "fixture-meeting.md")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "local_multi_document_question")
+        self.assertNotIn("review meeting starts at 18:30 WIB",
+                         self.page.locator("#agent-plan-details").inner_text())
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("APPROVED")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text("COMPLETED")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "fixture-meeting.md")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "meeting starts at 18:30 WIB")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "verified_exact_match")
+        self.page.locator("#agent-plan-report-generate").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "# Local Agent Task Deliverable")
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "AI interpretation verified: NO")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#agent-plan-report-display")).to_contain_text(
+            "Session locked")
+
     def test_owner_selected_text_file_becomes_approved_cited_plan_step(self):
         from pathlib import Path
         file_input=self.page.locator("#agent-plan-document-file")

@@ -27,7 +27,8 @@ from local_multi_document_analysis import (analyze_multiple_documents,
                                            validate_multiple_documents)
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
-                                    document_source_metadata)
+                                    document_source_metadata, validated_document_set_snapshot,
+                                    document_set_source_metadata)
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
@@ -297,6 +298,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                     and local_agent_plan_store is not None
                                                     and local_document_analyzer is not None
                                                     and local_agent_plan_store.document_analyzer is not None),
+                                 "plan_multi_documents": (
+                                     local_agent_planner is not None
+                                     and local_agent_plan_store is not None
+                                     and local_multi_document_analyzer is not None
+                                     and local_agent_plan_store.multi_document_analyzer is not None),
                                  "plan_memory": (local_agent_planner is not None
                                                  and local_agent_plan_store is not None
                                                  and agent_memory_store is not None),
@@ -726,7 +732,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     (creating and (
                         not {"goal", "model"}.issubset(set(data))
                         or not set(data).issubset(
-                            {"goal", "model", "memory_ids", "document"})
+                            {"goal", "model", "memory_ids", "document", "documents"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
@@ -743,6 +749,25 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         return
                 source_snapshot = None
                 source_metadata = None
+                source_set_snapshot = None
+                source_set_metadata = None
+                if creating and "documents" in data and "document" in data:
+                    self._send(422, {"error": "invalid_plan_document_selection"})
+                    return
+                if creating and "documents" in data:
+                    if (local_multi_document_analyzer is None
+                            or local_agent_plan_store.multi_document_analyzer is None):
+                        self._send(403, {"error": "plan_multi_documents_disabled"})
+                        return
+                    try:
+                        source_set_snapshot = validated_document_set_snapshot(
+                            data["documents"], data["model"])
+                        source_set_metadata = [
+                            {k: item[k] for k in ("filename", "source_bytes", "sha256")}
+                            for item in document_set_source_metadata(source_set_snapshot)]
+                    except PlanError as exc:
+                        self._send(422, {"error": str(exc)})
+                        return
                 if creating and "document" in data:
                     if (local_document_analyzer is None
                             or local_agent_plan_store.document_analyzer is None):
@@ -777,6 +802,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                          "digest": c["digest"]} for c in cards]
                             if source_metadata is not None:
                                 kwargs["document_context"] = source_metadata
+                            if source_set_metadata is not None:
+                                kwargs["document_set_context"] = source_set_metadata
                             proposal = local_agent_planner(
                                 data["goal"], data["model"], **kwargs)
                             # The plan store independently validates the exact
@@ -787,7 +814,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 proposal, memory_refs=refs,
                                 document_snapshot=(data["document"]
                                                    if source_snapshot is not None
-                                                   else None))
+                                                   else None),
+                                document_set_snapshot=(data["documents"]
+                                                       if source_set_snapshot is not None
+                                                       else None))
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
@@ -1202,7 +1232,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             home / "agent-task-plans.sqlite3", github_reader=reader,
             memory_store=memory_store,
             document_analyzer=(analyze_local_document
-                               if enable_local_documents else None))
+                               if enable_local_documents else None),
+            multi_document_analyzer=(analyze_multiple_documents
+                                     if enable_multi_documents else None))
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
@@ -1217,11 +1249,13 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_models=installed_models if enable_local_agent else None,
                            local_agent_probe=probe_model if enable_local_agent else None,
                            local_agent_planner=(
-                               (lambda goal, model, memory_context=None, document_context=None:
+                               (lambda goal, model, memory_context=None, document_context=None,
+                                       document_set_context=None:
                                 propose_readonly_plan(
                                    goal, model, allow_github=enable_agent_github_read,
                                    memory_context=memory_context,
-                                   document_context=document_context))
+                                   document_context=document_context,
+                                   document_set_context=document_set_context))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_document_analyzer=(
