@@ -13,6 +13,9 @@ MAX_QUESTION = 500
 MAX_ANSWER = 1200
 MAX_QUOTE = 180
 MAX_CITATIONS = 4
+# Numbers in model answers require the same literal numeric token in a verified quote.
+# This does not prove semantic entailment or validate unquoted non-numeric claims.
+_NUMERIC_TOKEN = re.compile(r"(?<!\w)[+\-\u2212]?\d+(?:[.,:/-]\d+)*(?:[%\u00b0])?(?!\w)")
 CHUNK_CHARS = 650
 NAME_PATTERN = re.compile(r"[\w.() -]{1,80}\.(txt|md)\Z", re.ASCII | re.IGNORECASE)
 
@@ -28,6 +31,8 @@ SYSTEM = (
     "If the answer is not supported by the text, respond with exactly: "
     "{\"answer\":\"Insufficient evidence in the selected document.\","
     "\"insufficient_evidence\":true,\"citations\":[]}. "
+    "If the answer uses a number, date, time or percentage, include the exact "
+    "same numeric form in a cited verbatim quote; otherwise abstain. "
     "A citation proves the quoted text is in the document, not that your "
     "interpretation is correct. Answer in the same language as the question."
 )
@@ -53,6 +58,19 @@ def validate_document(filename, content, question, model):
     if ("\x00" in content or
             any(ord(ch) < 32 and ch not in "\n\r\t" for ch in content)):
         raise LocalDocumentError("invalid_local_document_text")
+
+
+def unsupported_numeric_claims(answer, quotes):
+    """Fail closed on unsupported literal numbers/times, without guessing semantics.
+
+    Compare full numeric tokens, not substrings: 9 must not match 19 or 09:00.
+    Exact formatting is deliberately required, even for equivalent date formats.
+    """
+    answer_tokens = set(_NUMERIC_TOKEN.findall(answer))
+    cited_tokens = set()
+    for quote in quotes:
+        cited_tokens.update(_NUMERIC_TOKEN.findall(quote))
+    return bool(answer_tokens - cited_tokens)
 
 
 def source_chunks(content):
@@ -127,6 +145,9 @@ def analyze_local_document(filename, content, question, model, transport=None):
             "end_char": start + len(citation["quote"]),
             "verified_exact_match": True,
         })
+    if not result["insufficient_evidence"] and unsupported_numeric_claims(
+            result["answer"], [c["quote"] for c in verified]):
+        raise LocalDocumentError("document_numeric_evidence_missing")
     return {
         "status": "DOCUMENT_ANALYZED_LOCAL",
         "filename": filename,
