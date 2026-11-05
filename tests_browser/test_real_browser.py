@@ -132,6 +132,24 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             "No unresolved local timeout")
         expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
 
+    def test_uncertain_connection_loss_shows_quarantine_and_needs_owner_ack(self):
+        self.page.locator("#local-agent-model").fill("fixture:disconnect")
+        expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
+        self.page.locator("#device-acceptance-run").click()
+        expect(self.page.locator("#device-acceptance-status")).to_contain_text(
+            "Acceptance BLOCKED: local_model_transport_uncertain")
+        expect(self.page.locator("#device-acceptance-result")).to_contain_text(
+            "connection was interrupted")
+        expect(self.page.locator("#local-timeout-state")).to_contain_text("QUARANTINED")
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
+        expect(self.page.locator("#local-timeout-ack")).to_be_enabled()
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator("#local-timeout-ack").click()
+        expect(self.page.locator("#local-timeout-state")).to_contain_text(
+            "No unresolved local timeout")
+        expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
+
     def test_device_acceptance_fixture_is_not_misrepresented_as_real_ollama(self):
         expect(self.page.locator("#device-acceptance-run")).to_be_disabled()
         self.page.locator("#local-agent-model").fill("fixture:model")
