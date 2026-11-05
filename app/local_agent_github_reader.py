@@ -14,7 +14,6 @@ MAX_ISSUES = 15
 MAX_TITLE = 160
 MAX_LABELS = 5
 MAX_LABEL = 40
-_SAFE_TEXT = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class GitHubPlanReadError(Exception):
