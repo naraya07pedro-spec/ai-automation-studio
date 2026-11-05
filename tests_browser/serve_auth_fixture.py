@@ -88,9 +88,15 @@ def main():
             assert csv_context["columns"] == ["revenue", "stage"]
             assert csv_context["row_count"] == 3
             assert "SYNTHETIC_PERSON_1" not in json.dumps(csv_context)
-            return {"model": model, "goal": goal,
-                    "steps": [{"tool": "local_csv_profile",
-                               "args": {"columns": ["revenue", "stage"]}}]}
+            steps = [{"tool": "local_csv_profile",
+                      "args": {"columns": ["revenue", "stage"]}}]
+            if "handoff" in goal.lower():
+                steps.append({"tool": "calculate",
+                              "args": {"a": {"from_step": 1,
+                                             "field": "column_sum",
+                                             "column": "revenue"},
+                                       "b": "2", "operation": "multiply"}})
+            return {"model": model, "goal": goal, "steps": steps}
         if document_set_context is not None:
             assert [d["filename"] for d in document_set_context] == [
                 "fixture-runbook.txt", "fixture-meeting.md"]
