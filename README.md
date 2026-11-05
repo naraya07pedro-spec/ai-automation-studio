@@ -1,6 +1,19 @@
 # AI Automation Studio
 
-A **localhost-only** automation studio prototype with a functional SQLite-backed rule engine, manual CSV import, and **one optional public GitHub Issues read-only source adapter**, plus five isolated synthetic mock demonstrations. It is **not** a hosted SaaS, live AI agent, production-ready integration platform or publicly exposed server.
+AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
+
+
+## Optional local AI agent in the browser (Slices 47–50)
+
+Install Ollama separately, download a **tool-calling-capable** local model that your computer can run, and ensure Ollama is available on its default local port. After provisioning the owner's password once (see below), start the workbench with:
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-history
+```
+
+Visit `http://127.0.0.1:8765`, log in, open **Ask your local AI agent**, and enter the name of a locally installed model. The agent can use a **calculator** and **read-only UTC clock**, but not run shell commands, access arbitrary files, send messages, or mutate external systems. A request can run stateless or, when you explicitly check **Save this conversation on my PC**, store and reuse context in a selected conversation ID. Up to **8 saved conversations × 6 user/assistant pairs** are retained. Use the UI to view and delete a selected conversation; existing Slice 49 records are migrated into `default`.
+
+**Important:** chat history is plaintext SQLite on your machine and is unsuitable for secrets or customer PII. Ollama hardware/model compatibility has **not** been verified through a real model E2E in CI. All server access remains localhost-only and requires local operator authentication. Without the two startup flags, local inference and persisted agent history are disabled by default. See [agent conversation and migration documentation](docs/LOCAL_AGENT_CONVERSATION_ISOLATION_V1.md) and [progress log](docs/PROGRESS.md).
 
 ## Run the demo
 
@@ -13,7 +26,7 @@ python app/local_server.py --init-owner
 python app/local_server.py
 ```
 
-The first command prompts securely for a **12–128-character password** and confirmation, stores only a salted scrypt verifier at `~/.ai-automation-studio/operator.json`, and refuses to overwrite an existing owner. **Do not delete the owner file casually: there is no password recovery mechanism yet.** The second command loads that identity and fails closed when it is absent or invalid. Open **http://127.0.0.1:8765**, enter the password on the local login screen, and use **Lock session** to revoke the session.
+The first command prompts securely for a **12–128-character password** and confirmation, stores only a salted scrypt verifier at `~/.ai-automation-studio/operator.json`, and refuses to overwrite an existing owner. **Do not delete the owner file casually: optional one-time offline recovery is available only if enrolled first (see the recovery section below).** The second command loads that identity and fails closed when it is absent or invalid. Open **http://127.0.0.1:8765**, enter the password on the local login screen, and use **Lock session** to revoke the session.
 
 The server binds only to `127.0.0.1`. Sessions are one-hour, short-lived process-memory tokens in HttpOnly, SameSite=Strict cookies; every mutation requires the matching session CSRF token, including old mock APIs and GitHub source preview. No real user accounts, cloud provider credentials, outside identity provider or GitHub login are created. Do not expose this unauthenticated-at-the-network-layer local HTTP service using public proxies or port forwarding. It remains unsuitable for real customer data or a compromised local PC.
 
@@ -53,7 +66,7 @@ Both commands refuse to operate if a normal server is using `127.0.0.1:8765`. No
 
 ## Password rotation and explicit public-source permissions (Slice 44)
 
-The local owner can now use **Change operator password** to rotate the credential after proving knowledge of the current password. On successful atomic verifier replacement, **all operator sessions are revoked immediately**; sign in again with the new password. A storage failure leaves the previous credential and sessions unchanged. **Lost-password recovery is not implemented**; don't remove the owner file or assume there is an anonymous reset route.
+The local owner can now use **Change operator password** to rotate the credential after proving knowledge of the current password. On successful atomic verifier replacement, **all operator sessions are revoked immediately**; sign in again with the new password. A storage failure leaves the previous credential and sessions unchanged. **Offline one-time recovery is documented above**; don't remove the owner file or assume there is an anonymous reset route.
 
 Public GitHub read-only ingestion has an additional, persistent **default-deny exact-repository allowlist**. An authenticated owner must explicitly approve each `owner/repo` in **Allow a specific public GitHub repository**, re-entering the current local password. Approval is limited to at most 16 public repos; removing a grant prevents further fetches and invalidates all uncommitted snapshots for that source, even after a later regrant. A browser login does *not* by itself permit reading arbitrary GitHub repos.
 
