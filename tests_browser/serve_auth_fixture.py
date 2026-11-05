@@ -30,6 +30,15 @@ def main():
     audit = LocalSecurityAudit(Path(home.name) / "security-audit.sqlite3")
     core = LocalWorkflowCore(":memory:")
     conversation = LocalAgentConversation(":memory:")
+    def fixture_models():
+        # CI does not install Ollama; tests only browser/API wiring here.
+        return ["fixture:model"]
+
+    def fixture_probe(model):
+        return {"status": "MODEL_RESPONDED", "model": model,
+                "tool_calling": "OBSERVED", "answer_present": True,
+                "history_saved": False, "external_dispatch_count": 0}
+
     def fixture_local_agent(prompt, model, history=None):
         return {"mode": "LOCAL_MODEL", "answer": "Fixture answer: " + str(len(prompt)),
                 "tools_used": ["calculate"], "external_dispatch_count": 0}
@@ -39,7 +48,9 @@ def main():
         create_handler(local_core=core, operator_auth=owner,
                        source_policy=policy, security_audit=audit,
                        local_agent_runner=fixture_local_agent,
-                       agent_conversation=conversation))
+                       agent_conversation=conversation,
+                       local_agent_models=fixture_models,
+                       local_agent_probe=fixture_probe))
     try:
         server.serve_forever()
     finally:
