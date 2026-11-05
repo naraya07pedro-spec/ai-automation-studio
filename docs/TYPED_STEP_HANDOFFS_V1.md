@@ -44,6 +44,8 @@ Missing, malformed, changed, nonnumeric or out-of-range source data fails as HTT
 
 ## Durable audit and previous plans
 
+GitHub-derived counts are **not** a way to retain authority after a source grant is revoked. Before a later calculator uses any cached triage count, the runner rechecks the source repository and the **original approval epoch** with the separately granted public GitHub reader. Revocation, even if followed by regrant, denies this next step with the existing public_source_permission_changed conflict. A restart without that GitHub adapter also denies use of cached counts. No new GitHub fetch is needed for the permission recheck.
+
 Each successful bound step stores a handoff record in a new backward-compatible SQLite column handoff_log_json (default empty array). The authenticated plan UI and final Markdown deliverable show destination step, original one-based source reference, concrete numeric input, source tool/field and SHA-256 of the exact saved source output. The original reviewed step definition remains intact. On reload, the store recomputes this lineage and rejects inconsistent audit records.
 
 Older plans, approvals, and results migrate unchanged and have no handoffs. A restart never auto-executes the following step; interrupted steps still require explicit owner resumption. Stored plan and audit data are local plaintext SQLite, not suitable for secrets. Hash matching and numeric consistency are *not* independent verification of external source truth.
