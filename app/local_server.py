@@ -80,6 +80,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
     agent_gate = threading.BoundedSemaphore(1)
+    # A client timeout does not prove the Ollama backend stopped. Keep
+    # uncertain work latched until an explicit owner inspection acknowledgment.
+    agent_timeout_uncertain = threading.Event()
+    agent_state_lock = threading.Lock()
     public_github = PublicGitHubReadOnlyIntake(core, batch,
                                                fetcher=github_fetcher,
                                                clock=github_clock,
@@ -160,6 +164,32 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 return False
             return True
 
+        def _enter_agent_gate(self, *, allow_uncertain=False):
+            with agent_state_lock:
+                if agent_timeout_uncertain.is_set() and not allow_uncertain:
+                    self._send(423, {"error": "local_ollama_timeout_unresolved"})
+                    return False
+                if not agent_gate.acquire(blocking=False):
+                    self._send(429, {"error": "local_agent_busy"})
+                    return False
+                return True
+
+        @staticmethod
+        def _mark_model_timeout(exc):
+            if str(exc) == "local_model_timeout":
+                agent_timeout_uncertain.set()
+
+        def _timeout_status(self):
+            blocked = agent_timeout_uncertain.is_set()
+            return {"status": ("OPERATOR_INSPECTION_REQUIRED" if blocked
+                               else "NO_UNRESOLVED_TIMEOUT"),
+                    "timeout_unresolved": blocked,
+                    "backend_stopped_verified": False,
+                    "next_action": ("Inspect Ollama's actual running work before "
+                                    "acknowledging. The application cannot prove "
+                                    "the backend request has stopped." if blocked else
+                                    "No unresolved timeout recorded by this server.")}
+
         def _audit_event(self, action, outcome, repo=None):
             if security_audit is None:
                 return True
@@ -232,6 +262,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     code = (422 if str(exc).startswith("invalid_") else
                             404 if str(exc) == "plan_not_found" else 503)
                     self._send(code, {"error": str(exc)})
+                return
+            if route.path == "/api/local-agent-timeout-status":
+                if route.query:
+                    self._send(422, {"error": "invalid_timeout_status_query"})
+                elif local_agent_runner is None:
+                    self._send(403, {"error": "local_agent_disabled"})
+                else:
+                    self._send(200, self._timeout_status())
                 return
             if route.path == "/api/local-agent-device-preflight":
                 if route.query:
@@ -367,6 +405,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-document-analyze",
                                  "/api/local-agent-multi-document-analyze",
                                  "/api/local-agent-device-acceptance",
+                                 "/api/local-agent-timeout-acknowledge",
                                  "/api/local-agent-plan-create",
                                  "/api/local-agent-plan-approve",
                                  "/api/local-agent-plan-next",
@@ -404,6 +443,29 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
                 return
+            if self.path == "/api/local-agent-timeout-acknowledge":
+                if local_agent_runner is None:
+                    self._send(403, {"error": "local_agent_disabled"})
+                    return
+                if (type(data) is not dict
+                        or data != {"acknowledge": "OLLAMA_INSPECTED"}):
+                    self._send(422, {"error": "invalid_timeout_acknowledgement"})
+                    return
+                with agent_state_lock:
+                    # No re-arming while a request is actually in flight.
+                    if not agent_gate.acquire(blocking=False):
+                        self._send(429, {"error": "local_agent_busy"})
+                        return
+                    try:
+                        agent_timeout_uncertain.clear()
+                    finally:
+                        agent_gate.release()
+                self._send(200, {"status": "OPERATOR_ACKNOWLEDGED",
+                                 "timeout_unresolved": False,
+                                 "backend_stopped_verified": False,
+                                 "model_calls": 0,
+                                 "external_write_count": 0})
+                return
             if self.path == "/api/local-agent-device-acceptance":
                 if local_agent_runner is None or local_device_acceptance is None:
                     self._send(403, {"error": "device_acceptance_disabled"})
@@ -412,8 +474,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         or not valid_model_name(data.get("model"))):
                     self._send(422, {"error": "invalid_device_acceptance_request"})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate():
                     return
                 try:
                     try:
@@ -431,11 +492,13 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, report)
                     except AgentError as exc:
+                        self._mark_model_timeout(exc)
                         error = str(exc)
                         code = (422 if error.startswith("invalid_") else
                                 409 if error == "model_not_installed" else 503)
                         self._send(code, {"error": error})
                     except LocalDocumentError as exc:
+                        self._mark_model_timeout(exc)
                         error = str(exc)
                         self._send(502 if error == "multi_document_numeric_evidence_missing"
                                    else 503, {"error": error})
@@ -458,12 +521,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     validate_multiple_documents(data["documents"], data["question"],
                                                 data["model"])
                 except LocalDocumentError as exc:
+                    self._mark_model_timeout(exc)
                     code = 413 if str(exc) in ("multi_document_too_large",
                                                 "local_document_too_large") else 422
                     self._send(code, {"error": str(exc)})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate():
                     return
                 try:
                     try:
@@ -477,6 +540,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except LocalDocumentError as exc:
+                        self._mark_model_timeout(exc)
                         error = str(exc)
                         self._send(413 if error in ("multi_document_too_large",
                                                    "local_document_too_large") else
@@ -502,12 +566,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     validate_document(data["filename"], data["content"],
                                       data["question"], data["model"])
                 except LocalDocumentError as exc:
+                    self._mark_model_timeout(exc)
                     err = str(exc)
                     self._send(413 if err == "local_document_too_large" else 422,
                                {"error": err})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate():
                     return
                 try:
                     try:
@@ -522,6 +586,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except LocalDocumentError as exc:
+                        self._mark_model_timeout(exc)
                         err = str(exc)
                         code = 413 if err == "local_document_too_large" else (
                             502 if err == "document_numeric_evidence_missing" else
@@ -545,8 +610,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         or type(data["plan_id"]) is not str))):
                     self._send(422, {"error": "invalid_plan_request"})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate(allow_uncertain=(not creating and
+                        self.path != "/api/local-agent-plan-next")):
                     return
                 try:
                     try:
@@ -566,6 +631,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                             outcome = action(data["plan_id"])
                         self._send(200, outcome)
                     except PlanError as exc:
+                        self._mark_model_timeout(exc)
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
                                 else 403 if err == "public_source_not_allowed"
@@ -575,6 +641,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 else 503)
                         self._send(code, {"error": err})
                     except AgentError as exc:
+                        self._mark_model_timeout(exc)
                         self._send(503, {"error": str(exc)})
                     except Exception:
                         self._send(503, {"error": "agent_plan_unavailable"})
@@ -588,8 +655,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if type(data) is not dict or set(data) != {"model"} or type(data["model"]) is not str:
                     self._send(422, {"error": "invalid_probe_request"})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate():
                     return
                 try:
                     try:
@@ -601,6 +667,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             self._send(200, result)
                     except AgentError as exc:
+                        self._mark_model_timeout(exc)
                         code = (422 if str(exc).startswith("invalid_") else
                                 409 if str(exc) == "model_not_installed" else 503)
                         self._send(code, {"error": str(exc)})
@@ -621,8 +688,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if selected_id is not None and not valid_conversation_id(selected_id):
                     self._send(422, {"error": "invalid_conversation_id"})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate(allow_uncertain=True):
                     return
                 try:
                     agent_conversation.clear(selected_id)
@@ -657,8 +723,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if remember and agent_conversation is None:
                     self._send(403, {"error": "agent_history_disabled"})
                     return
-                if not agent_gate.acquire(blocking=False):
-                    self._send(429, {"error": "local_agent_busy"})
+                if not self._enter_agent_gate():
                     return
                 try:
                     try:
@@ -693,6 +758,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         code = 409 if str(exc) == "conversation_capacity_reached" else 503
                         self._send(code, {"error": str(exc)})
                     except AgentError as exc:
+                        self._mark_model_timeout(exc)
                         self._send(422 if str(exc).startswith("invalid_") else 503,
                                    {"error": str(exc)})
                     except Exception:
