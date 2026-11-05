@@ -90,6 +90,24 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail("timed out waiting for actual network response gate")
 
+    def test_host_preflight_reads_only_installed_catalog_and_clears_on_logout(self):
+        expect(self.page.locator("#device-preflight-run")).to_be_enabled()
+        expect(self.page.locator("#device-preflight-result")).to_contain_text(
+            "No host preflight yet")
+        self.page.locator("#device-preflight-run").click()
+        expect(self.page.locator("#device-preflight-status")).to_contain_text(
+            "Preflight completed")
+        report=self.page.locator("#device-preflight-result")
+        expect(report).to_contain_text("PREFLIGHT ONLY")
+        expect(report).to_contain_text("MODEL_SELECTION_REQUIRED")
+        expect(report).to_contain_text("fixture:model")
+        expect(report).to_contain_text("System RAM available: 1664 MB")
+        expect(report).to_contain_text("No model inference attempted")
+        self.page.locator("#operator-logout").click()
+        expect(self.page.locator("#device-preflight-run")).to_be_disabled()
+        expect(self.page.locator("#device-preflight-result")).to_contain_text(
+            "Session locked")
+
     def test_device_acceptance_timeout_shows_actionable_local_diagnosis(self):
         self.page.locator("#local-agent-model").fill("fixture:timeout")
         expect(self.page.locator("#device-acceptance-run")).to_be_enabled()
