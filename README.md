@@ -3,6 +3,18 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Owner-selected CSV profiling inside reviewed task plans (Slice 75)
+
+The authenticated local workbench can now perform **deterministic column profiling on one explicitly owner-selected, short UTF-8 CSV**, as a persistent reviewed plan step. Opt in with:
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-plan-csv
+```
+
+Select a `.csv` file in **Plan a small local task**, explicitly consent to saving its local plaintext snapshot, and propose a goal. The local model sees **only** filename/byte count/SHA-256/row count/column names, never the records. A fixed `local_csv_profile` step can select 1–8 exact columns and, after separate owner approval/execution, computes nonempty/missing/distinct counts and bounded Decimal min/max/sum/mean when values are numeric. The reviewed profile is persisted for the existing final-report workflow and opt-in export. No shell, arbitrary filesystem access, external writes, model-generated data claims, CSV row echo, or automatic execution is added.
+
+Limits: up to **6,000 UTF-8 bytes, 100 data rows, 8 columns**; strict headers/rows; selected CSV is **plaintext in SQLite** and unsuitable for secrets, confidential records or customer PII. Browser/file snapshots cannot be silently changed after approval. This feature is not a spreadsheet editor or multi-dataset analysis. Real Windows/Ollama acceptance remains deferred. [Complete contract](docs/OWNER_SELECTED_CSV_PROFILE_V1.md).
+
 ## Owner-approved local task deliverable files (Slice 74)
 
 After an explicitly approved read-only plan has completed and the owner has separately generated its evidence-linked report, the workbench can save that **existing report** to an actual local Markdown file without re-invoking a model. Start with `--enable-local-agent --enable-agent-plans --enable-plan-artifacts`, then use **Save .md into local workspace** and accept the exact write destination in the new native confirmation.
