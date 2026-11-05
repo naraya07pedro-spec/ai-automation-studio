@@ -634,11 +634,11 @@ class LocalAgentPlanStore:
         try:
             with self.lock, self.db:
                 old = self._fetch(plan_id)
-                if old["status"] not in ("APPROVED", "NEXT_READY"):
-                    raise PlanError("plan_state_conflict")
                 if (old["batch_run_status"] in ("RUNNING", "STOPPING")
                         and not from_batch):
                     raise PlanError("plan_batch_active")
+                if old["status"] not in ("APPROVED", "NEXT_READY"):
+                    raise PlanError("plan_state_conflict")
                 if from_batch and old["batch_run_status"] != "RUNNING":
                     raise PlanError("plan_batch_stop_requested")
                 self._verify_memory_refs(old["memory_refs"])
