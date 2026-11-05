@@ -311,7 +311,8 @@ class LocalAgentPlanStore:
                 # Do not swallow an Ollama timeout: HTTP must latch uncertain
                 # backend execution even though this durable step is blocked.
                 raise PlanError(
-                    "local_model_timeout" if str(exc) == "local_model_timeout"
+                    str(exc) if str(exc) in ("local_model_timeout",
+                                           "local_model_transport_uncertain")
                     else "plan_step_failed") from None
             with self.lock, self.db:
                 results = old["results"] + [{"tool": step["tool"], "output": output}]
