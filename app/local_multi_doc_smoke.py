@@ -4,6 +4,7 @@ Uses only two bundled non-sensitive, in-memory synthetic texts. No browser,
 file system scan, downloaded model, or report files. Never invent success.
 """
 import argparse
+from datetime import datetime, timezone
 import ctypes
 import json
 import os
@@ -67,16 +68,32 @@ def smoke(model, *, catalog=None, transport=None, clock=None, memory=None):
         EXAMPLE_DOCUMENTS, EXAMPLE_QUESTION, model, transport=transport)
     elapsed = round((now() - started) * 1000)
     after = memory_probe()
+    source_text = EXAMPLE_DOCUMENTS[1]["content"]
+    citations = result.get("citations", [])
+    verified = (type(citations) is list and any(
+        type(c) is dict and c.get("filename") == "schedule.md"
+        and type(c.get("start_char")) is int
+        and type(c.get("end_char")) is int
+        and 0 <= c["start_char"] < c["end_char"] <= len(source_text)
+        and type(c.get("quote")) is str
+        and "18:30 WIB" in c["quote"]
+        and c["quote"] == source_text[c["start_char"]:c["end_char"]]
+        and c.get("verified_exact_match") is True for c in citations))
     if (result.get("status") != "MULTI_DOCUMENT_ANALYZED_LOCAL"
             or result.get("model_calls") != 1
             or result.get("insufficient_evidence") is not False
-            or not any(c.get("filename") == "schedule.md" and
-                       "18:30 WIB" in c.get("quote", "")
-                       for c in result.get("citations", []))
+            or type(result.get("answer")) is not str
+            or "18:30 WIB" not in result["answer"]
+            or not verified
             or result.get("external_write_count") != 0):
         raise LocalDocumentError("smoke_source_evidence_not_verified")
+    actual_runtime = catalog is None and transport is None
     return {
-        "status": "REAL_LOCAL_MULTI_DOCUMENT_SMOKE_PASSED",
+        "status": ("REAL_LOCAL_MULTI_DOCUMENT_SMOKE_PASSED" if actual_runtime
+                   else "SYNTHETIC_MODEL_SMOKE_PASSED"),
+        "inference_source": ("LIVE_LOCAL_OLLAMA" if actual_runtime
+                             else "INJECTED_TEST_TRANSPORT"),
+        "checked_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model": model,
         "model_installed": True,
         "source_evidence_verified": True,
