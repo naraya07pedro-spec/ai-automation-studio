@@ -21,7 +21,8 @@ from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from github_public_issue_intake import PublicGitHubReadOnlyIntake
 from local_ollama_agent import run_agent, AgentError
-from local_agent_conversation import LocalAgentConversation, ConversationError
+from local_agent_conversation import (LocalAgentConversation, ConversationError,
+                                      valid_conversation_id, DEFAULT_CONVERSATION)
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "prototype"))
@@ -178,12 +179,35 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "local_only": True,
                                  "persisted": agent_conversation is not None})
                 return
-            if route.path == "/api/local-agent-history" and not route.query:
+            if route.path in ("/api/local-agent-history",
+                              "/api/local-agent-conversations"):
                 if local_agent_runner is None or agent_conversation is None:
                     self._send(403, {"error": "agent_history_disabled"})
                     return
+                if route.path == "/api/local-agent-conversations":
+                    if route.query:
+                        self._send(422, {"error": "invalid_conversation_query"})
+                        return
+                    try:
+                        self._send(200, {"conversation_ids":
+                                         agent_conversation.list_conversations()})
+                    except ConversationError:
+                        self._send(503, {"error": "conversation_storage_unavailable"})
+                    return
+                conversation_id = DEFAULT_CONVERSATION
+                if route.query:
+                    params = parse_qs(route.query, keep_blank_values=True)
+                    if (set(params) != {"conversation_id"}
+                            or len(params["conversation_id"]) != 1):
+                        self._send(422, {"error": "invalid_conversation_query"})
+                        return
+                    conversation_id = params["conversation_id"][0]
+                if not valid_conversation_id(conversation_id):
+                    self._send(422, {"error": "invalid_conversation_id"})
+                    return
                 try:
-                    self._send(200, {"turns": agent_conversation.snapshot(),
+                    self._send(200, {"conversation_id": conversation_id,
+                                     "turns": agent_conversation.snapshot(conversation_id),
                                      "storage": "local_plaintext"})
                 except ConversationError:
                     self._send(503, {"error": "conversation_storage_unavailable"})
@@ -287,15 +311,21 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if local_agent_runner is None or agent_conversation is None:
                     self._send(403, {"error": "agent_history_disabled"})
                     return
-                if type(data) is not dict or data:
+                if (type(data) is not dict
+                        or set(data) not in (set(), {"conversation_id"})):
                     self._send(422, {"error": "invalid_clear_fields"})
+                    return
+                selected_id = data.get("conversation_id")
+                if selected_id is not None and not valid_conversation_id(selected_id):
+                    self._send(422, {"error": "invalid_conversation_id"})
                     return
                 if not agent_gate.acquire(blocking=False):
                     self._send(429, {"error": "local_agent_busy"})
                     return
                 try:
-                    agent_conversation.clear()
-                    self._send(200, {"status": "CLEARED_LOCAL", "turns": []})
+                    agent_conversation.clear(selected_id)
+                    self._send(200, {"status": "CLEARED_LOCAL",
+                                     "conversation_id": selected_id, "turns": []})
                 except ConversationError:
                     self._send(503, {"error": "conversation_storage_unavailable"})
                 finally:
@@ -306,13 +336,22 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(403, {"error": "local_agent_disabled"})
                     return
                 if (type(data) is not dict
-                        or set(data) not in ({"model", "prompt"}, {"model", "prompt", "remember"})
+                        or not {"model", "prompt"}.issubset(data)
+                        or not set(data).issubset(
+                            {"model", "prompt", "remember", "conversation_id"})
                         or type(data["model"]) is not str or type(data["prompt"]) is not str
                         or ("remember" in data and type(data["remember"]) is not bool)):
 
                     self._send(422, {"error": "invalid_local_agent_request"})
                     return
                 remember = data.get("remember", False)
+                conversation_id = data.get("conversation_id", DEFAULT_CONVERSATION)
+                if ("conversation_id" in data and not remember):
+                    self._send(422, {"error": "conversation_requires_remember"})
+                    return
+                if not valid_conversation_id(conversation_id):
+                    self._send(422, {"error": "invalid_conversation_id"})
+                    return
                 if remember and agent_conversation is None:
                     self._send(403, {"error": "agent_history_disabled"})
                     return
@@ -321,7 +360,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return
                 try:
                     try:
-                        prior = agent_conversation.snapshot() if remember else None
+                        prior = (agent_conversation.snapshot(conversation_id)
+                                 if remember else None)
+                        if (remember and not prior
+                                and conversation_id not in
+                                agent_conversation.list_conversations()
+                                and len(agent_conversation.list_conversations()) >= 8):
+                            self._send(409, {"error": "conversation_capacity_reached"})
+                            return
                         if remember and prior and any(
                                 pair["model"] != data["model"] for pair in prior):
                             self._send(409, {"error": "agent_history_model_mismatch"})
@@ -336,10 +382,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         else:
                             if remember:
                                 agent_conversation.append(
-                                    data["model"], data["prompt"], outcome.get("answer"))
-                            self._send(200, {**outcome, "remembered": remember})
-                    except ConversationError:
-                        self._send(503, {"error": "conversation_storage_unavailable"})
+                                    data["model"], data["prompt"], outcome.get("answer"),
+                                    conversation_id)
+                            self._send(200, {**outcome, "remembered": remember,
+                                             "conversation_id": conversation_id
+                                             if remember else None})
+                    except ConversationError as exc:
+                        code = 409 if str(exc) == "conversation_capacity_reached" else 503
+                        self._send(code, {"error": str(exc)})
                     except AgentError as exc:
                         self._send(422 if str(exc).startswith("invalid_") else 503,
                                    {"error": str(exc)})
