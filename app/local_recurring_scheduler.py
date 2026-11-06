@@ -136,6 +136,7 @@ class LocalRecurringScheduler:
         self.lock = threading.RLock()
         self.stop_signal = threading.Event()
         self.thread = None
+        self.outbound_autopilot = None
         if str(database) != ":memory:":
             path = Path(database).expanduser()
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -346,6 +347,8 @@ class LocalRecurringScheduler:
         while not self.stop_signal.is_set():
             try:
                 self.run_due()
+                if self.outbound_autopilot is not None:
+                    self.outbound_autopilot.dispatch_due()
             except (sqlite3.Error, ScheduleError, OSError, ValueError):
                 # Do not expose schedule content in logs. Tick errors are
                 # not treated as completed; next iteration may retry.
