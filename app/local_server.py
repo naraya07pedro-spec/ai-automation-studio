@@ -18,6 +18,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError
+from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
@@ -94,7 +95,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    agent_memory_store=None, plan_artifact_exporter=None,
                    plan_action_gate=None, hn_policy=None,
                    hn_job_discovery=None, greenhouse_evidence=None,
-                   local_scheduler=None, outbound_webhook=None):
+                   local_scheduler=None, outbound_webhook=None,
+                   scheduled_autopilot=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -542,6 +544,16 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, source_policy.snapshot())
                 return
+            if route.path == "/api/autopilot-status" and not route.query:
+                if scheduled_autopilot is None:
+                    self._send(200, {"enabled": False, "policies": [], "attempts": [],
+                                     "reason": "outbound_webhook_not_enabled"})
+                else:
+                    try:
+                        self._send(200, {"enabled": True, **scheduled_autopilot.list()})
+                    except (sqlite3.Error, OSError):
+                        self._send(503, {"error": "autopilot_storage_unavailable"})
+                return
             if route.path in ("/api/connector-catalog", "/api/outbound-history"):
                 if outbound_webhook is None:
                     self._send(200 if route.path == "/api/connector-catalog" else 403,
@@ -638,7 +650,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-schedule-pause",
                                  "/api/local-schedule-resume",
                                  "/api/outbound-webhook-preview",
-                                 "/api/outbound-webhook-commit"):
+                                 "/api/outbound-webhook-commit",
+                                 "/api/autopilot-preview",
+                                 "/api/autopilot-arm",
+                                 "/api/autopilot-stop"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1548,6 +1563,60 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 code, result = method(data)
                 self._send(code, result)
                 return
+            if self.path in ("/api/autopilot-preview",
+                             "/api/autopilot-arm",
+                             "/api/autopilot-stop"):
+                if scheduled_autopilot is None:
+                    self._send(403, {"error": "autopilot_not_configured"})
+                    return
+                if not self._audit_event("WEBHOOK_AUTOPILOT_POLICY", "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                try:
+                    if self.path == "/api/autopilot-preview":
+                        response = scheduled_autopilot.preview(data)
+                        status = 200
+                    elif self.path == "/api/autopilot-arm":
+                        if (type(data) is not dict or
+                                set(data) != {"schedule_id", "max_sends",
+                                             "expires_days", "preview_token",
+                                             "current_password"} or
+                                type(data["current_password"]) is not str):
+                            raise AutopilotError("invalid_autopilot_arm_fields")
+                        if operator_auth is None:
+                            raise AutopilotError("real_owner_required",403)
+                        verified = operator_auth.confirm_current_password(
+                            data["current_password"])
+                        if verified != 200:
+                            self._audit_event("WEBHOOK_AUTOPILOT_POLICY", "DENIED")
+                            self._send(verified, {"error": (
+                                "operator_restart_required" if verified == 503
+                                else "operator_login_locked" if verified == 429
+                                else "invalid_operator_credentials")})
+                            return
+                        response = scheduled_autopilot.arm(
+                            {k:v for k,v in data.items() if k != "current_password"})
+                        status = 201
+                    else:
+                        if (type(data) is not dict or
+                                set(data) != {"schedule_id", "expected_epoch"}):
+                            raise AutopilotError("invalid_autopilot_stop_fields")
+                        response = scheduled_autopilot.stop(
+                            data["schedule_id"], data["expected_epoch"])
+                        status = 200
+                except AutopilotError as exc:
+                    self._audit_event("WEBHOOK_AUTOPILOT_POLICY", "DENIED")
+                    self._send(exc.status, {"error": str(exc)})
+                    return
+                except (sqlite3.Error, OSError):
+                    self._audit_event("WEBHOOK_AUTOPILOT_POLICY", "UNCERTAIN")
+                    self._send(503, {"error": "autopilot_state_uncertain_check_history"})
+                    return
+                if not self._audit_event("WEBHOOK_AUTOPILOT_POLICY", "SUCCESS"):
+                    self._send(503, {"error": "autopilot_policy_result_uncertain_check_status"})
+                else:
+                    self._send(status, response)
+                return
             if self.path in ("/api/outbound-webhook-preview",
                              "/api/outbound-webhook-commit"):
                 if outbound_webhook is None:
@@ -1784,6 +1853,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                     if enable_local_agent else None)
     scheduler = None
     outbound = None
+    autopilot = None
     try:
         if enable_outbound_webhook:
             destination = os.environ.get("AAS_WEBHOOK_URL", "")
@@ -1794,6 +1864,10 @@ def start_local_server(port=8765, enable_local_agent=False,
                 url=destination,
                 secret=os.environ.get("AAS_WEBHOOK_SIGNING_SECRET", ""))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
+        if outbound is not None:
+            autopilot = ScheduledWebhookAutopilot(
+                scheduler,outbound,audit,home / "scheduled-webhook-autopilot.sqlite3")
+            scheduler.outbound_autopilot = autopilot
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -1824,6 +1898,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_plan_store=plan_store,
                            local_scheduler=scheduler,
                            outbound_webhook=outbound,
+                           scheduled_autopilot=autopilot,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
@@ -1850,6 +1925,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     finally:
         if scheduler is not None:
             scheduler.close()
+        if autopilot is not None:
+            autopilot.close()
         if outbound is not None:
             outbound.close()
         if memory_store is not None:
