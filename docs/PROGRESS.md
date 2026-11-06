@@ -2395,3 +2395,18 @@ Each slice must report: goal, exact files changed, checks run and their results,
 - **Privacy and control:** no added model call, network host or provider request, OAuth credentials, file write, external write, permission grant, model-plannable tool or batch execution. Existing authenticated loopback/CSRF/Origin one-click owner gate and metadata-free security audit apply. Source quotes are sanitized and bounded, and truncation is explicit. Source SHA-256 now covers stable triage evidence fields. Browser displays a human warning and source JSON; it cannot automatically submit applications.
 - **Unchanged hard limitations:** `indonesia_eligibility_verified=false`, `remote_work_verified=false`, `accepting_applications_verified=false`, `employer_identity_independently_verified=false` and `hn_to_ats_match_verified=false` remain unchanged. Pattern-based partial text scanning cannot verify legal work authorization, employer country exceptions, timezone, ATS apply form, current vacancy acceptance or candidate seniority fit; no automatic shortlist/ranking/apply. Actual owner Windows PC and Ollama acceptance still explicitly deferred in [Issue #68](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/68).
 - **Primary contract:** [docs/REMOTE_JOB_ELIGIBILITY_EVIDENCE_V1.md](REMOTE_JOB_ELIGIBILITY_EVIDENCE_V1.md). **Next suggested slice #82:** original employer application-form/geo eligibility evidence with scoped read-only permissions and conservative human validation, not generic crawling or autonomous application.
+
+
+## Usable local release launch · 2026-11-06 · Windows quickstart
+
+**Objective:** convert the accumulated local product features into an operator-friendly, directly usable foreground app, not another provider-discovery microfeature.
+
+**Files:** `START_AI_STUDIO.cmd`, `app/launch_workbench.py`, `tests/test_launch_workbench.py`, `tests/test_launch_workbench_e2e.py`, `.github/workflows/windows-quickstart.yml`, `docs/LAUNCH_NOW_V1.md`, README.
+
+**Implemented:** double-click Windows entrypoint, first-run owner provisioning, default reviewed existing full-feature profile, explicit offline/local-AI alternatives, fixed localhost binding and occupied-port guard, browser startup after the actual local HTTP service responds, no model-download or forced inference, opt-in plaintext history, in-process serving for low-memory machines. Features remain bounded to the already implemented server; this is not a universal agent or new external write connector.
+
+**Verification gate:** new disposable CI test must boot a real HTTP listener on 127.0.0.1:8765 with a synthetic owner, plus profile/permission tests and existing Python/Chromium checks on the final PR SHA. CI cannot prove the operator's actual Windows/Ollama device works. All real local device acceptance remains deferred per issue #68.
+
+**Public 24/7 status:** NOT DEPLOYED. Do not expose the loopback HTTP server through a VPS/public reverse proxy. Cloud-ready security, real delivery connector, and tested always-on hosting are separate prerequisites.
+
+**PR/CI/merge:** PENDING at the point this entry is drafted. Record exact final head checks and merge after verification; never backfill a fake deployment success.
