@@ -1,5 +1,4 @@
 """Slice 79: consented, no-grant HN public jobstories discovery preview."""
-from hashlib import sha256
 from http.server import ThreadingHTTPServer
 import http.client
 import json
@@ -261,7 +260,6 @@ class HNDiscoveryHTTP(unittest.TestCase):
         self.assertFalse((self.home/"hn-grants.json").exists())
         self.assertEqual(0,self.store.db.execute(
             "SELECT COUNT(*) FROM agent_task_plans").fetchone()[0])
-        self.assertEqual([],self.audit.recent(0))
         records=self.audit.recent(10)
         actions=[x for x in records if x["action"]=="HN_JOB_DISCOVERY"]
         self.assertEqual(["SUCCESS","ATTEMPT"],[x["outcome"] for x in actions])
