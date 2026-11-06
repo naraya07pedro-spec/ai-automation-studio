@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Real recurring LOCAL AI inference (read-only, owner-armed)
+
+Mission Control section **12 · Scheduled Local AI** now has independently scheduled **real local Ollama model calls**, not merely rule evaluations. Minutes/hours/daily/weekly/monthly, fixed owner-selected prompt/model, 1–30 total attempts, 1–90-day expiry, persisted plaintext SQLite answers, real pause/resume and crash/uncertain timeout quarantine. A separate worker shares the existing model-safety gate with interactive chat, and its tool capabilities are restricted to calculator and UTC time: no Gmail, n8n, MCP, shell, arbitrary websites or external writes. Opt in with `START_AI_STUDIO.cmd --mode local-ai --enable-scheduled-local-ai`; Ollama and a compatible installed model are required separately. **No real Ollama model, Tencent VPS or business connector was live-tested in CI.** [Runbook and boundaries](docs/READONLY_AI_RECURRING_SCHEDULE_V1.md).
+
 ## n8n final-step signed delivery evidence (owner import)
 
 **New:** Mission Control **11 · n8n Delivery Proof** distinguishes 2xx webhook acceptance from owner-imported, HMAC-SHA256 verified final-step assertions. The import requires current owner password + CSRF, strong encrypted managed connector signing secret, exact connector/schedule/delivery ID from a real durable SQLite attempt, and an n8n execution ID. Duplicate receipts are idempotent, conflicts and forged signatures rejected, no automatic retries or unpausing. **A valid HMAC is only a shared-secret assertion, not independent confirmation of remote business success**; Tencent/n8n accounts were not accessed. [Protocol and real-world acceptance instructions](docs/N8N_SIGNED_DELIVERY_PROOF_V1.md).
