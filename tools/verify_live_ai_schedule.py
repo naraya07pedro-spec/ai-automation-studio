@@ -35,6 +35,16 @@ PROMPT = ("This is a private local Ollama scheduler acceptance check. "
           "No file, network, email, shell or external business action is requested.")
 PROBE_WINDOW_SECONDS = 200
 WAIT_INTERVAL_SECONDS = 0.25
+REDACTED_EVIDENCE_FIELDS = frozenset((
+    "status", "inference_source", "model", "task_id", "max_inference_attempts",
+    "checks", "scheduled_slot_utc", "answer_present", "answer_sha256",
+    "answer_length", "tools_used", "attempted_runs", "external_dispatch_count",
+    "sqlite_reopen_verified", "no_replay_on_reopen", "started_utc",
+    "completed_utc", "elapsed_seconds", "actual_server_8765_used",
+    "tencent_instance_identity_verified", "service_24h_or_reboot_recovery_verified",
+    "actual_user_task_executed", "no_user_app_state_changed", "limitations",
+))
+
 
 
 class LiveAcceptanceError(Exception):
@@ -215,8 +225,11 @@ def save_redacted_evidence(report):
             or not re.fullmatch(r"[0-9a-f]{24}", str(report.get("task_id", "")))):
         raise LiveAcceptanceError("only_genuine_live_reports_may_be_saved")
     owner_root = Path.home() / ".ai-automation-studio"
-    if owner_root.is_symlink():
+    if owner_root.is_symlink() or (owner_root.exists() and not owner_root.is_dir()):
         raise LiveAcceptanceError("unsafe_evidence_directory")
+    owner_root.mkdir(exist_ok=True, mode=0o700)
+    if os.name == "posix" and owner_root.stat().st_mode & 0o077:
+        raise LiveAcceptanceError("insecure_owner_root_permissions")
     folder = owner_root / "live-acceptance"
     if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
         raise LiveAcceptanceError("unsafe_evidence_directory")
@@ -229,7 +242,9 @@ def save_redacted_evidence(report):
     path = folder / filename
     if path.is_symlink():
         raise LiveAcceptanceError("unsafe_evidence_path")
-    data = json.dumps(report, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
+    safe = {key: report[key] for key in REDACTED_EVIDENCE_FIELDS
+            if key in report}
+    data = json.dumps(safe, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except (OSError, FileExistsError):
