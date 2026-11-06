@@ -1,0 +1,59 @@
+name: Signed n8n delivery completion proof acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_n8n_delivery_proof.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'tests/test_n8n_delivery_proof.py'
+      - 'docs/N8N_SIGNED_DELIVERY_PROOF_V1.md'
+      - '.github/workflows/n8n-signed-delivery-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_n8n_delivery_proof.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'tests/test_n8n_delivery_proof.py'
+      - 'docs/N8N_SIGNED_DELIVERY_PROOF_V1.md'
+      - '.github/workflows/n8n-signed-delivery-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  n8n-signed-proof-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install actual encrypted-managed-connector dependency
+        run: python -m pip install -r requirements-vault.txt
+      - name: Verify signed n8n proof plus authenticated HTTP/CSRF acceptance
+        run: python -m unittest discover -s tests -p 'test_n8n_delivery_proof.py' -v
+      - name: Protect existing real managed autopilot and owner authorization tests
+        run: |
+          python -m unittest discover -s tests -p 'test_managed_scheduled_webhook.py' -v
+          python -m unittest discover -s tests -p 'test_managed_scheduled_webhook_http.py' -v
+      - name: Compile Python and parse Mission Control JavaScript
+        run: |
+          python -m py_compile app/local_n8n_delivery_proof.py app/local_server.py app/local_security_audit.py
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(scripts.length===0)throw Error('No Mission Control JS');
+          for(const entry of scripts)new vm.Script(entry[1]);
+          console.log('All Mission Control JavaScript parses');
+          NODE
+      - name: Record external acceptance limitation
+        run: echo "Only injected sender and local HTTP. No user n8n execution, remote CRM write, Google consent or Tencent VM accessed."
