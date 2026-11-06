@@ -3,7 +3,6 @@ from http.server import ThreadingHTTPServer
 import http.client
 import json
 from pathlib import Path
-import sqlite3
 import sys
 import tempfile
 import threading
@@ -14,7 +13,7 @@ sys.path.insert(0, str(ROOT / "app"))
 from local_csv_profile import profile_selected_csv
 from local_agent_task_plans import LocalAgentPlanStore, PlanError, validate_steps
 from local_operator_auth import LocalOperatorAuth
-from local_security_audit import LocalSecurityAudit, SecurityAuditError
+from local_security_audit import LocalSecurityAudit
 from local_tool_registry import (
     ACTION_TOOL, BATCH_READ_TOOLS, registered_tools, require_owner_action,
     ToolPermissionError)
@@ -108,8 +107,8 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(preview["preview_sha256"], result["sha256"])
         data = json.loads(saved.read_text(encoding="utf-8"))
         self.assertEqual("60", self.store.get(self.pid)["results"][1]["output"])
-        self.assertEqual(30, data["profiles"][0]["profile"]["column_stats"][0]
-                         ["numeric_summary"]["sum"] == "30" and 30)
+        self.assertEqual("30", data["profiles"][0]["profile"]["column_stats"][0]
+                         ["numeric_summary"]["sum"])
         self.assertNotIn("SYNTHETIC_PERSON_", saved.read_text())
         self.assertEqual(1, len(list(self.gate.writer.root.glob("*.json"))))
         with self.assertRaisesRegex(ToolActionError,
