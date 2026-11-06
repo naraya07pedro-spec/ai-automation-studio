@@ -114,7 +114,10 @@ class ManagedScheduledWebhookAutopilot:
     def _without_connector(request, keys):
         if type(request) is not dict or set(request) != keys:
             raise AutopilotError("invalid_managed_autopilot_fields")
-        _validate_id(request["connector_id"])
+        try:
+            _validate_id(request["connector_id"])
+        except ManagedConnectorError as exc:
+            raise AutopilotError(str(exc), exc.status) from None
         return {k: v for k, v in request.items() if k != "connector_id"}
 
     def preview(self, request):
