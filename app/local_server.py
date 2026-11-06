@@ -10,11 +10,13 @@ from pathlib import Path
 import argparse
 import getpass
 import json
+import sqlite3
 import socket
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
+from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
@@ -89,7 +91,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_device_preflight=None, model_safety_state=None,
                    agent_memory_store=None, plan_artifact_exporter=None,
                    plan_action_gate=None, hn_policy=None,
-                   hn_job_discovery=None, greenhouse_evidence=None):
+                   hn_job_discovery=None, greenhouse_evidence=None,
+                   local_scheduler=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -537,6 +540,28 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, source_policy.snapshot())
                 return
+            if route.path in ("/api/local-schedules", "/api/local-schedule-history"):
+                if local_scheduler is None:
+                    self._send(403, {"error": "recurring_scheduler_disabled"})
+                    return
+                if route.path == "/api/local-schedules" and not route.query:
+                    try:
+                        self._send(200, local_scheduler.list())
+                    except (sqlite3.Error, OSError):
+                        self._send(503, {"error": "scheduler_storage_unavailable"})
+                    return
+                if route.path == "/api/local-schedule-history":
+                    params = parse_qs(route.query, keep_blank_values=True)
+                    if set(params) == {"schedule_id"} and len(params["schedule_id"]) == 1:
+                        try:
+                            self._send(200, local_scheduler.history(params["schedule_id"][0]))
+                        except ScheduleError as exc:
+                            self._send(exc.status, {"error": str(exc)})
+                        except (sqlite3.Error, OSError):
+                            self._send(503, {"error": "scheduler_storage_unavailable"})
+                        return
+                self._send(422, {"error": "invalid_schedule_query"})
+                return
             if route.path in ("/api/local-workflows", "/api/local-history", "/api/local-revisions"):
                 if route.path == "/api/local-workflows" and not route.query:
                     self._send(200, core.list_workflows())
@@ -595,7 +620,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-report",
                                  "/api/local-agent-plan-export",
                                  "/api/local-agent-action-preview",
-                                 "/api/local-agent-action-commit"):
+                                 "/api/local-agent-action-commit",
+                                 "/api/local-schedule-create",
+                                 "/api/local-schedule-pause",
+                                 "/api/local-schedule-resume"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1505,6 +1533,39 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 code, result = method(data)
                 self._send(code, result)
                 return
+            if self.path in ("/api/local-schedule-create",
+                             "/api/local-schedule-pause",
+                             "/api/local-schedule-resume"):
+                if local_scheduler is None:
+                    self._send(403, {"error": "recurring_scheduler_disabled"})
+                    return
+                if not self._audit_event("SCHEDULE_OWNER_CHANGE", "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                try:
+                    if self.path == "/api/local-schedule-create":
+                        result = local_scheduler.create(data)
+                        code = 201
+                    else:
+                        if (type(data) is not dict or set(data) !=
+                                {"schedule_id", "expected_epoch"}):
+                            raise ScheduleError("invalid_schedule_control_fields")
+                        result = local_scheduler.change(
+                            data["schedule_id"], data["expected_epoch"],
+                            pause=self.path.endswith("-pause"))
+                        code = 200
+                except ScheduleError as exc:
+                    self._audit_event("SCHEDULE_OWNER_CHANGE", "DENIED")
+                    self._send(exc.status, {"error": str(exc)})
+                    return
+                except (sqlite3.Error, OSError):
+                    self._send(503, {"error": "scheduler_storage_unavailable"})
+                    return
+                if not self._audit_event("SCHEDULE_OWNER_CHANGE", "SUCCESS"):
+                    self._send(503, {"error": "scheduler_change_outcome_uncertain"})
+                else:
+                    self._send(code, result)
+                return
             if self.path in ("/api/local-create", "/api/local-activate", "/api/local-run"):
                 # SQLite workbench methods serialize their own writes. Nothing
                 # in these endpoints invokes a mock or external provider.
@@ -1654,7 +1715,9 @@ def start_local_server(port=8765, enable_local_agent=False,
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
                     if enable_local_agent else None)
+    scheduler = None
     try:
+        scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -1683,6 +1746,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                                    hn_allowed_ids=hn_allowed_ids))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
+                           local_scheduler=scheduler,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
@@ -1701,11 +1765,14 @@ def start_local_server(port=8765, enable_local_agent=False,
                                    plan_store, home / "exports", audit)
                                if enable_plan_actions else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
+        scheduler.start()
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if scheduler is not None:
+            scheduler.close()
         if memory_store is not None:
             memory_store.close()
         if model_safety is not None:
