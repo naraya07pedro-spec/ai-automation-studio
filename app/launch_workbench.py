@@ -88,6 +88,12 @@ def _open_browser_after_ready(stop):
             return
 
 
+def _serve(flags):
+    # In-process server avoids a second long-lived Python interpreter on 8 GB hosts.
+    from local_server import main as server_main
+    return server_main(list(flags))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
@@ -141,7 +147,8 @@ def main(argv=None):
         threading.Thread(target=_open_browser_after_ready,
                          args=(stop,), daemon=True).start()
     try:
-        return subprocess.call([sys.executable, str(SERVER), *flags], cwd=str(ROOT))
+        _serve(flags)
+        return 0
     except KeyboardInterrupt:
         return 130
     except OSError as exc:
