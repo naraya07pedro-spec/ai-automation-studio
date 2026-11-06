@@ -889,8 +889,13 @@ $("hn-job-discover").addEventListener("click",async()=>{
    " public job titles. Select an ID and grant it separately with your password. No permission was changed.";
  }catch(error){
   if(revision===hnJobPreviewRevision&&operatorCsrf){
-   clearHNJobPreview("Discovery unavailable: "+error.message+
-    ". No grant or task was executed.");
+   hnJobPreview=null;
+   $("hn-job-preview-choice").replaceChildren();
+   $("hn-job-preview-choice").disabled=true;
+   $("hn-job-use-id").disabled=true;
+   $("hn-job-discovery-output").textContent=
+    "Discovery unavailable: "+error.message+
+    ". No grant or task was executed.";
    $("hn-job-discovery-status").textContent=
     "Provider preview failed or invalid; no source permission was granted.";
   }
@@ -925,6 +930,7 @@ const refreshHNStories=async()=>{
  }
  for(const id of ["hn-story-id","hn-story-password","hn-story-grant","hn-story-revoke"])
   $(id).disabled=!hnStoryEnabled;
+ $("hn-job-discover").disabled=!hnStoryEnabled||!hnJobDiscoveryEnabled;
 };
 const changeHNStory=async operation=>{
  const raw=$("hn-story-id").value.trim();
