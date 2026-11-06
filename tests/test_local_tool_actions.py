@@ -1,5 +1,6 @@
 """Slice 77: deliberate two-phase owner action, synthetic CSV and local files."""
 from http.server import ThreadingHTTPServer
+from hashlib import sha256
 import http.client
 import json
 from pathlib import Path
@@ -13,7 +14,7 @@ sys.path.insert(0, str(ROOT / "app"))
 from local_csv_profile import profile_selected_csv
 from local_agent_task_plans import LocalAgentPlanStore, PlanError, validate_steps
 from local_operator_auth import LocalOperatorAuth
-from local_security_audit import LocalSecurityAudit
+from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_tool_registry import (
     ACTION_TOOL, BATCH_READ_TOOLS, registered_tools, require_owner_action,
     ToolPermissionError)
@@ -124,6 +125,53 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(4, len([e for e in events
                                  if e["action"] == AUDIT_ACTION]))
         self.assertTrue(all(e["source_fingerprint"] == "" for e in events))
+
+    def test_expired_ticket_cannot_mutate_and_needs_fresh_preview(self):
+        self.finished()
+        p = self.gate.preview(ACTION_TOOL, self.pid)
+        with self.gate.lock:
+            self.gate._tickets[p["preview_token"]]["expires"] = 0
+        with self.assertRaisesRegex(ToolActionError,
+                                    "action_preview_expired_or_changed"):
+            self.gate.commit(ACTION_TOOL, self.pid, p["preview_token"],
+                             p["preview_sha256"])
+        self.assertFalse(self.gate.writer.root.exists())
+        second = self.gate.preview(ACTION_TOOL, self.pid)
+        self.assertNotEqual(p["preview_token"], second["preview_token"])
+        self.assertEqual("CREATED", self.gate.commit(
+            ACTION_TOOL, self.pid, second["preview_token"],
+            second["preview_sha256"])["status"])
+
+    def test_audit_failure_after_file_create_is_uncertain_not_auto_retried(self):
+        self.finished()
+        p = self.gate.preview(ACTION_TOOL, self.pid)
+        original_record = self.audit.record
+        def fail_after_write(action, outcome, repo=None):
+            if action == AUDIT_ACTION and outcome == "SUCCESS":
+                raise SecurityAuditError("audit_restart_required")
+            return original_record(action, outcome, repo)
+        self.audit.record = fail_after_write
+        try:
+            with self.assertRaisesRegex(ToolActionError,
+                                        "action_write_outcome_uncertain"):
+                self.gate.commit(ACTION_TOOL, self.pid, p["preview_token"],
+                                 p["preview_sha256"])
+        finally:
+            self.audit.record = original_record
+        saved = self.gate.writer.root / p["filename"]
+        self.assertTrue(saved.is_file())
+        self.assertEqual(p["preview_sha256"],
+                         sha256(saved.read_bytes()).hexdigest())
+        # The old grant was consumed, even though the response was uncertain.
+        with self.assertRaisesRegex(ToolActionError,
+                                    "action_preview_expired_or_changed"):
+            self.gate.commit(ACTION_TOOL, self.pid, p["preview_token"],
+                             p["preview_sha256"])
+        retry = self.gate.preview(ACTION_TOOL, self.pid)
+        result = self.gate.commit(ACTION_TOOL, self.pid,
+                                  retry["preview_token"], retry["preview_sha256"])
+        self.assertEqual("EXISTS_IDENTICAL", result["status"])
+        self.assertEqual(0, result["local_file_write_count"])
 
     def test_altered_file_and_symlink_never_overwritten(self):
         self.finished()
