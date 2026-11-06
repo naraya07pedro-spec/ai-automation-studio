@@ -1443,6 +1443,7 @@ const renderPlan=plan=>{
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,batch_run_status:plan.batch_run_status||"IDLE",
+  hn_approval_epoch:plan.hn_approval_epoch??null,
   goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
   verified_numeric_handoff_lineage:plan.handoffs||[],
