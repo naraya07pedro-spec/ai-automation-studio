@@ -21,6 +21,7 @@ from local_tool_registry import (
     ToolPermissionError)
 from local_tool_action_gate import (
     LocalCSVProfileActionGate, ToolActionError, AUDIT_ACTION)
+from local_plan_artifacts import LocalPlanArtifactExporter
 from local_server import create_handler
 
 CSV = "revenue,stage\n10,SYNTHETIC_PERSON_1\n20,SYNTHETIC_PERSON_2\n,SYNTHETIC_PERSON_3\n"
@@ -314,6 +315,8 @@ class ActionHTTPTests(unittest.TestCase):
             local_agent_runner=lambda *_: None,
             local_agent_planner=lambda *_a, **_k: PLAN,
             local_agent_plan_store=self.store,
+            plan_artifact_exporter=LocalPlanArtifactExporter(
+                self.home / "exports"),
             plan_action_gate=self.gate))
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -391,6 +394,7 @@ class ActionHTTPTests(unittest.TestCase):
         action = next(t for t in catalog["tool_registry"]
                       if t["name"] == ACTION_TOOL)
         self.assertEqual("LOCAL_CREATE_ONLY", action["effect"])
+        self.assertTrue(action["enabled"])
         self.assertFalse(action["batch_allowed"])
 
     def test_preview_audit_failure_prevents_any_mutation(self):
