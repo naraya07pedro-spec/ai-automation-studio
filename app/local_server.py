@@ -311,6 +311,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "plan_action_export": (
                                      local_agent_planner is not None
                                      and local_agent_plan_store is not None
+                                     and local_agent_plan_store.csv_profiler is not None
+                                     and plan_artifact_exporter is not None
                                      and plan_action_gate is not None),
                                  "tool_registry": registered_tools(
                                      planning=(local_agent_planner is not None
@@ -769,7 +771,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 return
             if self.path in ("/api/local-agent-action-preview",
                              "/api/local-agent-action-commit"):
-                if plan_action_gate is None:
+                if (plan_action_gate is None or plan_artifact_exporter is None
+                        or local_agent_plan_store is None
+                        or local_agent_plan_store.csv_profiler is None):
                     self._send(403, {"error": "local_tool_permission_denied"})
                     return
                 previewing = self.path.endswith("preview")
