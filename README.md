@@ -3,6 +3,20 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Frozen tool registry and separately approved local JSON actions (Slice 77)
+
+A code-owned [tool-effect registry](docs/LOCAL_TOOL_ACTION_GATE_V1.md) classifies the eight existing reviewed read tools and both owner-only local-create actions: the **existing** Markdown report export and **new** `local_csv_profile_json_export`. Neither write action can be model-planned or run in the existing server-owned read-only batch; both server endpoints now enforce their registry permissions.
+
+After a previously reviewed and completed CSV profiling plan, click **Preview CSV profile JSON (no write)** to inspect the exact **aggregate-only** JSON and SHA-256, then separately **Confirm & save verified JSON** with a single-use, 5-minute server-issued preview ticket. The server recomputes the entire original CSV profile against the frozen source before writing, logs the write attempt and outcome to its local security ledger, and uses a fixed create-only file destination:
+`~/.ai-automation-studio/exports/local-agent-csv-profile-<plan-id>.json`. It never overwrites changed files. Identical repeated exports are safe/idempotent.
+
+Enable it only with all flags:
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-plan-csv --enable-plan-artifacts --enable-plan-actions
+```
+
+The file is **plaintext** and may disclose aggregates; do not use confidential datasets, credentials or PII. No generic filesystem, shell, email, webhook, external API write, model-selected path or scheduled action is granted. Source-data validity remains the owner's responsibility. Real owner-PC Windows/Ollama acceptance remains deferred.
+
 ## Verified CSV-to-calculator numeric handoffs (Slice 76)
 
 An owner-approved task plan can now use numeric aggregates from a **prior, explicitly selected and executed CSV profiling step** as typed calculator operands. Example reviewed plan: profile `revenue`, then multiply `{"from_step":1,"field":"column_sum","column":"revenue"}` by `2`. Strict supported fields are `row_count`, `column_sum`, `column_nonempty_count`, `column_missing_count` and `column_distinct_count`, all bound to an earlier approved `local_csv_profile` step; column metrics require a column name previously selected in that step.

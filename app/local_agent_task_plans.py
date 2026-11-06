@@ -31,14 +31,12 @@ from local_agent_handoffs import (
 from local_csv_profile import (
     CSVProfileError, parse_selected_csv, csv_source_metadata,
     profile_selected_csv, COLUMN_NAME, CSV_NAME, MAX_CSV_BYTES, MAX_CSV_COLUMNS)
+from local_tool_registry import BATCH_READ_TOOLS
 from local_agent_memory import (MemoryCardError, valid_selection,
                                 validate_memory_text, valid_memory_id,
                                 MAX_SELECTED_MEMORY)
 
 MAX_STEPS = 3
-BATCH_READ_TOOLS = frozenset(("calculate", "utc_now", "github_public_issues",
-    "github_issue_triage", "github_issue_analysis", "local_document_question",
-    "local_multi_document_question", "local_csv_profile"))
 MAX_PLANS = 12
 MAX_GOAL = 1200
 LOCAL_DOCUMENT_TOOL = "local_document_question"
