@@ -165,9 +165,9 @@ class LocalConnectorManager:
         return row
 
     def _ledger_path(self, connector_id):
-        directory = ("vault-managed-webhook-ledgers" if self._vault is not None
-                     else "managed-webhook-ledgers")
-        return self.path.parent / directory / (connector_id+".sqlite3")
+        # Reuse immutable per-ID send receipts between legacy and encrypted
+        # storage modes: a vault migration must NOT reset no-retry history.
+        return self.path.parent / "managed-webhook-ledgers" / (connector_id+".sqlite3")
 
     def _client(self, row):
         key = row["connector_id"]
