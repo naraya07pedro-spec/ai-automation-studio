@@ -434,9 +434,11 @@ class ScheduledWebhookAutopilot:
                     expires_utc,max_sends,attempted,control_epoch,not_before_utc,
                     last_slot_utc,created_utc,destination_hash
                     FROM scheduled_webhook_policies WHERE status='ACTIVE'
-                    ORDER BY created_utc LIMIT ?""", (MAX_DISPATCH_PER_TICK,)).fetchall()
+                    ORDER BY created_utc""").fetchall()
             count = 0
             for row in rows:
+                if count >= MAX_DISPATCH_PER_TICK:
+                    break
                 try:
                     count += self._run_policy(self._row(row))
                 except (AutopilotError, sqlite3.Error):
