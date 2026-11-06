@@ -1,0 +1,42 @@
+name: Windows one-click local workbench acceptance
+
+on:
+  pull_request:
+    paths:
+      - "START_AI_STUDIO.cmd"
+      - "app/launch_workbench.py"
+      - "tests/test_launch_workbench.py"
+      - "tests/test_launch_workbench_e2e.py"
+      - ".github/workflows/windows-quickstart.yml"
+      - "docs/LAUNCH_NOW_V1.md"
+  push:
+    branches: [main]
+    paths:
+      - "START_AI_STUDIO.cmd"
+      - "app/launch_workbench.py"
+      - "tests/test_launch_workbench.py"
+      - "tests/test_launch_workbench_e2e.py"
+      - ".github/workflows/windows-quickstart.yml"
+      - "docs/LAUNCH_NOW_V1.md"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-quickstart:
+    name: Disposable Windows local quickstart and HTTP smoke
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pure launch profile and denial tests
+        run: python -m unittest discover -s tests -p test_launch_workbench.py -v
+      - name: Boot real local-only HTTP with disposable owner
+        run: python -m unittest discover -s tests -p test_launch_workbench_e2e.py -v
+      - name: Explain test scope
+        run: echo "CI tests the disposable Windows host, not the owner's PC or Ollama model."
