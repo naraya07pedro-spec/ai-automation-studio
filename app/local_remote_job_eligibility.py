@@ -88,9 +88,9 @@ def assess_public_job_language(*, title, location, description):
     years_value = (max(int(m.group(1)) for m in all_years)
                    if all_years else None)
     years = _evidence(body, re.compile(
-        r"(?<![\\d\\-–])\\b" + str(years_value) +
-        r"\\s*\\+?\\s*(?:years|yrs)\\s+(?:of\\s+)?"
-        r"(?:relevant\\s+|professional\\s+|commercial\\s+|hands[\\s-]+on\\s+)?experience\\b",
+        r"(?<![\d\-–])\b" + str(years_value) +
+        r"\s*\+?\s*(?:years|yrs)\s+(?:of\s+)?"
+        r"(?:relevant\s+|professional\s+|commercial\s+|hands[\s-]+on\s+)?experience\b",
         re.I), "public_job_description") if years_value is not None else None
     if not remote and _REMOTE.search(loc+" "+job_title):
         remote = _matches(loc, (_REMOTE,), "public_location_label")
