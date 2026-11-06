@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
+from local_hn_story_policy import HNStoryPolicy, valid_story_id
+from local_hn_story_reader import AllowedHNStoryReader
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from local_csv_profile import profile_selected_csv, csv_source_metadata
@@ -80,7 +82,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_device_acceptance=None,
                    local_device_preflight=None, model_safety_state=None,
                    agent_memory_store=None, plan_artifact_exporter=None,
-                   plan_action_gate=None):
+                   plan_action_gate=None, hn_policy=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -319,6 +321,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                and local_agent_plan_store is not None),
                                      github=(local_agent_plan_store is not None
                                              and local_agent_plan_store.github_reader is not None),
+                                     hn=(local_agent_plan_store is not None
+                                         and local_agent_plan_store.hn_reader is not None),
                                      document=(local_agent_plan_store is not None
                                                and local_agent_plan_store.document_analyzer is not None),
                                      documents=(local_agent_plan_store is not None
@@ -347,6 +351,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "plan_memory": (local_agent_planner is not None
                                                  and local_agent_plan_store is not None
                                                  and agent_memory_store is not None),
+                                 "hn_story_read": bool(
+                                     local_agent_planner is not None
+                                     and local_agent_plan_store is not None
+                                     and local_agent_plan_store.hn_reader is not None
+                                     and hn_policy is not None),
                                  "github_plan_read": bool(
                                      local_agent_plan_store is not None
                                      and local_agent_plan_store.github_reader is not None),
@@ -495,6 +504,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return
                 self._send(200, {"events": events})
                 return
+            if route.path == "/api/local-hn-stories" and not route.query:
+                if hn_policy is None:
+                    self._send(403, {"error":"hn_story_read_disabled"})
+                else:
+                    self._send(200, hn_policy.snapshot())
+                return
             if route.path == "/api/local-github-sources" and not route.query:
                 if source_policy is None:
                     self._send(200, {"allowed": [], "epoch": 0, "test_only": True})
@@ -529,7 +544,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def do_POST(self):
             if self.path not in ("/api/operator-login", "/api/operator-logout",
-                                 "/api/operator-rotate", "/api/local-github-source-grant",
+                                 "/api/operator-rotate", "/api/local-hn-story-grant",
+                                 "/api/local-hn-story-revoke",
+                                 "/api/local-github-source-grant",
                                  "/api/local-github-source-revoke",
                                  "/api/mock-run", "/api/mock-review", "/api/mock-setup", "/api/mock-triage", "/api/mock-appointment", "/api/mock-crm-handoff", "/api/mock-knowledge-routing", "/api/local-create", "/api/local-activate", "/api/local-run", "/api/local-batch-preview", "/api/local-batch-commit", "/api/local-stage", "/api/local-publish", "/api/local-pause", "/api/local-resume", "/api/local-github-preview", "/api/local-github-commit",
                                  "/api/local-agent-run", "/api/local-agent-clear",
@@ -967,6 +984,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 kwargs["document_set_context"] = source_set_metadata
                             if csv_metadata is not None:
                                 kwargs["csv_context"] = csv_metadata
+                            if hn_policy is not None:
+                                kwargs["hn_allowed_ids"] = hn_policy.snapshot()[
+                                    "allowed_story_ids"]
                             proposal = local_agent_planner(
                                 data["goal"], data["model"], **kwargs)
                             # The plan store independently validates the exact
@@ -1210,6 +1230,41 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 self._send(code, outcome,
                            cookie_header=self._no_cookie() if code == 200 else None)
                 return
+            if self.path in ("/api/local-hn-story-grant",
+                             "/api/local-hn-story-revoke"):
+                if (type(data) is not dict or
+                        set(data) != {"story_id", "current_password"} or
+                        not valid_story_id(data.get("story_id")) or
+                        type(data.get("current_password")) is not str):
+                    self._send(422, {"error":"invalid_hn_grant_request"})
+                    return
+                if hn_policy is None or operator_auth is None:
+                    self._send(403, {"error":"hn_story_read_disabled"})
+                    return
+                action = ("HN_STORY_GRANT" if self.path.endswith("grant")
+                          else "HN_STORY_REVOKE")
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                approved = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if approved != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(approved, {"error": (
+                        "operator_restart_required" if approved == 503
+                        else "operator_login_locked" if approved == 429
+                        else "invalid_operator_credentials")})
+                    return
+                method = hn_policy.grant if self.path.endswith("grant") else hn_policy.revoke
+                code, outcome = method(data["story_id"])
+                end = ("SUCCESS" if code == 200 else
+                       "UNCERTAIN" if outcome.get("error") == "hn_policy_restart_required"
+                       else "DENIED" if code in (401,403,404,409,422) else "FAILED")
+                if not self._audit_event(action, end):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                self._send(code, outcome)
+                return
             if self.path in ("/api/local-github-source-grant",
                              "/api/local-github-source-revoke"):
                 if type(data) is not dict or set(data) != {
@@ -1367,7 +1422,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_multi_documents=False,
                        enable_agent_memory=False,
                        enable_plan_artifacts=False,
-                       enable_plan_csv=False, enable_plan_actions=False):
+                       enable_plan_csv=False, enable_plan_actions=False,
+                       enable_hn_story_read=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1388,6 +1444,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("agent_plans_require_local_agent")
     if enable_agent_github_read and not enable_agent_plans:
         raise ValueError("github_plan_read_requires_agent_plans")
+    if enable_hn_story_read and not enable_agent_plans:
+        raise ValueError("hn_story_read_requires_agent_plans")
     if enable_plan_artifacts and not enable_agent_plans:
         raise ValueError("plan_artifacts_require_agent_plans")
     if enable_plan_csv and not enable_agent_plans:
@@ -1399,13 +1457,17 @@ def start_local_server(port=8765, enable_local_agent=False,
     conversation = None
     plan_store = None
     memory_store = None
+    hn_policy = (HNStoryPolicy(home / "hn-story-grants.json")
+                 if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     if enable_agent_plans:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
+        hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None
         plan_store = LocalAgentPlanStore(
             home / "agent-task-plans.sqlite3", github_reader=reader,
+            hn_reader=hn_reader,
             memory_store=memory_store,
             document_analyzer=(analyze_local_document
                                if enable_local_documents else None),
@@ -1421,19 +1483,23 @@ def start_local_server(port=8765, enable_local_agent=False,
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
                            source_policy=source_policy, security_audit=audit,
+                           hn_policy=hn_policy,
                            local_agent_runner=run_agent if enable_local_agent else None,
                            agent_conversation=conversation,
                            local_agent_models=installed_models if enable_local_agent else None,
                            local_agent_probe=probe_model if enable_local_agent else None,
                            local_agent_planner=(
                                (lambda goal, model, memory_context=None, document_context=None,
-                                       document_set_context=None, csv_context=None:
+                                       document_set_context=None, csv_context=None,
+                                       hn_allowed_ids=None:
                                 propose_readonly_plan(
                                    goal, model, allow_github=enable_agent_github_read,
                                    memory_context=memory_context,
                                    document_context=document_context,
                                    document_set_context=document_set_context,
-                                   csv_context=csv_context))
+                                   csv_context=csv_context,
+                                   allow_hn=enable_hn_story_read,
+                                   hn_allowed_ids=hn_allowed_ids))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_document_analyzer=(
@@ -1515,6 +1581,8 @@ def main(argv=None):
                         help="Opt in to separate preview and one-use owner-confirmed create-only CSV profile JSON exports; also requires --enable-plan-csv and --enable-plan-artifacts.")
     parser.add_argument("--enable-plan-artifacts", action="store_true",
                         help="Allow explicit, write-once Markdown report export to the local owner workspace.")
+    parser.add_argument("--enable-hn-story-read", action="store_true",
+                        help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
@@ -1528,6 +1596,8 @@ def main(argv=None):
         parser.error("--enable-agent-plans requires --enable-local-agent")
     if args.enable_agent_github_read and not args.enable_agent_plans:
         parser.error("--enable-agent-github-read requires --enable-agent-plans")
+    if args.enable_hn_story_read and not args.enable_agent_plans:
+        parser.error("--enable-hn-story-read requires --enable-agent-plans")
     if args.enable_plan_artifacts and not args.enable_agent_plans:
         parser.error("--enable-plan-artifacts requires --enable-agent-plans")
     if args.enable_plan_csv and not args.enable_agent_plans:
@@ -1609,7 +1679,8 @@ def main(argv=None):
                            enable_multi_documents=args.enable_multi_documents,
                            enable_plan_artifacts=args.enable_plan_artifacts,
                            enable_plan_csv=args.enable_plan_csv,
-                           enable_plan_actions=args.enable_plan_actions)
+                           enable_plan_actions=args.enable_plan_actions,
+                           enable_hn_story_read=args.enable_hn_story_read)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
