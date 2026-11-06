@@ -156,7 +156,7 @@ class GoogleGmailMetadata:
         if type(access) is not str or not 16 <= len(access) <= 8192:
             raise GmailConnectorError("google_token_refresh_failed")
         scope = token.get("scope")
-        if scope is not None and GMAIL_SCOPE not in str(scope).split():
+        if scope is not None and set(str(scope).split()) != {GMAIL_SCOPE}:
             raise GmailConnectorError("google_scope_not_granted", 403)
         return access
 
