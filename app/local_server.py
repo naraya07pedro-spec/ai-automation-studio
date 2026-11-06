@@ -28,7 +28,9 @@ from local_multi_document_analysis import (analyze_multiple_documents,
                                            validate_multiple_documents)
 from local_agent_batch_runner import LocalAgentBatchRunner
 from local_plan_artifacts import LocalPlanArtifactExporter, PlanArtifactError
-from local_tool_registry import ACTION_TOOL, registered_tools
+from local_tool_registry import (
+    ACTION_TOOL, MARKDOWN_ACTION_TOOL, require_owner_action,
+    ToolPermissionError, registered_tools)
 from local_tool_action_gate import LocalCSVProfileActionGate, ToolActionError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
@@ -321,6 +323,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                 and local_agent_plan_store.multi_document_analyzer is not None),
                                      csv=(local_agent_plan_store is not None
                                           and local_agent_plan_store.csv_profiler is not None),
+                                     artifact=(plan_artifact_exporter is not None),
                                      action=(plan_action_gate is not None)),
                                  "plan_artifact_export": (local_agent_planner is not None
                                                           and local_agent_plan_store is not None
@@ -886,7 +889,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         self._send(422, {"error": str(exc)})
                         return
                 if self.path == "/api/local-agent-plan-export":
-                    if plan_artifact_exporter is None:
+                    try:
+                        require_owner_action(
+                            MARKDOWN_ACTION_TOOL,
+                            enabled=(plan_artifact_exporter is not None))
+                    except ToolPermissionError:
                         self._send(403, {"error": "plan_artifact_export_disabled"})
                         return
                     if not self._audit_event("LOCAL_ARTIFACT_EXPORT", "ATTEMPT"):
