@@ -348,6 +348,7 @@ aas:timeline:urgent
 <div id="greenhouse-status" class="setup-msg" role="status" aria-live="polite">Disabled. Start with --enable-local-agent --enable-agent-plans --enable-greenhouse-evidence.</div>
 </div><div>
 <div class="kicker">SOURCE · VERIFIED VS NOT VERIFIED</div>
+<p class="muted">Eligibility triage reads bounded ATS job wording and shows exact excerpts in the JSON below. A location conflict is a warning, not a final rejection. “Remote” or “Worldwide” alone never proves hiring eligibility for Indonesia; work permits and application forms are not checked.</p>
 <div id="greenhouse-source-links" class="core-list"></div>
 <pre id="greenhouse-result" class="trace">No Greenhouse ATS posting checked. No conclusion about an employer, job status or Indonesia eligibility.</pre>
 </div></div></section>
@@ -888,9 +889,17 @@ $("greenhouse-check").addEventListener("click",async()=>{
   link.href=safeLink;link.target="_blank";link.rel="noopener noreferrer";
   link.textContent="Open public Greenhouse posting #"+input.job_id;
   $("greenhouse-source-links").replaceChildren(link);
+  const triage=out.eligibility_triage;
+  if(!triage||triage.version!=="ATS_PUBLIC_ELIGIBILITY_TRIAGE_V1"||
+     triage.candidate_work_location!=="Indonesia"||
+     !["MANUAL_REVIEW_REQUIRED","POSTING_LOCATION_CONFLICT_FOR_INDONESIA"].includes(
+       triage.indonesia_candidate_verdict))
+   throw Error("invalid_greenhouse_eligibility_triage");
   $("greenhouse-result").textContent=JSON.stringify(out,null,2);
   $("greenhouse-status").textContent=
-   "Public Greenhouse record observed at the stated check time. Employer verification, application acceptance and Indonesia eligibility remain unverified.";
+   triage.indonesia_candidate_verdict==="POSTING_LOCATION_CONFLICT_FOR_INDONESIA"
+    ?"ATS text contains an explicit non-Indonesia location requirement. Verify with the employer; this is a posting-language conflict, not a legal decision."
+    :"Public ATS post observed. Evidence triage requires manual verification of work location, authorization, remote rules and seniority; no eligibility was proven.";
  }catch(error){
   if(revision===greenhouseEvidenceRevision&&operatorCsrf){
    $("greenhouse-source-links").replaceChildren();

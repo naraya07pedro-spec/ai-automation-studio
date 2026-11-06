@@ -31,6 +31,9 @@ on:
       - "docs/HN_JOB_DISCOVERY_V1.md"
       - "app/local_greenhouse_job_evidence.py"
       - "tests/test_local_greenhouse_job_evidence.py"
+      - "app/local_remote_job_eligibility.py"
+      - "tests/test_local_remote_job_eligibility.py"
+      - "docs/REMOTE_JOB_ELIGIBILITY_EVIDENCE_V1.md"
       - "docs/GREENHOUSE_PUBLIC_ATS_EVIDENCE_V1.md"
       - "docs/OWNER_SELECTED_CSV_PROFILE_V1.md"
   workflow_dispatch:
@@ -115,6 +118,10 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_local_greenhouse_job_evidence.py -v
+      - name: Evidence-only remote job eligibility triage on disposable Windows
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_local_remote_job_eligibility.py -v
       - name: Scope and cleanup
         shell: pwsh
         run: |

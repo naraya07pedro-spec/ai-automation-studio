@@ -1310,6 +1310,19 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                             or result.get("public_job_post_observed") is not True
                             or result.get("indonesia_eligibility_verified") is not False
                             or result.get("hn_to_ats_match_verified") is not False
+                            or type(result.get("eligibility_triage")) is not dict
+                            or result["eligibility_triage"].get("version") !=
+                               "ATS_PUBLIC_ELIGIBILITY_TRIAGE_V1"
+                            or result["eligibility_triage"].get(
+                                "candidate_work_location") != "Indonesia"
+                            or result["eligibility_triage"].get(
+                                "indonesia_candidate_verdict") not in (
+                                "MANUAL_REVIEW_REQUIRED",
+                                "POSTING_LOCATION_CONFLICT_FOR_INDONESIA")
+                            or result["eligibility_triage"].get(
+                                "source_is_public_employer_claim_not_legally_verified") is not True
+                            or result["eligibility_triage"].get(
+                                "no_auto_apply_or_filter") is not True
                             or result.get("external_read_count") != 1
                             or result.get("external_write_count") != 0
                             or result.get("model_calls") != 0

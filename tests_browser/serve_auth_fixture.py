@@ -233,7 +233,7 @@ def main():
                                "location":{"name":"US-only / simulated"},
                                "first_published":"2026-10-01T10:00:00Z",
                                "updated_at":"2026-10-03T10:00:00Z",
-                               "content":"<p>Mock ATS public job, no eligibility claim.</p>",
+                               "content":"<p>Candidates must be based in the United States. 3+ years of experience required. Remote US-only.</p>",
                                "absolute_url":"https://evil.invalid/untrusted",
                            } if board=="fixturecorp" and job==1234567
                              else (_ for _ in ()).throw(
