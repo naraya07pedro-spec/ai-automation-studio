@@ -263,6 +263,15 @@ class LocalReadOnlyAgentSchedules:
             return 0
         acquired=False
         try:
+            # Idle polling must NOT churn the durable model safety checkpoint.
+            # Only enter the shared inference gate if a due slot actually
+            # exists. The second transaction below still claims atomically.
+            with self.lock:
+                pending=self.db.execute("""SELECT 1 FROM ai_schedules
+                    WHERE status='ACTIVE' AND next_due_utc<=? LIMIT 1""",
+                    (_iso(self.clock()),)).fetchone()
+            if pending is None:
+                return 0
             with self.agent_state_lock:
                 acquired=self.agent_gate.acquire(blocking=False)
                 if not acquired:
