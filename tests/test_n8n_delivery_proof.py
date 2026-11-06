@@ -245,6 +245,57 @@ class N8NSignedDeliveryProofTests(unittest.TestCase):
         with self.assertRaisesRegex(N8NProofError,"strong_connector_hmac_secret_required"):
             self.proofs.reconcile(self.sign(did,cid="short_secret",secret="abc"))
 
+    def test_proof_lookup_does_not_hold_manager_lock_waiting_dispatch_lock(self):
+        did=self.dispatch()
+        entered=threading.Event()
+        errors=[]
+        original=self.autopilot._get
+        def tracked_get(*args,**kwargs):
+            entered.set()
+            return original(*args,**kwargs)
+        self.autopilot._get=tracked_get
+        self.autopilot.lock.acquire()
+        try:
+            def worker():
+                try:
+                    self.proofs.reconcile(self.sign(did))
+                except Exception as exc:
+                    errors.append(str(exc))
+            thread=threading.Thread(target=worker,daemon=True)
+            thread.start()
+            self.assertTrue(entered.wait(3),
+                "Proof importer should reach dispatcher lookup.")
+            can_get_manager=self.manager._lock.acquire(timeout=0.5)
+            try:
+                self.assertTrue(can_get_manager,
+                    "Proof importer must NOT hold manager lock while waiting on dispatcher.")
+            finally:
+                if can_get_manager:
+                    self.manager._lock.release()
+        finally:
+            self.autopilot.lock.release()
+            self.autopilot._get=original
+        thread.join(timeout=4)
+        self.assertFalse(thread.is_alive(),"Proof import deadlocked")
+        self.assertEqual(errors,[])
+        self.assertEqual(len(self.proofs.list()["records"]),1)
+
+    def test_import_and_revoke_concurrency_completes_without_new_send(self):
+        did=self.dispatch()
+        errors=[]
+        def reconcile():
+            try:
+                self.proofs.reconcile(self.sign(did))
+            except N8NProofError as exc:
+                errors.append(str(exc))
+        thread=threading.Thread(target=reconcile,daemon=True)
+        thread.start()
+        self.manager.revoke("n8n_primary")
+        thread.join(timeout=4)
+        self.assertFalse(thread.is_alive(),"Connector revoke deadlocked proof import")
+        self.assertLessEqual(len(self.proofs.list()["records"]),1)
+        self.assertEqual(len(self.sent),1)
+
     def test_invalid_fields_and_no_untrusted_file_paths(self):
         for bad in [
             {},
