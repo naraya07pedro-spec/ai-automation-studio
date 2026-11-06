@@ -251,7 +251,7 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 <section class="panel" id="managed-connectors-panel" aria-label="Manage multiple private webhook connectors" style="margin-top:20px">
  <div class="split"><h2>08 · Managed connections</h2><span class="pill" id="managed-badge">Checking permissions</span></div>
  <p class="sub">Register up to four independent n8n/custom HTTPS webhook destinations. Each connection has its own identity and durable single-send ledger. Register or revoke using your current owner password, without changing source code or restarting the app.</p>
- <div class="notice" id="managed-storage-notice" style="margin:18px 0">Storage status is reported by the server after sign-in. Legacy mode is not encrypted. Encrypted mode uses AES-256-GCM and an external master key; neither protects a compromised server account. No AI or scheduler can use these connections automatically.</div>
+ <div class="notice" id="managed-storage-notice" style="margin:18px 0">Storage status is reported by the server after sign-in. Legacy mode is not encrypted. Encrypted mode uses AES-256-GCM and an external master key; neither protects a compromised server account. No model can use them; scheduling requires an explicit encrypted-only owner grant in section 10.</div>
  <div class="grid">
   <div>
    <h2 style="font-size:17px">Register a new webhook</h2>
@@ -1119,7 +1119,7 @@ async function managedRefresh(){
   managedEnabled=!!data.enabled;
   const encrypted=data.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
   $("managed-storage-notice").textContent=encrypted?
-   "ENCRYPTED STORAGE: AES-256-GCM protects this registry at rest using a 32-byte master key supplied separately at startup. Keep that key backed up separately. This does not protect a compromised OS/process or backups of old plaintext registries. Neither AI models nor schedules receive this permission.":
+   "ENCRYPTED STORAGE: AES-256-GCM protects this registry at rest using a 32-byte master key supplied separately at startup. Keep that key backed up separately. This does not protect a compromised OS/process or backups of old plaintext registries. AI models receive no permission. Schedules only gain narrowly bounded permission after an explicit owner authorization in section 10.":
    "LEGACY PLAINTEXT STORAGE: the registry is protected only by OS file permissions, NOT encrypted. Do not use high-value real credentials without verifying device access controls. Start --enable-encrypted-managed-webhooks for a separate encrypted registry.";
   managedItems=Array.isArray(data.connectors)?data.connectors:[];
   managedAutoChoices();
