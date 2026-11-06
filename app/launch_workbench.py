@@ -98,6 +98,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--enable-webhook", action="store_true",
+                        help="Explicitly permit owner-confirmed n8n HTTPS webhook, requires AAS_WEBHOOK_URL environment.")
     parser.add_argument("--enable-history", action="store_true",
                         help="Explicitly persist local chat transcript in plaintext SQLite.")
     parser.add_argument("--no-browser", action="store_true",
@@ -109,6 +111,8 @@ def main(argv=None):
         return 2
     try:
         flags = feature_flags(args.mode, history=args.enable_history)
+        if args.enable_webhook:
+            flags += ("--enable-outbound-webhook",)
     except ValueError as exc:
         print("Launch blocked: " + str(exc))
         return 2
@@ -132,7 +136,8 @@ def main(argv=None):
             return 2
 
     print("AI Automation Studio starting at " + URL)
-    print("Profile: " + args.mode + " | HTTP: loopback only | external writes: disabled")
+    print("Profile: " + args.mode + " | HTTP: loopback only | webhook: " +
+          ("OWNER-APPROVAL REQUIRED" if args.enable_webhook else "disabled"))
     print("This server stays on only while this console stays open. Use Ctrl+C to stop.")
     if args.mode != "offline":
         print("Local AI needs independently installed Ollama and an installed model.")
