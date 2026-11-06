@@ -283,6 +283,21 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+<section class="panel" id="google-gmail-panel" aria-label="Google Gmail read-only metadata" style="margin-top:20px">
+ <div class="split"><h2>09 · Google Gmail metadata</h2><span class="pill" id="gmail-badge">Checking</span></div>
+ <p class="sub">Direct official Google OAuth connector. Read-only: view mailbox counts or the latest five inbox message headers, never full bodies. No send, delete, model access, background polling, or automatic scheduled reads.</p>
+ <div class="notice" style="margin:18px 0">Connect privately on your PC with <code>python tools/connect_google_gmail.py --client-id YOUR_DESKTOP_OAUTH_CLIENT_ID</code> and launch Studio using <code>--enable-google-gmail-metadata</code>. This requires an independent AES-GCM vault master key. Google's consent, API enablement and verification rules still apply.</div>
+ <label for="gmail-owner">Current owner password required for EACH Gmail read</label>
+ <input id="gmail-owner" type="password" autocomplete="off" placeholder="Current private operator password" />
+ <div class="btnrow">
+  <button class="btn" id="gmail-refresh" type="button">Refresh connection status</button>
+  <button class="btn primary" id="gmail-profile" type="button" disabled>Read account counters</button>
+  <button class="btn" id="gmail-inbox" type="button" disabled>Read five inbox headers</button>
+ </div>
+ <p class="status" id="gmail-status" role="status" aria-live="polite">No Google account queried.</p>
+ <div class="output" id="gmail-output">Gmail content stays private until you authorize one explicit read.</div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -330,11 +345,12 @@ function lock(message){
  webhookEnabled=false;webhookPreview=null;$("webhook-password").value="";$("webhook-history").textContent="Session locked.";$("webhook-preview-output").textContent="Session locked.";refreshWebhookButtons();
  autopilotEnabled=false;autopilotPreview=null;$("autopilot-pass").value="";$("autopilot-consent").checked=false;$("autopilot-grants").textContent="Session locked.";$("autopilot-receipts").textContent="Session locked.";autopilotControls();
  managedEnabled=false;managedPreview=null;managedItems=[];$("managed-url").value="";$("managed-secret").value="";$("managed-owner").value="";$("managed-send-pass").value="";$("managed-list").textContent="Session locked.";$("managed-history").textContent="Session locked.";$("managed-preview-output").textContent="Session locked.";managedControls();
+ googleGmailClear();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh()]);
  stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();}},10000);
 }
 async function loadCapabilities(){
@@ -834,7 +850,51 @@ $("autopilot-arm-btn").addEventListener("click",async()=>{
 });
 
 
-let managedEnabled=false,managedItems=[],managedPreview=null,managedBusy=false;
+let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
+ function googleGmailClear(){
+  gmailEnabled=false;gmailConnected=false;
+  $("gmail-owner").value="";
+  $("gmail-badge").textContent="Locked";
+  $("gmail-output").textContent="Session locked.";
+  googleGmailControls();
+ }
+ function googleGmailControls(){
+  const can=!!csrf&&!busy&&!gmailBusy;
+  $("gmail-refresh").disabled=!can;
+  $("gmail-profile").disabled=!can||!gmailEnabled||!gmailConnected;
+  $("gmail-inbox").disabled=!can||!gmailEnabled||!gmailConnected;
+ }
+ async function googleGmailRefresh(){
+  if(!csrf||gmailBusy)return;
+  try{
+   const d=await request("/api/google-gmail-status");
+   gmailEnabled=!!d.enabled;gmailConnected=!!d.connected;
+   $("gmail-badge").textContent=!gmailEnabled?"Disabled by default":gmailConnected?"Encrypted grant available":"No grant enrolled";
+   $("gmail-status").textContent=gmailConnected?"Google grant exists locally; no API request made yet.":"Connect using the separate Desktop OAuth command.";
+  }catch(error){gmailEnabled=false;gmailConnected=false;$("gmail-status").textContent="Cannot verify Gmail grant: "+error.message;}
+  googleGmailControls();
+ }
+ for(const [id,api] of [["gmail-profile","/api/google-gmail-profile"],["gmail-inbox","/api/google-gmail-inbox"]]){
+  $(id).addEventListener("click",async()=>{
+   if(!csrf||gmailBusy||!gmailEnabled||!gmailConnected)return;
+   const current_password=$("gmail-owner").value;
+   if(!current_password){$("gmail-status").textContent="Enter current owner password for this read.";return;}
+   $("gmail-owner").value="";gmailBusy=true;googleGmailControls();
+   $("gmail-output").textContent="Requesting metadata from the official Gmail API…";
+   try{
+    const data=await request(api,{current_password});
+    $("gmail-output").textContent=JSON.stringify(data,null,2);
+    $("gmail-status").textContent="One owner-confirmed read completed. No emails were sent or changed.";
+   }catch(error){
+    $("gmail-output").textContent="No verified Gmail metadata returned.";
+    $("gmail-status").textContent="Read failed: "+error.message;
+   }finally{gmailBusy=false;googleGmailControls();}
+  });
+ }
+ $("gmail-refresh").addEventListener("click",googleGmailRefresh);
+ $("gmail-owner").addEventListener("input",googleGmailControls);
+
+ let managedEnabled=false,managedItems=[],managedPreview=null,managedBusy=false;
 function managedResetPreview(){
  managedPreview=null;
  $("managed-preview-output").textContent="No valid send preview. Prepare the exact event again.";
