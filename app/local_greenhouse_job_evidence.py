@@ -12,6 +12,7 @@ import re
 import ssl
 
 from local_hn_story_reader import _plain
+from local_remote_job_eligibility import assess_public_job_language
 
 HOST = "boards-api.greenhouse.io"
 BOARD = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?\Z")
@@ -122,6 +123,10 @@ class GreenhouseJobEvidence:
             "company_display_name": company,
             "location_label": location,
             "description_excerpt": details,
+            "eligibility_triage": assess_public_job_language(
+                title=data["title"],
+                location=data["location"].get("name") or "",
+                description=data.get("content") if type(data.get("content")) is str else ""),
             "first_published_utc": _date(data.get("first_published")),
             "updated_at_utc": _date(data.get("updated_at")),
             "application_deadline_utc": _date(data.get("application_deadline")),
