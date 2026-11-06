@@ -356,12 +356,18 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.assertFalse(out["hn_to_ats_match_verified"])
         self.assertFalse(out["accepting_applications_verified"])
         self.assertFalse(out["remote_work_verified"])
+        self.assertEqual("POSTING_LOCATION_CONFLICT_FOR_INDONESIA",out["eligibility_triage"]["indonesia_candidate_verdict"])
+        self.assertEqual(3,out["eligibility_triage"]["seniority_years_mentioned"])
         self.assertEqual(77712301,out["hn_story_id_supplied_by_owner"])
         self.assertEqual(1,out["external_read_count"])
         self.assertEqual(0,out["model_calls"])
         self.assertEqual(0,out["external_write_count"])
         expect(self.page.locator("#greenhouse-result")).to_contain_text(
             "SYNTHETIC ATS Integration Engineer")
+        expect(self.page.locator("#greenhouse-status")).to_contain_text(
+            "explicit non-Indonesia location requirement")
+        expect(self.page.locator("#greenhouse-result")).to_contain_text(
+            '"indonesia_candidate_verdict": "POSTING_LOCATION_CONFLICT_FOR_INDONESIA"')
         expect(self.page.locator("#greenhouse-result")).to_contain_text(
             '"indonesia_eligibility_verified": false')
         self.assertNotIn("evil.invalid",
