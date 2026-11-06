@@ -1,0 +1,50 @@
+name: Private VPS real reboot and schedule persistence acceptance contract
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/verify_private_vps_reboot.py'
+      - 'tests/test_private_vps_reboot_persistence.py'
+      - 'docs/PRIVATE_VPS_REBOOT_RECOVERY_V1.md'
+      - '.github/workflows/private-vps-reboot-persistence.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/verify_private_vps_reboot.py'
+      - 'tests/test_private_vps_reboot_persistence.py'
+      - 'docs/PRIVATE_VPS_REBOOT_RECOVERY_V1.md'
+      - '.github/workflows/private-vps-reboot-persistence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vps-reboot-persistence-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test non-destructive reboot baseline and persisted SQLite state
+        run: python -m unittest discover -s tests -p 'test_private_vps_reboot_persistence.py' -v
+      - name: Protect prior private VPS runtime checker and service unit
+        run: |
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_release.py' -v
+      - name: Verify Python and owner-only command CLI
+        run: |
+          python -m py_compile deploy/verify_private_vps_reboot.py
+          python deploy/verify_private_vps_reboot.py --help
+      - name: Ensure no automatic reboot is available through the CLI
+        run: |
+          if python deploy/verify_private_vps_reboot.py --reboot; then
+            echo "Reboot action must not exist"
+            exit 1
+          fi
+      - name: Preserve external evidence boundary
+        run: echo "CI uses synthetic Linux boot IDs and disposable SQLite fixtures. No Tencent instance, actual reboot, owner schedule or systemd process was reached."
