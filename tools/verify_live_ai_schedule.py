@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sqlite3
@@ -208,7 +209,15 @@ def live_acceptance(model):
 
 def save_redacted_evidence(report):
     """Owner-only, create-once redacted evidence; never write inside Git checkout."""
-    folder = Path.home() / ".ai-automation-studio" / "live-acceptance"
+    if (type(report) is not dict
+            or report.get("status") != "LIVE_LOCAL_OLLAMA_SCHEDULE_ACCEPTANCE_PASSED"
+            or report.get("inference_source") != "REAL_LOCAL_OLLAMA_127_0_0_1_11434"
+            or not re.fullmatch(r"[0-9a-f]{24}", str(report.get("task_id", "")))):
+        raise LiveAcceptanceError("only_genuine_live_reports_may_be_saved")
+    owner_root = Path.home() / ".ai-automation-studio"
+    if owner_root.is_symlink():
+        raise LiveAcceptanceError("unsafe_evidence_directory")
+    folder = owner_root / "live-acceptance"
     if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
         raise LiveAcceptanceError("unsafe_evidence_directory")
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -216,7 +225,7 @@ def save_redacted_evidence(report):
         raise LiveAcceptanceError("unsafe_evidence_directory")
     if os.name == "posix":
         os.chmod(folder, 0o700)
-    filename = "live-local-ollama-" + str(report.get("task_id", "invalid")) + ".json"
+    filename = "live-local-ollama-" + report["task_id"] + ".json"
     path = folder / filename
     if path.is_symlink():
         raise LiveAcceptanceError("unsafe_evidence_path")
