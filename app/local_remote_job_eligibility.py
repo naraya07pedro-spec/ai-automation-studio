@@ -18,7 +18,7 @@ _LOCATION_LIMIT = (
     re.compile(r"\b(?:must|required to|need to)\s+(?:currently\s+)?(?:be\s+)?(?:based|located|reside|living|live|work(?:ing)?)\s+(?:in|within|from)\s+(?:the\s+)?"+OTHER_COUNTRIES+r"\b", re.I),
     re.compile(r"\b(?:only|exclusively)\s+(?:hiring|hire|accepting|considering)\s+(?:applicants|candidates|people|workers)?\s*(?:based|located|living|residing|in)\s+(?:in\s+)?(?:the\s+)?"+OTHER_COUNTRIES+r"\b", re.I),
     re.compile(r"\b"+OTHER_COUNTRIES+r"[\s-]+only\s+(?:remote|residents|candidates|applicants|positions|jobs|workers|roles)\b", re.I),
-    re.compile(r"\b(?:remote|work\s+from\s+home)\s*[-:(]?\s*"+OTHER_COUNTRIES+r"\s+only\b", re.I),
+    re.compile(r"\b(?:remote|work\s+from\s+home)\s*[-:(]?\s*"+OTHER_COUNTRIES+r"[\s-]+only\b", re.I),
     re.compile(r"\b(?:candidates|applicants|residents)\s+(?:must\s+be\s+)?(?:based|located|residing)\s+(?:in|within)\s+(?:the\s+)?"+OTHER_COUNTRIES+r"\b", re.I),
 )
 _LOCATION_INDONESIA = (
@@ -61,6 +61,29 @@ def _matches(text, patterns, field):
     return result
 
 
+def _explicit_foreign_location_limits(text):
+    """Don't call 'US or Indonesia' an Indonesia exclusion.
+
+    Restrict the exception to the same short sentence after a matching
+    country phrase; an unrelated 'Indonesia' elsewhere must not erase
+    a genuine foreign residence restriction.
+    """
+    hits = []
+    for pattern in _LOCATION_LIMIT:
+        for match in pattern.finditer(text):
+            next_clause = text[match.end():].split(".", 1)[0][:125]
+            if re.search(r"\bor\s+(?:also\s+)?(?:in\s+)?Indonesia\b",
+                         next_clause, re.I):
+                continue
+            context = _evidence(text, re.compile(re.escape(match.group(0))), 
+                                "public_job_description")
+            if context and context["quote"] not in [x["quote"] for x in hits]:
+                hits.append(context)
+            if len(hits) >= 2:
+                return hits
+    return hits
+
+
 def assess_public_job_language(*, title, location, description):
     """Find explicit constraints in a bounded sanitized official public posting.
 
@@ -79,7 +102,7 @@ def assess_public_job_language(*, title, location, description):
     truncated = raw_len > MAX_SCAN_CHARS * 4 or len(body) >= MAX_SCAN_CHARS
     # Location labels are frequently marketing labels. Never treat their
     # mere mention of a country as an explicit exclusion.
-    excluded = _matches(body, _LOCATION_LIMIT, "public_job_description")
+    excluded = _explicit_foreign_location_limits(body)
     indonesia = _matches(body, _LOCATION_INDONESIA, "public_job_description")
     auth = _matches(body, _WORK_AUTH, "public_job_description")
     remote = _matches(body, (_REMOTE,), "public_job_description")
