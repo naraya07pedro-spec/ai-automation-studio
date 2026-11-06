@@ -172,11 +172,11 @@ def run_disposable_schedule(model, *, runner, clock=None,
             model_checkpoint.close()
 
 
-def live_acceptance(model, *, check_active_studio=studio_port_in_use):
+def live_acceptance(model):
     """Only live entrypoint. No injectable catalog or transport, no mocks."""
     if not valid_model_name(model):
         raise LiveAcceptanceError("invalid_model_name")
-    if check_active_studio():
+    if studio_port_in_use():
         raise LiveAcceptanceError("studio_port_8765_in_use_stop_app_before_isolated_probe")
     names = installed_models()
     if model not in names:
