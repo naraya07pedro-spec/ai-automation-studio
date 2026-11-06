@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Private VPS reboot + saved-schedule persistence acceptance (owner executed)
+
+After deploying the existing loopback-only systemd service on an independently verified Linux VPS, the service's dedicated **nonroot** user can run `python3 deploy/verify_private_vps_reboot.py --capture-before-reboot`, perform a deliberate maintenance reboot **outside the tool**, then run `python3 deploy/verify_private_vps_reboot.py --verify-after-reboot`. Both phases require the original private service checker to pass. It compares actual Linux boot IDs, enabled/active systemd, private HTTP protection, owner configuration, and preexisting SQLite schedule identifiers/run counts, without changing production tasks or calling providers. **Zero stored schedules produces a service-only verdict, never a false task-persistence claim.** No Tencent, actual reboot or owner machine is reached by GitHub CI. [Precise acceptance and risks](docs/PRIVATE_VPS_REBOOT_RECOVERY_V1.md).
+
 ## On-host real Ollama scheduled AI acceptance (no simulated live evidence)
 
 **New:** Run `python tools/verify_live_ai_schedule.py --model EXACT_INSTALLED_MODEL --save-redacted-evidence` on the owner's actual Windows/Linux machine after stopping Studio port 8765. It verifies an actually installed localhost Ollama model, runs one real due-slot through the production local AI worker, checks durable SQLite results across reopen and rejects duplicate inference; prompts/results are disposable and only a redacted digest report can be stored privately. CI tests use an explicitly **SYNTHETIC** fixture that can never count as a live model pass. **Tencent identity, VPS uptime, production Studio task execution and reboot recovery remain unverified** until the owner runs separate live checks. [Exact safe operator procedure](docs/LIVE_LOCAL_AI_SCHEDULE_ACCEPTANCE_V1.md).
