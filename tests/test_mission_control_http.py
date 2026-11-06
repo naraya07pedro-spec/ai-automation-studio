@@ -33,7 +33,7 @@ class MissionControlSmoke(unittest.TestCase):
                        AAS_WEBHOOK_URL="https://demo.n8n.cloud/webhook/disposable-smoke")
             proc = subprocess.Popen(
                 [sys.executable, str(ROOT / "app" / "local_server.py"),
-                 "--enable-outbound-webhook"],
+                 "--enable-outbound-webhook", "--enable-managed-webhooks"],
                 cwd=str(ROOT), env=env, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL)
             opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -171,6 +171,53 @@ class MissionControlSmoke(unittest.TestCase):
                     "schedule_id": created["schedule_id"], "expected_epoch": 0})
                 self.assertEqual(status, 200)
                 self.assertEqual(stopped["status"], "STOPPED")
+                # Managed connector registry end-to-end through owner HTTP,
+                # still with no outbound internet request.
+                with opener.open(BASE + "/api/managed-connectors",timeout=2) as response:
+                    initial = json.load(response)
+                self.assertTrue(initial["enabled"])
+                self.assertEqual(initial["connectors"],[])
+                status, registered = post("/api/managed-connector-add", {
+                    "connector_id": "smoke_webhook",
+                    "label": "Disposable n8n",
+                    "url": "https://demo.n8n.cloud/webhook/managed-http-smoke",
+                    "signing_secret": "fixture-only-secret",
+                    "current_password": PASSWORD})
+                self.assertEqual(status,201)
+                self.assertEqual(registered["status"],"ACTIVE")
+                self.assertNotIn("url",registered)
+                self.assertNotIn("secret",registered)
+                with opener.open(BASE + "/api/managed-connectors",timeout=2) as response:
+                    catalog = json.load(response)
+                self.assertEqual(len(catalog["connectors"]),1)
+                self.assertNotIn("managed-http-smoke",json.dumps(catalog))
+                self.assertNotIn("fixture-only-secret",json.dumps(catalog))
+                status, p = post("/api/managed-webhook-preview",{
+                    "connector_id":"smoke_webhook",
+                    "workflow_id":"scheduled_studio",
+                    "event_id":"connector_smoke_001"})
+                self.assertEqual(status,200)
+                self.assertEqual(p["status"],"PREVIEW_ONLY")
+                self.assertEqual(p["external_write_count"],0)
+                with self.assertRaises(HTTPError) as deny:
+                    post("/api/managed-webhook-commit",{
+                        "connector_id":"smoke_webhook",
+                        "workflow_id":"scheduled_studio",
+                        "event_id":"connector_smoke_001",
+                        "preview_token":p["preview_token"],
+                        "payload_sha256":p["payload_sha256"],
+                        "current_password":"incorrect-password"})
+                self.assertIn(deny.exception.code,(401,403,429))
+                status, revoked = post("/api/managed-connector-revoke",{
+                    "connector_id":"smoke_webhook",
+                    "current_password": PASSWORD})
+                self.assertEqual(status,200)
+                self.assertEqual(revoked["status"],"REVOKED")
+                with opener.open(BASE + "/api/managed-connector-history?connector_id=smoke_webhook",
+                                 timeout=2) as response:
+                    receipt = json.load(response)
+                self.assertEqual(receipt["connector_status"],"REVOKED")
+                self.assertEqual(receipt["deliveries"][0]["status"],"PREVIEWED")
                 # No real network is ever contacted by this CI smoke.
             finally:
                 if proc.poll() is None:
