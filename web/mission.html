@@ -547,7 +547,7 @@ async function loadConnectors(){
   const box=$("connector-catalog");box.replaceChildren();
   for(const item of catalog.connectors||[]){
    const row=document.createElement("div");row.className="step";
-   const name=document.createElement("strong");name.textContent=item.label+" · "+(item.configured?"Configured":"Not configured");
+   const name=document.createElement("strong");name.textContent=item.label+" · "+(item.configured===true?"Configured":item.configured===false?"Not configured":"Separate read-only grant");
    const cap=document.createElement("span");cap.textContent=(item.capabilities||[]).join(", ")+"\nPermission: "+item.permission;
    row.append(name,cap);box.append(row);
   }
