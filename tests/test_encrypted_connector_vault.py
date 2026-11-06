@@ -158,6 +158,37 @@ class EncryptedVaultTests(unittest.TestCase):
             EncryptedConnectorVault(target,"invalid-key")
         self.assertFalse(target.exists())
 
+    def test_offline_plaintext_migration_encrypts_and_preserves_delivery_receipt(self):
+        sys.path.insert(0,str(ROOT/"tools"))
+        from migrate_managed_webhook_vault import migrate
+        old=self.root/"owner"/"managed-webhooks.json"
+        legacy=LocalConnectorManager(self.core,old,sender=self.sender)
+        legacy.add({"connector_id":"migrated_hook","label":"Old n8n",
+                    "url":"https://hooks.n8n.cloud/webhook/previous-sensitive-path",
+                    "signing_secret":"migrated-private-signing-key"})
+        request={"connector_id":"migrated_hook","workflow_id":"encrypted_flow",
+                 "event_id":"encrypted_event_001"}
+        preview=legacy.preview(request)
+        legacy.commit({**request,"preview_token":preview["preview_token"],
+                       "payload_sha256":preview["payload_sha256"]})
+        self.assertEqual(len(self.sent),1)
+        legacy.close()
+        self.manager.close()
+        self.file.unlink()
+        self.assertEqual(migrate(self.root/"owner",self.key),1)
+        self.assertFalse(old.exists())
+        self.assertNotIn("previous-sensitive-path",self.file.read_text())
+        self.assertNotIn("migrated-private-signing-key",self.file.read_text())
+        self.manager=LocalConnectorManager(self.core,self.file,
+            sender=self.sender,vault_key=self.key)
+        self.assertEqual(self.manager.list()["connectors"][0]["connector_id"],
+                         "migrated_hook")
+        self.assertEqual(self.manager.history("migrated_hook")["deliveries"][0]["status"],
+                         "REMOTE_ACCEPTED")
+        with self.assertRaises(Exception):
+            self.manager.preview(request)
+        self.assertEqual(len(self.sent),1)
+
     def test_encrypted_and_legacy_share_no_retry_ledger_identity(self):
         self.add()
         legacy=LocalConnectorManager(self.core,self.root/"owner"/"managed-webhooks.json",
