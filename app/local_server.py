@@ -67,6 +67,7 @@ from lead_inquiry_template_catalog import (list_templates, setup_choices,
 
 MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
+MISSION = ROOT / "web" / "mission.html"
 _CONFIGURATION = {
     "source": "mock_inbox", "destination": "mock_crm",
     "follow_up_policy": "approval_required", "ai_mode": "mock",
@@ -294,7 +295,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     else:
                         self._send(200, {"authenticated": True, **session})
                 return
-            if route.path != "/" and route.path != "/api/health":
+            if route.path not in ("/", "/mission", "/api/health"):
                 if not self._operator_authorized():
                     return
             if route.path == "/api/local-agent-capabilities" and not route.query:
@@ -552,6 +553,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 return
             if self.path == "/":
                 self._send(200, WEB.read_text(encoding="utf-8"),
+                           "text/html; charset=utf-8")
+            elif self.path == "/mission":
+                self._send(200, MISSION.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
             elif self.path == "/api/health":
                 self._send(200, {"status": "MOCK_ONLY", "external_dispatch_count": 0})
