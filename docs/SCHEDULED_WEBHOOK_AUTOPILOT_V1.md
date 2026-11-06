@@ -23,7 +23,7 @@ The browser can close. The computer or VPS must remain online. Tencent VPS activ
 - HTTP 2xx is REMOTE_ACCEPTED (endpoint accepted, not downstream business completion). Non-2xx, timeout, socket failure, or unknown outcome is OUTCOME_UNCERTAIN and PAUSED_UNCERTAIN. There is no automatic retry.
 - If the app crashes mid-request, startup quarantines any IN_FLIGHT delivery as OUTCOME_UNCERTAIN and stops its policy. A stopped, exhausted, expired, or quarantined policy is never silently reactivated; a new schedule and new explicit owner grant are needed.
 - Pausing/resuming a schedule, changing its control epoch, changing the underlying workflow version, or changing the configured destination automatically ends policy eligibility.
-- Limits: 12 policies lifetime per installation; each grant authorizes 1–30 outbound attempts and expires in 1–90 days. A worker examines at most 3 active policies per tick; only the latest eligible completed slot is considered to avoid backlog floods.
+- Limits: 24 policies lifetime per installation, aligned with the current 24-schedule storage cap; each grant authorizes 1–30 outbound attempts and expires in 1–90 days. A worker examines at most 3 active policies per tick; only the latest eligible completed slot is considered to avoid backlog floods.
 - This is not distributed exactly-once external delivery or an encrypted credential vault. Process environment is visible to the service account/admin. Provider billing and n8n execution outcomes are external to this software.
 
 ## Verification scope
