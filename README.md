@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## n8n final-step signed delivery evidence (owner import)
+
+**New:** Mission Control **11 · n8n Delivery Proof** distinguishes 2xx webhook acceptance from owner-imported, HMAC-SHA256 verified final-step assertions. The import requires current owner password + CSRF, strong encrypted managed connector signing secret, exact connector/schedule/delivery ID from a real durable SQLite attempt, and an n8n execution ID. Duplicate receipts are idempotent, conflicts and forged signatures rejected, no automatic retries or unpausing. **A valid HMAC is only a shared-secret assertion, not independent confirmation of remote business success**; Tencent/n8n accounts were not accessed. [Protocol and real-world acceptance instructions](docs/N8N_SIGNED_DELIVERY_PROOF_V1.md).
+
 ## Owner-armed scheduled automation for encrypted managed connectors
 
 **New:** Mission Control **10 · Managed Connector Autopilot** can now bind a separately encrypted HTTPS/n8n connection ID to an already active recurring schedule. Exact preview + owner password + explicit consent create a finite **1–30 POST / 1–90-day** permission. The existing SQLite worker emits actual locally computed rule receipts at upcoming due times; each connector has an isolated durable no-blind-retry ledger. Revoke/stop blocks future sends, and a separate grant is required for each destination. Enable only with `--enable-encrypted-managed-webhooks --enable-managed-autopilot`; plaintext managed connections and AI/model-selected sends remain disallowed. **No live user n8n or Tencent cloud operation has yet been verified.** [Setup, safety and recovery](docs/MANAGED_CONNECTOR_AUTOPILOT_V1.md).
