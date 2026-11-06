@@ -5,7 +5,7 @@ AI Automation Studio is a **local-first, open-source AI agent and automation wor
 
 ## Frozen tool registry and separately approved local JSON actions (Slice 77)
 
-A code-owned [tool-effect registry](docs/LOCAL_TOOL_ACTION_GATE_V1.md) classifies the existing reviewed read tools and introduces exactly one new **owner-only local create action**: `local_csv_profile_json_export`. This is NOT a new tool the model can plan or execute, and the existing server-owned bounded batch remains closed to any write actions.
+A code-owned [tool-effect registry](docs/LOCAL_TOOL_ACTION_GATE_V1.md) classifies the eight existing reviewed read tools and both owner-only local-create actions: the **existing** Markdown report export and **new** `local_csv_profile_json_export`. Neither write action can be model-planned or run in the existing server-owned read-only batch; both server endpoints now enforce their registry permissions.
 
 After a previously reviewed and completed CSV profiling plan, click **Preview CSV profile JSON (no write)** to inspect the exact **aggregate-only** JSON and SHA-256, then separately **Confirm & save verified JSON** with a single-use, 5-minute server-issued preview ticket. The server recomputes the entire original CSV profile against the frozen source before writing, logs the write attempt and outcome to its local security ledger, and uses a fixed create-only file destination:
 `~/.ai-automation-studio/exports/local-agent-csv-profile-<plan-id>.json`. It never overwrites changed files. Identical repeated exports are safe/idempotent.
