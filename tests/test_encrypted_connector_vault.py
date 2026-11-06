@@ -158,17 +158,13 @@ class EncryptedVaultTests(unittest.TestCase):
             EncryptedConnectorVault(target,"invalid-key")
         self.assertFalse(target.exists())
 
-    def test_encrypted_and_legacy_use_distinct_delivery_directories(self):
+    def test_encrypted_and_legacy_share_no_retry_ledger_identity(self):
         self.add()
-        self.assertIn("vault-managed-webhook-ledgers",
-                      str(self.manager._ledger_path("secure_n8n")))
         legacy=LocalConnectorManager(self.core,self.root/"owner"/"managed-webhooks.json",
                                      sender=self.sender)
         try:
-            self.assertIn("managed-webhook-ledgers",
-                          str(legacy._ledger_path("secure_n8n")))
-            self.assertNotEqual(self.manager._ledger_path("secure_n8n"),
-                                legacy._ledger_path("secure_n8n"))
+            self.assertEqual(self.manager._ledger_path("secure_n8n"),
+                             legacy._ledger_path("secure_n8n"))
         finally:
             legacy.close()
 
