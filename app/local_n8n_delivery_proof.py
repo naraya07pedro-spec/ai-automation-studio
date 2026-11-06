@@ -99,9 +99,16 @@ class SignedN8NDeliveryProof:
     def reconcile(self, request):
         cid, sid, did, outcome, execution_id, signature = _validate(request)
         manager = self.autopilot.manager
-        # Lock order consistent with revoke/send: manager first, then ledger.
-        # Revoked connector secrets are erased; do not silently bypass this.
-        with manager._lock:
+        # Get the policy reference without any caller-held locks: _get
+        # internally obtains the manager/dispatcher locks for lookup.
+        try:
+            policy = self.autopilot._get(cid, require_active=True, create=False)
+        except (ManagedConnectorError, AutopilotError) as exc:
+            raise N8NProofError("local_delivery_ledger_not_found", 404) from None
+        # Lock order: policy ledger -> connector manager. The existing
+        # dispatcher also holds the policy lock while obtaining target
+        # metadata. Never hold the manager lock while calling _get().
+        with policy.lock, manager._lock:
             try:
                 row = manager._entry(cid, require_active=True)
             except ManagedConnectorError as exc:
@@ -114,46 +121,41 @@ class SignedN8NDeliveryProof:
                                 hashlib.sha256).hexdigest()
             if not hmac.compare_digest(expected, signature):
                 raise N8NProofError("n8n_proof_signature_invalid", 403)
-            # Validate the actual authorized sender ledger BEFORE recording any proof.
-            try:
-                policy = self.autopilot._get(cid, require_active=True, create=False)
-            except (ManagedConnectorError, AutopilotError) as exc:
-                raise N8NProofError("local_delivery_ledger_not_found", 404) from None
-            with policy.lock:
-                attempt = policy.db.execute("""SELECT slot_utc,status
-                    FROM scheduled_webhook_attempts
-                    WHERE schedule_id=? AND delivery_id=?""", (sid, did)).fetchone()
-                if attempt is None:
-                    raise N8NProofError("local_delivery_attempt_not_found", 404)
-                slot, dispatch_status = attempt
-                if dispatch_status not in ("REMOTE_ACCEPTED", "OUTCOME_UNCERTAIN"):
-                    raise N8NProofError("delivery_attempt_not_finalized", 409)
-                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-                fingerprint = hashlib.sha256(message.encode("ascii")).hexdigest()
-                with policy.db:
-                    self._schema(policy.db)
-                    prior = policy.db.execute("""SELECT schedule_id,slot_utc,
-                        outcome,execution_id,message_sha256
-                        FROM n8n_signed_delivery_proofs
-                        WHERE delivery_id=?""", (did,)).fetchone()
-                    current = (sid,slot,outcome,execution_id,fingerprint)
-                    if prior is not None:
-                        if prior != current:
-                            raise N8NProofError("conflicting_delivery_proof", 409)
-                        code = "ALREADY_VERIFIED"
-                    else:
-                        policy.db.execute("""INSERT INTO n8n_signed_delivery_proofs
-                            (delivery_id,schedule_id,slot_utc,outcome,
-                             execution_id,message_sha256,verified_at_utc)
-                            VALUES(?,?,?,?,?,?,?)""",
-                            (did,sid,slot,outcome,execution_id,fingerprint,now))
-                        code = "RECORDED"
-                    saved = policy.db.execute("""SELECT delivery_id,schedule_id,
-                        slot_utc,outcome,execution_id,verified_at_utc
-                        FROM n8n_signed_delivery_proofs WHERE delivery_id=?""",
-                        (did,)).fetchone()
-            return {"result":code,"local_dispatch_status_unchanged":dispatch_status,
-                    **self._public(cid,saved)}
+            # Validate the actual authorized sender ledger BEFORE recording.
+            attempt = policy.db.execute("""SELECT slot_utc,status
+                FROM scheduled_webhook_attempts
+                WHERE schedule_id=? AND delivery_id=?""", (sid, did)).fetchone()
+            if attempt is None:
+                raise N8NProofError("local_delivery_attempt_not_found", 404)
+            slot, dispatch_status = attempt
+            if dispatch_status not in ("REMOTE_ACCEPTED", "OUTCOME_UNCERTAIN"):
+                raise N8NProofError("delivery_attempt_not_finalized", 409)
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            fingerprint = hashlib.sha256(message.encode("ascii")).hexdigest()
+            with policy.db:
+                self._schema(policy.db)
+                prior = policy.db.execute("""SELECT schedule_id,slot_utc,
+                    outcome,execution_id,message_sha256
+                    FROM n8n_signed_delivery_proofs
+                    WHERE delivery_id=?""", (did,)).fetchone()
+                current = (sid,slot,outcome,execution_id,fingerprint)
+                if prior is not None:
+                    if prior != current:
+                        raise N8NProofError("conflicting_delivery_proof", 409)
+                    code = "ALREADY_VERIFIED"
+                else:
+                    policy.db.execute("""INSERT INTO n8n_signed_delivery_proofs
+                        (delivery_id,schedule_id,slot_utc,outcome,
+                         execution_id,message_sha256,verified_at_utc)
+                        VALUES(?,?,?,?,?,?,?)""",
+                        (did,sid,slot,outcome,execution_id,fingerprint,now))
+                    code = "RECORDED"
+                saved = policy.db.execute("""SELECT delivery_id,schedule_id,
+                    slot_utc,outcome,execution_id,verified_at_utc
+                    FROM n8n_signed_delivery_proofs WHERE delivery_id=?""",
+                    (did,)).fetchone()
+        return {"result":code,"local_dispatch_status_unchanged":dispatch_status,
+                **self._public(cid,saved)}
 
     def list(self):
         records = []
