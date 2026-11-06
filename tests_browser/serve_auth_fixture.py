@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from local_operator_auth import LocalOperatorAuth
 from local_source_policy import LocalPublicSourcePolicy
+from local_hn_story_policy import HNStoryPolicy
+from local_hn_story_reader import AllowedHNStoryReader
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
@@ -38,6 +40,19 @@ def main():
     LocalOperatorAuth.provision(owner_path, "ci_only_fixture_password_1234")
     owner = LocalOperatorAuth.load(owner_path)
     policy = LocalPublicSourcePolicy()
+    hn_policy = HNStoryPolicy()
+    def fixture_hn_fetch(ident):
+        if ident == 8863:
+            return {"id":8863,"type":"story",
+                    "title":"Fixture public HN discussion", "time":1175714200,
+                    "kids":[8952,9224],
+                    "text":"<p>Fixture owner-granted story only.</p>"}
+        if ident in (8952,9224):
+            return {"id":ident,"type":"comment","parent":8863,
+                    "time":1175714300,
+                    "text":"Fixture comment under exact approved story."}
+        raise AssertionError("HN resource not owner-granted")
+    hn_reader = AllowedHNStoryReader(hn_policy,fetcher=fixture_hn_fetch)
     # Only the test fixture grants a sample public repository on startup.
     # Shipping server starts with no grants.
     policy.grant("Octocat/Hello-World")
@@ -74,17 +89,23 @@ def main():
                              "interpretation":"This is a saved tool-output excerpt."}]
             })}})
     plans = LocalAgentPlanStore(":memory:",github_reader=github_reader,
+                                hn_reader=hn_reader,
                                 issue_analyzer=fixture_issue_analyzer,
                                 memory_store=memory_cards,
                                 report_generator=fixture_final_report,
                                 csv_profiler=profile_selected_csv)
     def fixture_planner(goal, model, memory_context=None, document_context=None,
-                        document_set_context=None, csv_context=None):
+                        document_set_context=None, csv_context=None,
+                        hn_allowed_ids=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
         if memory_context:
             assert all(set(c)=={"id","text"} for c in memory_context)
             assert all(c["id"].startswith("fixture_") for c in memory_context)
+        if "hacker news" in goal.lower():
+            assert hn_allowed_ids == [8863]
+            return {"model":model,"goal":goal,
+                    "steps":[{"tool":"hn_public_story","args":{"story_id":8863}}]}
         if csv_context is not None:
             assert csv_context["columns"] == ["revenue", "stage"]
             assert csv_context["row_count"] == 3
@@ -192,6 +213,7 @@ def main():
         ("127.0.0.1", 8765),
         create_handler(local_core=core, operator_auth=owner,
                        source_policy=policy, security_audit=audit,
+                       hn_policy=hn_policy,
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
                        agent_memory_store=memory_cards,

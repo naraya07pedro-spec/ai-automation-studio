@@ -338,6 +338,59 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
             "No triage report yet")
 
+    def test_hn_owner_grant_read_and_revoke_blocks_existing_approval(self):
+        """Real Chromium: per-item HN grant, planner, execution, revocation."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#hn-story-id")).to_be_enabled()
+        self.page.locator("#hn-story-id").fill("8863")
+        self.page.locator("#hn-story-password").fill("wrong-password")
+        self.page.locator("#hn-story-grant").click()
+        expect(self.page.locator("#hn-story-status")).to_contain_text(
+            "HN permission request rejected")
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
+        self.page.locator("#hn-story-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#hn-story-grant").click()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text("8863")
+        self.page.locator("#agent-plan-goal").fill(
+            "Read owner-granted Hacker News story 8863")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"hn_public_story"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "PREPARED"')
+        self.assertNotIn("Fixture public HN discussion",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "APPROVED"')
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "Fixture public HN discussion")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"hn_approval_epoch": 1')
+        self.page.locator("#agent-plan-goal").fill(
+            "Read owner-granted Hacker News story 8863 again")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "PREPARED"')
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "APPROVED"')
+        self.page.locator("#hn-story-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#hn-story-revoke").click()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-status")).to_contain_text(
+            "hn_story_permission_changed")
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "APPROVED"')
+
     def test_agent_approved_github_public_issues_read_with_provenance(self):
         expect(self.page.locator("#agent-plan-github-status")).to_contain_text(
             "GitHub read-only tool enabled")

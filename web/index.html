@@ -314,11 +314,26 @@ aas:timeline:urgent
 <div id="local-memory-status" class="setup-msg" role="status" aria-live="polite">Memory disabled. Restart with --enable-local-agent --enable-agent-memory.</div>
 <pre id="local-memory-list" class="trace" aria-label="Locally saved memory notes">No memory notes loaded.</pre>
 </section>
+<section class="panel" id="hn-source-panel" aria-label="Owner-granted Hacker News public story connector" style="margin:22px 0">
+<div class="kicker">SECOND PROVIDER · HACKER NEWS PUBLIC API · OWNER GRANTS</div>
+<h2>Read a specific public Hacker News story or job thread</h2>
+<p class="muted">The owner must grant each exact numerical story ID with the local password. The reviewed agent reads only that item and up to two direct comments from Hacker News' fixed public HTTPS API. No account tokens, arbitrary URLs, external writes, full-comment scraping, background polling or automatic job applications. HN users' posts are unverified and do not establish that jobs are open or accept applicants from Indonesia.</p>
+<div class="layout"><div>
+<div class="field"><label for="hn-story-id">Hacker News story ID (digits only)</label>
+<input id="hn-story-id" type="text" inputmode="numeric" maxlength="9" placeholder="8863" autocomplete="off" disabled></div>
+<div class="field"><label for="hn-story-password">Confirm local owner password</label><input id="hn-story-password" type="password" autocomplete="current-password" disabled></div>
+<div class="core-actions"><button id="hn-story-grant" type="button" class="secondary" disabled>Grant exact story ID</button>
+<button id="hn-story-revoke" type="button" class="secondary" disabled>Revoke story ID</button></div>
+<div id="hn-story-status" role="status" aria-live="polite" class="setup-msg">Disabled. Start with --enable-local-agent --enable-agent-plans --enable-hn-story-read.</div></div>
+<div><div class="kicker">ALLOWED ID LIST · OWNER LOCAL STORAGE</div>
+<pre id="hn-story-allowed" class="trace">No public story grants loaded.</pre>
+<p class="muted">After granting an ID, propose a task such as “Read allowed Hacker News story ID 8863” in the task planner below. Revoke invalidates any older approvals, including revoke-and-regrant. Only 12 active IDs may be granted.</p></div></div></section>
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
 <p class="muted">The local model proposes up to three reviewed read-only steps. Nothing executes at creation or approval. Execute one step at a time, or explicitly authorize a server-owned bounded run while the local server is alive. Stop prevents the next step, not a request already in flight. A separate owner-confirmed file export is available only after a final report.</p>
 <p class="muted">Typed cross-step handoffs: a later calculator can reference the saved result of an earlier calculator, authorized public GitHub issue triage counts, or deterministic counts/sums from an earlier approved CSV profile. For example, select a CSV with a revenue column, propose "profile revenue, then multiply its saved column_sum by 2", review exact steps, approve and execute. CSV references require an earlier selected column and use the original snapshot with a recomputed complete profile before any calculation. Only previous steps may be referenced; source/result hashes and exact resolved numeric arguments appear in the audit. No raw CSV cells, arbitrary text, paths or commands are passed as operands.</p>
+<div id="agent-plan-hn-status" class="setup-msg" role="status" aria-live="polite">HN agent reads disabled. Grant one public story ID above after enabling --enable-hn-story-read.</div>
 <div id="agent-plan-github-status" class="setup-msg" role="status" aria-live="polite">GitHub agent reads disabled. Enable the separate flag and allow a public repository in Public Source Permissions above.</div>
 <p class="muted">Example: "Analyze open GitHub issues from Octocat/Hello-World and suggest review questions" for local Ollama interpretation with source links, or "Triage open GitHub issues from Octocat/Hello-World" for deterministic label classification. Grant that exact public repository under Public Source Permissions. Both tools read only the first page (up to 15 entries); AI review questions are not verified findings.</p>
 <div class="field"><label for="agent-plan-goal">Goal for your chosen installed model</label>
@@ -802,6 +817,48 @@ $("public-github-commit").addEventListener("click",async()=>{
   $("local-run-choice").disabled=false;refreshPublicGithubButton();
  }
 });
+let hnStoryEnabled=false;
+const refreshHNStories=async()=>{
+ try{
+  const response=await appFetch("/api/local-hn-stories");
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||"hn_permission_unavailable");
+  hnStoryEnabled=true;
+  $("hn-story-allowed").textContent=(data.allowed_story_ids||[]).length
+   ?data.allowed_story_ids.join("\n")+"\nGrant epoch: "+data.epoch
+   :"No approved story IDs. Grant epoch: "+data.epoch;
+  $("hn-story-status").textContent="HN grants loaded. Each grant is checked again before a read.";
+ }catch(error){
+  hnStoryEnabled=false;
+  $("hn-story-allowed").textContent="HN source permissions unavailable or disabled.";
+  $("hn-story-status").textContent="HN grant feature disabled or unavailable.";
+ }
+ for(const id of ["hn-story-id","hn-story-password","hn-story-grant","hn-story-revoke"])
+  $(id).disabled=!hnStoryEnabled;
+};
+const changeHNStory=async operation=>{
+ const raw=$("hn-story-id").value.trim();
+ const pwd=$("hn-story-password").value;
+ const status=$("hn-story-status");
+ if(!/^[1-9][0-9]{0,8}$/.test(raw)){
+  status.textContent="Enter exactly one positive numeric story ID (max 9 digits).";return;
+ }
+ if(!pwd){status.textContent="Re-enter your local owner password.";return;}
+ try{
+  const data=await localPost("/api/local-hn-story-"+operation,
+   {story_id:Number(raw),current_password:pwd});
+  $("hn-story-password").value="";
+  status.textContent=data.status+" · approval epoch "+data.epoch+
+   ". Existing previously approved HN plans may need to be recreated.";
+  await refreshHNStories();
+  await refreshOperatorAudit();
+ }catch(error){
+  $("hn-story-password").value="";
+  status.textContent="HN permission request rejected: "+error.message;
+ }
+};
+$("hn-story-grant").addEventListener("click",()=>changeHNStory("grant"));
+$("hn-story-revoke").addEventListener("click",()=>changeHNStory("revoke"));
 const refreshOperatorSources=async()=>{
  try{
   const response=await appFetch("/api/local-github-sources");
@@ -1186,6 +1243,9 @@ const refreshLocalAgent=async()=>{
   agentPlanCsvEnabled=agentPlanEnabled&&data.plan_csv===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
+  $("agent-plan-hn-status").textContent=agentPlanEnabled&&data.hn_story_read===true
+   ?"HN story read-only connector enabled. Grant exact story IDs above, then review and approve each plan. User-generated content is unverified."
+   :"HN agent reads disabled. Start with --enable-local-agent --enable-agent-plans --enable-hn-story-read.";
   $("agent-plan-github-status").textContent=agentPlanEnabled&&data.github_plan_read===true
    ?"GitHub read-only tool enabled. Only operator-allowed public repositories can be used; each plan still needs approval and a separate next-step click."
    :"GitHub agent reads disabled. Start with --enable-agent-github-read and allow the repository under Public Source Permissions.";
@@ -1305,7 +1365,7 @@ function scheduleServerBatchPoll(){
 // Deliberate closed allowlist: future write-capable tools cannot enter this flow automatically.
 const approvedBatchReadTools=new Set(["calculate","utc_now","github_public_issues",
  "github_issue_triage","github_issue_analysis","local_document_question",
- "local_multi_document_question","local_csv_profile"]);
+ "local_multi_document_question","local_csv_profile","hn_public_story"]);
 let selectedPlan=null;
 const planStatus=$("agent-plan-status");
 const planMemoryField=$("agent-plan-memory-ids");
@@ -1383,6 +1443,7 @@ const renderPlan=plan=>{
  if(plan&&plan.plan_id)planIdInput.value=plan.plan_id;
  planDetails.textContent=plan ? JSON.stringify({
   status:plan.status,batch_run_status:plan.batch_run_status||"IDLE",
+  hn_approval_epoch:plan.hn_approval_epoch??null,
   goal:plan.goal,model:plan.model,
   steps:plan.steps,completed_steps:plan.results,next_index:plan.next_index,
   verified_numeric_handoff_lineage:plan.handoffs||[],
@@ -2301,6 +2362,7 @@ const operatorReady=()=>{
  loadGallery();
  refreshLocalWorkflows();
  refreshOperatorSources();
+ refreshHNStories();
  refreshOperatorAudit();
  refreshLocalAgent();
  readTimeoutStatus();
@@ -2385,6 +2447,12 @@ const lockOperatorUI=message=>{
  selectedPlanReportMarkdown="";
  planStatus.textContent="Session locked; task plans unavailable.";
  $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
+ $("agent-plan-hn-status").textContent="Session locked; HN source permissions hidden.";
+ hnStoryEnabled=false;
+ for(const id of ["hn-story-id","hn-story-password","hn-story-grant","hn-story-revoke"])
+  $(id).disabled=true;
+ $("hn-story-password").value="";
+ $("hn-story-allowed").textContent="Session locked; HN grants hidden.";
  renderPlan(null);
  agentReadinessEnabled=false;
  agentModelsButton.disabled=true;agentProbeButton.disabled=true;

@@ -57,7 +57,7 @@ class ActionGateTests(unittest.TestCase):
     def test_registry_is_fixed_and_does_not_allow_action_in_model_or_batch(self):
         names = registered_tools(
             planning=True, csv=True, artifact=True, action=True)
-        self.assertEqual(10, len(names))
+        self.assertEqual(11, len(names))
         markdown = next(t for t in names
                         if t["name"] == MARKDOWN_ACTION_TOOL)
         self.assertEqual("LOCAL_CREATE_ONLY", markdown["effect"])
@@ -75,7 +75,7 @@ class ActionGateTests(unittest.TestCase):
         self.assertFalse(match[0]["batch_allowed"])
         self.assertNotIn(ACTION_TOOL, BATCH_READ_TOOLS)
         self.assertNotIn(MARKDOWN_ACTION_TOOL, BATCH_READ_TOOLS)
-        self.assertEqual(8, len(BATCH_READ_TOOLS))
+        self.assertEqual(9, len(BATCH_READ_TOOLS))
         disabled = [t for t in registered_tools(planning=True, csv=True,
                                                 action=False)
                     if t["name"] == ACTION_TOOL][0]

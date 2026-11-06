@@ -3,6 +3,19 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Independent external read-only provider: exact owner-granted Hacker News story (Slice 78)
+
+The local planner now supports **a second external provider beyond the existing public GitHub issue reader**. Use an explicitly owner-granted Hacker News **public story/job item ID**, never an arbitrary URL, to read the public item and at most **two direct comments** from the official Firebase-backed HN API, with strict HTML-to-text sanitization and a durable SHA-256-backed provenance receipt. The provider data is untrusted public user prose; HN job posts are **not** confirmed to be live, legitimate, Indonesia-eligible or open for applications.
+
+Start the loopback workbench with:
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-hn-story-read
+```
+
+After logging in, grant an exact numeric story ID in the HN owner-permission panel using your **current local password**. The grant is default-deny, persistent and versioned; revoking or changing a grant invalidates earlier plan approvals. Review the model-proposed `hn_public_story` step, approve the task and separately execute it. The model sees **only granted numeric IDs during planning**, not remote item text. No private HN account credentials, custom URLs, external writes, scraping of whole threads, automatic polling or job applications are added.
+
+[Detailed HN read-only provider/grant contract](docs/HN_PUBLIC_STORY_CONNECTOR_V1.md). Tests include injected synthetic provider responses and a separately verified **real public HTTPS GET** in CI when the official API is reachable. Local Windows/Ollama machine acceptance remains deferred.
+
 ## Frozen tool registry and separately approved local JSON actions (Slice 77)
 
 A code-owned [tool-effect registry](docs/LOCAL_TOOL_ACTION_GATE_V1.md) classifies the eight existing reviewed read tools and both owner-only local-create actions: the **existing** Markdown report export and **new** `local_csv_profile_json_export`. Neither write action can be model-planned or run in the existing server-owned read-only batch; both server endpoints now enforce their registry permissions.

@@ -1,0 +1,49 @@
+name: Hacker News public live read-only connector verification
+
+on:
+  pull_request:
+    paths:
+      - "app/local_hn_story_reader.py"
+      - "app/local_hn_story_policy.py"
+      - "app/local_agent_task_plans.py"
+      - "app/local_server.py"
+      - "app/local_tool_registry.py"
+      - "tests/test_local_hn_story_connector.py"
+      - ".github/workflows/hn-public-live-read.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-hn-public-fixed-id-get:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Exactly granted story 8863 via official TLS host; no credentials
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          sys.path.insert(0, "app")
+          from local_hn_story_policy import HNStoryPolicy
+          from local_hn_story_reader import AllowedHNStoryReader
+          policy = HNStoryPolicy()
+          assert policy.grant(8863)[0] == 200
+          output = json.loads(AllowedHNStoryReader(policy).read(8863, 1))
+          assert output["source"] == "HACKER_NEWS_PUBLIC_ITEM_V0"
+          assert output["story_id"] == 8863
+          assert output["story_url"] == "https://news.ycombinator.com/item?id=8863"
+          assert output["story_type"] == "story"
+          assert output["external_read_count"] <= 3
+          assert output["external_write_count"] == 0
+          assert output["model_calls"] == 0
+          assert len(output["source_sha256"]) == 64
+          print("Verified real official Hacker News public GET: 8863; read-only.")
+          PY
