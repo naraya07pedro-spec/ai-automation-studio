@@ -93,7 +93,7 @@ def main(argv=None):
             if app_responding():
                 print("PRIVATE_VPS_TUNNEL_READY: " + URL)
                 if not args.no_browser:
-                    webbrowser.open(URL)
+                    webbrowser.open(URL.rstrip("/") + "/mission")
                 return proc.wait()
             time.sleep(0.25)
         print("SSH ended before the private app became reachable. "
