@@ -148,6 +148,45 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
   <p class="status" id="flow-status" role="status" aria-live="polite">Sign in to use local workflows.</p>
   <pre class="output" id="flow-output">No event evaluated in this session.</pre>
 </section>
+
+<section class="panel" aria-label="Automatic recurring schedules" id="schedule-panel" style="margin-top:20px">
+ <div class="split"><h2>05 · Recurring task scheduler</h2><span class="pill" id="schedule-worker">Worker status unknown</span></div>
+ <p class="sub">Create a schedule once. The server evaluates your existing ACTIVE local workflow automatically at the due time, saves the outcome in SQLite and shows its execution history. This continues after your browser closes, provided the application process remains running.</p>
+ <div class="notice">This scheduler executes deterministic LOCAL RULE EVALUATIONS ONLY. No email, WhatsApp, CRM, generic AI tools or external HTTP calls. After a shutdown it handles at most one overdue occurrence per schedule rather than flooding old events. Schedules remain on this computer/server, not in ChatGPT.</div>
+ <div class="grid">
+  <div>
+   <form id="schedule-form">
+    <label for="schedule-flow">Active workflow</label><select id="schedule-flow" required></select>
+    <label for="schedule-cadence">Repeat frequency</label>
+    <select id="schedule-cadence">
+     <option value="minutes">Every N minutes</option>
+     <option value="hours">Every N hours</option>
+     <option value="daily">Every day</option>
+     <option value="weekly">Every week</option>
+     <option value="monthly">Every month</option>
+    </select>
+    <div id="schedule-interval-group"><label for="schedule-every">Repeat every</label><input id="schedule-every" type="number" min="1" max="1440" step="1" value="5"></div>
+    <div id="schedule-clock-group" hidden><label for="schedule-at">Time of day (chosen timezone)</label><input id="schedule-at" type="time" value="08:30"></div>
+    <div id="schedule-weekday-group" hidden><label for="schedule-weekday">Day of week</label><select id="schedule-weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+    <div id="schedule-monthday-group" hidden><label for="schedule-monthday">Day of month (31 uses last day for short months)</label><input id="schedule-monthday" type="number" min="1" max="31" step="1" value="1"></div>
+    <label for="schedule-zone">Schedule timezone</label><select id="schedule-zone"><option value="Asia/Jakarta">Asia/Jakarta · WIB (UTC+7)</option><option value="UTC">UTC</option></select>
+    <label for="schedule-service">Evaluate service category</label><select id="schedule-service"><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select>
+    <label for="schedule-budget">Budget tier</label><select id="schedule-budget"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select>
+    <label for="schedule-timeline">Event timeline</label><select id="schedule-timeline"><option value="urgent">Urgent</option><option value="soon">Soon</option><option value="flexible">Flexible</option></select>
+    <div class="btnrow"><button class="btn primary" type="submit" id="schedule-create">Activate recurring schedule</button></div>
+   </form>
+  </div>
+  <div>
+   <div class="split"><strong>Scheduled automations</strong><button class="btn" type="button" id="schedule-refresh">Refresh</button></div>
+   <p class="note">Click a schedule to see its stored executions. Pause/resume is available for each entry.</p>
+   <div id="schedule-list" aria-live="polite">Sign in to load recurring schedules.</div>
+   <p class="status" id="schedule-status" role="status" aria-live="polite">No schedules loaded.</p>
+   <label for="schedule-history">Saved run receipts · most recent 25</label>
+   <div id="schedule-history" class="output" aria-live="polite">Select a schedule to view its actual execution history.</div>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -191,11 +230,13 @@ function lock(message){
  $("connection").textContent="Locked";
  status("login-status",message||"Sign in with your server's operator password.");
  flows=[];$("flow-choice").replaceChildren();$("flow-output").textContent="Session locked.";flowButtons();
+ recurringSchedules=[];stopSchedulerPoll();$("schedule-list").textContent="Session locked.";$("schedule-history").textContent="Session locked.";$("schedule-worker").textContent="Locked";refreshScheduleFlowChoices();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules()]);
+ stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf)refreshSchedules();},10000);
 }
 async function loadCapabilities(){
  try{
@@ -338,6 +379,109 @@ async function planAction(endpoint){
  finally{setBusy(false);if(csrf)loadList();}
 }
 
+
+let recurringSchedules=[],schedulerRefreshTimer=null,scheduleBusy=false;
+function refreshScheduleFields(){
+ const kind=$("schedule-cadence").value,interval=kind==="minutes"||kind==="hours";
+ $("schedule-interval-group").hidden=!interval;
+ $("schedule-clock-group").hidden=interval;
+ $("schedule-weekday-group").hidden=kind!=="weekly";
+ $("schedule-monthday-group").hidden=kind!=="monthly";
+ $("schedule-every").max=kind==="hours"?"168":"1440";
+}
+function refreshScheduleFlowChoices(){
+ const el=$("schedule-flow"),prior=el.value;
+ el.replaceChildren();
+ for(const workflow of flows.filter(x=>x.status==="ACTIVE")){
+  const o=document.createElement("option");o.value=workflow.workflow_id;
+  o.textContent=workflow.display_name+" · v"+workflow.version;el.append(o);
+ }
+ if(flows.some(x=>x.workflow_id===prior&&x.status==="ACTIVE"))el.value=prior;
+ const ready=!!csrf&&!busy&&!scheduleBusy;
+ $("schedule-create").disabled=!ready||!el.value;
+ $("schedule-refresh").disabled=!ready;
+}
+function stopSchedulerPoll(){
+ if(schedulerRefreshTimer!==null){clearInterval(schedulerRefreshTimer);schedulerRefreshTimer=null;}
+}
+async function refreshSchedules(){
+ if(!csrf||busy||scheduleBusy)return;
+ try{
+  const data=await request("/api/local-schedules");
+  if(!csrf)return;
+  recurringSchedules=Array.isArray(data.schedules)?data.schedules:[];
+  $("schedule-worker").textContent=data.worker_running?"Worker running · SQLite":"Worker not running";
+  const wrap=$("schedule-list");wrap.replaceChildren();
+  if(!recurringSchedules.length){wrap.textContent="No scheduled tasks yet.";return;}
+  for(const row of recurringSchedules){
+   const card=document.createElement("div");card.className="step";
+   const title=document.createElement("strong");
+   title.textContent=row.workflow_id+" · "+row.config.cadence+" · "+row.status;
+   const detail=document.createElement("span");
+   detail.textContent="Next: "+(row.next_due_utc||"Paused")+
+    "\nSuccess: "+row.completed_runs+" · Blocked: "+row.blocked_runs+
+    "\nService: "+row.config.service_code+" · timezone: "+row.config.timezone;
+   const bar=document.createElement("div");bar.className="btnrow";
+   const history=document.createElement("button");history.type="button";history.className="btn";
+   history.textContent="View history";
+   history.addEventListener("click",()=>loadScheduleHistory(row.schedule_id));
+   const change=document.createElement("button");change.type="button";change.className="btn";
+   change.textContent=row.status==="ACTIVE"?"Pause":"Resume";
+   change.addEventListener("click",()=>changeSchedule(row));
+   bar.append(history,change);card.append(title,detail,bar);wrap.append(card);
+  }
+ }catch(error){if(csrf)status("schedule-status","Unable to load schedules: "+error.message,true);}
+}
+async function loadScheduleHistory(id){
+ if(!csrf||scheduleBusy)return;
+ try{
+  const data=await request("/api/local-schedule-history?schedule_id="+encodeURIComponent(id));
+  if(!csrf)return;
+  $("schedule-history").textContent=data.runs.length?
+   data.runs.map(r=>r.scheduled_for_utc+" · "+r.status+
+    "\nDecision: "+(r.decision||"N/A")+" · "+(r.reason||"")+
+    "\nWorkflow version: "+(r.workflow_version??"?")+"\n").join("\n"):
+   "No executions yet. The worker checks scheduled times automatically.";
+ }catch(error){if(csrf)status("schedule-status","History unavailable: "+error.message,true);}
+}
+async function changeSchedule(row){
+ if(!csrf||busy||scheduleBusy)return;
+ const pause=row.status==="ACTIVE";
+ scheduleBusy=true;refreshScheduleFlowChoices();
+ try{
+  await request(pause?"/api/local-schedule-pause":"/api/local-schedule-resume",
+   {schedule_id:row.schedule_id,expected_epoch:row.control_epoch});
+  status("schedule-status",pause?"Schedule paused.":"Schedule resumed with a newly computed next due time.");
+ }catch(error){if(csrf)status("schedule-status","Schedule change failed: "+error.message,true);}
+ finally{scheduleBusy=false;refreshScheduleFlowChoices();refreshSchedules();}
+}
+$("schedule-cadence").addEventListener("change",refreshScheduleFields);
+$("schedule-refresh").addEventListener("click",refreshSchedules);
+$("schedule-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!csrf||busy||scheduleBusy)return;
+ const kind=$("schedule-cadence").value,workflow_id=$("schedule-flow").value;
+ if(!workflow_id){status("schedule-status","Create and activate a local workflow above first.",true);return;}
+ const payload={workflow_id,cadence:kind,timezone:$("schedule-zone").value,
+  service_code:$("schedule-service").value,
+  budget_tier:Number($("schedule-budget").value),
+  timeline:$("schedule-timeline").value};
+ if(kind==="minutes"||kind==="hours")payload.every=Number($("schedule-every").value);
+ else{
+  payload.at=$("schedule-at").value;
+  if(kind==="weekly")payload.weekday=Number($("schedule-weekday").value);
+  if(kind==="monthly")payload.monthday=Number($("schedule-monthday").value);
+ }
+ scheduleBusy=true;refreshScheduleFlowChoices();
+ try{
+  const item=await request("/api/local-schedule-create",payload);
+  if(!csrf)return;
+  status("schedule-status","Recurring schedule saved. Next server run (UTC): "+item.next_due_utc);
+  $("schedule-history").textContent="Created schedule "+item.schedule_id+". Waiting for first due time.";
+ }catch(error){if(csrf)status("schedule-status","Schedule not created: "+error.message,true);}
+ finally{scheduleBusy=false;refreshScheduleFlowChoices();refreshSchedules();}
+});
+refreshScheduleFields();
+
 let flows=[];
 function chosenFlow(){return flows.find(x=>x.workflow_id===$("flow-choice").value);}
 function flowButtons(){
@@ -355,7 +499,7 @@ async function refreshFlows(preferred){
   const select=$("flow-choice"),chosen=preferred||select.value;select.replaceChildren();
   for(const w of flows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" · "+w.status+" · v"+w.version;select.append(option);}
   if(flows.some(w=>w.workflow_id===chosen))select.value=chosen;
-  flowButtons();status("flow-status",flows.length+" saved workflow(s).");
+  flowButtons();refreshScheduleFlowChoices();status("flow-status",flows.length+" saved workflow(s).");
  }catch(error){if(csrf)status("flow-status","Cannot load workflows: "+error.message,true);}
 }
 $("flow-choice").addEventListener("change",flowButtons);

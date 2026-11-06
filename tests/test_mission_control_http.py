@@ -71,6 +71,42 @@ class MissionControlSmoke(unittest.TestCase):
                     capabilities = json.load(response)
                 self.assertFalse(capabilities["enabled"])
                 self.assertFalse(capabilities["planning"])
+
+                # Actual scheduler HTTP integration, no model or simulated service.
+                with opener.open(BASE + "/api/local-schedules", timeout=2) as response:
+                    sched = json.load(response)
+                self.assertTrue(sched["worker_running"])
+                self.assertEqual(sched["schedules"], [])
+
+                def post(path, data):
+                    req = Request(BASE + path,
+                                  json.dumps(data).encode("utf-8"),
+                                  headers={"Content-Type": "application/json",
+                                           "X-AAS-CSRF": login_csrf},
+                                  method="POST")
+                    with opener.open(req, timeout=4) as response:
+                        return response.status, json.load(response)
+
+                login_csrf = data["csrf_token"]
+                status, made = post("/api/local-create", {
+                    "workflow_id": "scheduled_studio", "display_name": "Scheduled Studio",
+                    "service_filter": "automation", "min_budget_tier": 2,
+                    "followup_policy": "review_required"})
+                self.assertEqual(status, 201)
+                self.assertEqual(post("/api/local-activate", {
+                    "workflow_id": made["workflow_id"], "expected_version": 1})[0], 200)
+                status, created = post("/api/local-schedule-create", {
+                    "workflow_id": "scheduled_studio", "cadence": "minutes",
+                    "timezone": "Asia/Jakarta", "service_code": "automation",
+                    "budget_tier": 2, "timeline": "soon", "every": 1})
+                self.assertEqual(status, 201)
+                self.assertEqual(created["status"], "ACTIVE")
+                with opener.open(BASE + "/api/local-schedules", timeout=2) as response:
+                    self.assertEqual(len(json.load(response)["schedules"]), 1)
+                status, paused = post("/api/local-schedule-pause", {
+                    "schedule_id": created["schedule_id"], "expected_epoch": 0})
+                self.assertEqual(status, 200)
+                self.assertEqual(paused["status"], "PAUSED")
             finally:
                 if proc.poll() is None:
                     proc.terminate()
