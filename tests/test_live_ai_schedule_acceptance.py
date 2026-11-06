@@ -121,11 +121,30 @@ class LiveAcceptanceContractTests(unittest.TestCase):
                     self.assertEqual(path.stat().st_mode & 0o777,0o600)
                     self.assertEqual(path.parent.stat().st_mode & 0o777,0o700)
 
+    def test_redacted_report_cannot_leak_extra_answer_or_secret_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("verify_live_ai_schedule.Path.home",return_value=Path(tmp)):
+                report={
+                    "task_id":"c"*24,
+                    "status":"LIVE_LOCAL_OLLAMA_SCHEDULE_ACCEPTANCE_PASSED",
+                    "inference_source":"REAL_LOCAL_OLLAMA_127_0_0_1_11434",
+                    "answer":"PRIVATE RAW MODEL OUTPUT MUST NEVER PERSIST",
+                    "password":"dont-save-secret",
+                    "prompt":"never saved"}
+                self.assertTrue(save_redacted_evidence(report))
+                path=Path(tmp)/".ai-automation-studio"/"live-acceptance"/(
+                    "live-local-ollama-"+"c"*24+".json")
+                saved=json.loads(path.read_text())
+                self.assertNotIn("answer",saved)
+                self.assertNotIn("password",saved)
+                self.assertNotIn("prompt",saved)
+                self.assertNotIn("dont-save-secret",path.read_text())
+
     def test_no_arbitrary_path_or_symlinked_report_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp)
             root=base/".ai-automation-studio"
-            root.mkdir()
+            root.mkdir(mode=0o700)
             ext=base/"untrusted"
             ext.mkdir()
             (root/"live-acceptance").symlink_to(ext,target_is_directory=True)
