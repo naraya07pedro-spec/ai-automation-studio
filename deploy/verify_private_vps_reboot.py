@@ -149,7 +149,10 @@ def live_snapshot():
     service_user = _systemctl(["show", "--property=User", "--value"])
     if service_user != account.pw_name:
         raise RebootAcceptanceError("must_run_as_matching_systemd_service_user")
-    _systemctl(["is-enabled", "--quiet"])
+    # Require persistently enabled, not enabled-runtime or merely "static".
+    # A currently active process by itself is not evidence of boot startup.
+    if _systemctl(["is-enabled"]) != "enabled":
+        raise RebootAcceptanceError("systemd_unit_not_persistently_enabled")
     current = runtime.probe()
     if current.get("status") != "LIVE_PRIVATE_VPS_SNAPSHOT_PASSED":
         raise RebootAcceptanceError("private_vps_runtime_snapshot_not_passed")
