@@ -121,6 +121,33 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  <p class="sub">Task plans are stored in server-side SQLite and remain visible after a restart. A process restart never automatically retries an uncertain operation.</p>
  <div id="saved-list" class="note">Sign in to load saved tasks.</div>
 </section>
+
+<section class="panel" id="local-workflow" aria-label="Real local workflow without AI" style="margin-top:20px">
+  <div class="split"><h2>04 · Local automation, no AI model needed</h2><span class="pill">Persistent SQLite</span></div>
+  <p class="sub">Build a local rule, activate it, then evaluate an event. Real saved decisions, no simulated result, no outgoing CRM/email message. Use pseudonymous IDs only, never customer PII.</p>
+  <div class="grid" style="margin:0">
+    <form id="flow-create-form">
+      <label for="flow-id">Workflow ID</label><input id="flow-id" required value="my_first_flow" pattern="[a-z][a-z0-9_-]{2,39}" maxlength="40">
+      <label for="flow-name">Display name</label><input id="flow-name" required value="My First Workflow" maxlength="50">
+      <label for="flow-filter">Service filter</label><select id="flow-filter"><option value="any">Any</option><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select>
+      <label for="flow-min">Minimum budget tier</label><select id="flow-min"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select>
+      <div class="btnrow"><button class="btn primary" id="flow-create" type="submit">Create local draft</button></div>
+    </form>
+    <div>
+      <label for="flow-choice">Saved workflows</label><select id="flow-choice"></select>
+      <div class="btnrow"><button class="btn" id="flow-activate" type="button">Activate draft</button><button class="btn" id="flow-refresh" type="button">Refresh</button></div>
+      <form id="flow-run-form">
+        <label for="flow-event">New event ID, no PII</label><input id="flow-event" required pattern="[A-Za-z0-9_-]{3,60}" maxlength="60" value="event_001">
+        <label for="flow-service">Service</label><select id="flow-service"><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select>
+        <label for="flow-budget">Budget tier</label><select id="flow-budget"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select>
+        <label for="flow-timeline">Timeline</label><select id="flow-timeline"><option value="urgent">Urgent</option><option value="soon">Soon</option><option value="flexible">Flexible</option></select>
+        <div class="btnrow"><button class="btn primary" id="flow-run" type="submit">Evaluate and save event</button></div>
+      </form>
+    </div>
+  </div>
+  <p class="status" id="flow-status" role="status" aria-live="polite">Sign in to use local workflows.</p>
+  <pre class="output" id="flow-output">No event evaluated in this session.</pre>
+</section>
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -141,7 +168,7 @@ let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnable
 const readTools=new Set(["calculate","utc_now","github_public_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
 function status(id,message,error=false){$(id).textContent=message;$(id).classList.toggle("error",error);}
 function stopPolling(){if(poller!==null){clearInterval(poller);poller=null;}}
-function setBusy(value){busy=value;for(const id of ["find-models","refresh-list","reload"]){$(id).disabled=value||!csrf;}$("ask").disabled=value||!csrf||!chatEnabled;$("propose").disabled=value||!csrf||!planningEnabled;refreshActions();}
+function setBusy(value){busy=value;for(const id of ["find-models","refresh-list","reload"]){$(id).disabled=value||!csrf;}$("ask").disabled=value||!csrf||!chatEnabled;$("propose").disabled=value||!csrf||!planningEnabled;refreshActions();flowButtons();}
 async function request(path,body){
  const method=body===undefined?"GET":"POST";
  const headers={};
@@ -163,11 +190,12 @@ function lock(message){
  $("chat-output").textContent="No private content displayed.";
  $("connection").textContent="Locked";
  status("login-status",message||"Sign in with your server's operator password.");
+ flows=[];$("flow-choice").replaceChildren();$("flow-output").textContent="Session locked.";flowButtons();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows()]);
 }
 async function loadCapabilities(){
  try{
@@ -309,6 +337,55 @@ async function planAction(endpoint){
  }catch(error){if(csrf&&rev===revision)status("plan-status","Task not completed: "+error.message,true);}
  finally{setBusy(false);if(csrf)loadList();}
 }
+
+let flows=[];
+function chosenFlow(){return flows.find(x=>x.workflow_id===$("flow-choice").value);}
+function flowButtons(){
+ const w=chosenFlow(),ready=!!csrf&&!busy;
+ $("flow-create").disabled=!ready;$("flow-refresh").disabled=!ready;
+ $("flow-activate").disabled=!ready||!w||w.status!=="DRAFT";
+ $("flow-run").disabled=!ready||!w||w.status!=="ACTIVE";
+}
+async function refreshFlows(preferred){
+ if(!csrf||busy)return;
+ try{
+  const response=await request("/api/local-workflows");
+  if(!csrf)return;
+  flows=Array.isArray(response.workflows)?response.workflows:[];
+  const select=$("flow-choice"),chosen=preferred||select.value;select.replaceChildren();
+  for(const w of flows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" · "+w.status+" · v"+w.version;select.append(option);}
+  if(flows.some(w=>w.workflow_id===chosen))select.value=chosen;
+  flowButtons();status("flow-status",flows.length+" saved workflow(s).");
+ }catch(error){if(csrf)status("flow-status","Cannot load workflows: "+error.message,true);}
+}
+$("flow-choice").addEventListener("change",flowButtons);
+$("flow-refresh").addEventListener("click",()=>refreshFlows());
+$("flow-create-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!csrf||busy)return;setBusy(true);
+ const wid=$("flow-id").value;
+ try{
+  await request("/api/local-create",{workflow_id:wid,display_name:$("flow-name").value,service_filter:$("flow-filter").value,min_budget_tier:Number($("flow-min").value),followup_policy:"review_required"});
+  status("flow-status","Draft saved. Activate it to evaluate events.");
+ }catch(error){status("flow-status","Draft failed: "+error.message,true);}
+ finally{setBusy(false);await refreshFlows(wid);}
+});
+$("flow-activate").addEventListener("click",async()=>{
+ const w=chosenFlow();if(!csrf||busy||!w||w.status!=="DRAFT")return;setBusy(true);
+ try{
+  await request("/api/local-activate",{workflow_id:w.workflow_id,expected_version:w.version});
+  status("flow-status","Workflow active. New events can be evaluated.");
+ }catch(error){status("flow-status","Activation failed: "+error.message,true);}
+ finally{setBusy(false);await refreshFlows(w.workflow_id);}
+});
+$("flow-run-form").addEventListener("submit",async e=>{
+ e.preventDefault();const w=chosenFlow();if(!csrf||busy||!w||w.status!=="ACTIVE")return;setBusy(true);
+ try{
+  const result=await request("/api/local-run",{workflow_id:w.workflow_id,event_id:$("flow-event").value,service_code:$("flow-service").value,budget_tier:Number($("flow-budget").value),timeline:$("flow-timeline").value});
+  $("flow-output").textContent=JSON.stringify(result,null,2);status("flow-status","Saved locally. No external dispatch.");
+ }catch(error){$("flow-output").textContent="No successful new event.";status("flow-status","Local run failed: "+error.message,true);}
+ finally{setBusy(false);await refreshFlows(w.workflow_id);}
+});
+
 $("login-form").addEventListener("submit",async e=>{
  e.preventDefault();const password=$("password").value;
  $("login").disabled=true;
