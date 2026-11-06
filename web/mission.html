@@ -138,7 +138,7 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 "use strict";
 const $=id=>document.getElementById(id);
 let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false;
-const readTools=new Set(["calculate","utc_now","github_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
+const readTools=new Set(["calculate","utc_now","github_public_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
 function status(id,message,error=false){$(id).textContent=message;$(id).classList.toggle("error",error);}
 function stopPolling(){if(poller!==null){clearInterval(poller);poller=null;}}
 function setBusy(value){busy=value;for(const id of ["find-models","refresh-list","reload"]){$(id).disabled=value||!csrf;}$("ask").disabled=value||!csrf||!chatEnabled;$("propose").disabled=value||!csrf||!planningEnabled;refreshActions();}
