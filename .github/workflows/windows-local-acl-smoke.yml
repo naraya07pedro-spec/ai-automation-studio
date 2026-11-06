@@ -17,6 +17,11 @@ on:
       - "app/local_agent_handoffs.py"
       - "tests/test_local_agent_csv_handoffs.py"
       - "docs/CSV_TYPED_HANDOFFS_V1.md"
+      - "app/local_tool_registry.py"
+      - "app/local_tool_action_gate.py"
+      - "app/local_security_audit.py"
+      - "tests/test_local_tool_actions.py"
+      - "docs/LOCAL_TOOL_ACTION_GATE_V1.md"
       - "docs/OWNER_SELECTED_CSV_PROFILE_V1.md"
   workflow_dispatch:
 
@@ -84,6 +89,10 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_local_agent_csv_handoffs.py -v
+      - name: Two-phase owner action and tool registry on disposable Windows files
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_local_tool_actions.py -v
       - name: Scope and cleanup
         shell: pwsh
         run: |
