@@ -10,12 +10,14 @@ from pathlib import Path
 import argparse
 import getpass
 import json
+import os
 import sqlite3
 import socket
 import sys
 import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
+from local_outbound_webhook import LocalOutboundWebhook, OutboundError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
@@ -92,7 +94,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    agent_memory_store=None, plan_artifact_exporter=None,
                    plan_action_gate=None, hn_policy=None,
                    hn_job_discovery=None, greenhouse_evidence=None,
-                   local_scheduler=None):
+                   local_scheduler=None, outbound_webhook=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -540,6 +542,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, source_policy.snapshot())
                 return
+            if route.path in ("/api/connector-catalog", "/api/outbound-history"):
+                if outbound_webhook is None:
+                    self._send(200 if route.path == "/api/connector-catalog" else 403,
+                               {"connectors": [], "webhook_enabled": False}
+                               if route.path == "/api/connector-catalog" else
+                               {"error": "outbound_webhook_disabled"})
+                else:
+                    self._send(200, outbound_webhook.catalog()
+                               if route.path == "/api/connector-catalog" else
+                               outbound_webhook.history())
+                return
             if route.path in ("/api/local-schedules", "/api/local-schedule-history"):
                 if local_scheduler is None:
                     self._send(403, {"error": "recurring_scheduler_disabled"})
@@ -623,7 +636,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-action-commit",
                                  "/api/local-schedule-create",
                                  "/api/local-schedule-pause",
-                                 "/api/local-schedule-resume"):
+                                 "/api/local-schedule-resume",
+                                 "/api/outbound-webhook-preview",
+                                 "/api/outbound-webhook-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1533,6 +1548,57 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 code, result = method(data)
                 self._send(code, result)
                 return
+            if self.path in ("/api/outbound-webhook-preview",
+                             "/api/outbound-webhook-commit"):
+                if outbound_webhook is None:
+                    self._send(403, {"error": "outbound_webhook_disabled"})
+                    return
+                committing = self.path.endswith("-commit")
+                if not self._audit_event("WEBHOOK_DELIVERY", "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                try:
+                    if committing:
+                        if (type(data) is not dict or
+                                set(data) != {"workflow_id", "event_id",
+                                             "preview_token", "payload_sha256",
+                                             "current_password"} or
+                                type(data["current_password"]) is not str):
+                            raise OutboundError("invalid_webhook_confirmation")
+                        if operator_auth is None:
+                            raise OutboundError("real_owner_required", 403)
+                        verified = operator_auth.confirm_current_password(
+                            data["current_password"])
+                        if verified != 200:
+                            self._audit_event("WEBHOOK_DELIVERY", "DENIED")
+                            self._send(verified, {"error": (
+                                "operator_restart_required" if verified == 503
+                                else "operator_login_locked" if verified == 429
+                                else "invalid_operator_credentials")})
+                            return
+                        safe_body = {k: v for k, v in data.items()
+                                     if k != "current_password"}
+                        result = outbound_webhook.commit(safe_body)
+                        code = 200
+                    else:
+                        result = outbound_webhook.preview(data)
+                        code = 200
+                except OutboundError as exc:
+                    self._audit_event("WEBHOOK_DELIVERY", "DENIED")
+                    self._send(exc.status, {"error": str(exc)})
+                    return
+                except (sqlite3.Error, OSError):
+                    self._audit_event("WEBHOOK_DELIVERY", "UNCERTAIN")
+                    self._send(503, {"error": "webhook_delivery_state_unavailable_check_ledger"})
+                    return
+                outcome = ("SUCCESS" if not committing else
+                           "SUCCESS" if result["status"] == "REMOTE_ACCEPTED" else
+                           "UNCERTAIN")
+                if not self._audit_event("WEBHOOK_DELIVERY", outcome):
+                    self._send(503, {"error": "webhook_delivery_result_uncertain_check_history"})
+                else:
+                    self._send(code, result)
+                return
             if self.path in ("/api/local-schedule-create",
                              "/api/local-schedule-pause",
                              "/api/local-schedule-resume"):
@@ -1656,7 +1722,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_plan_csv=False, enable_plan_actions=False,
                        enable_hn_story_read=False,
                        enable_hn_job_discovery=False,
-                       enable_greenhouse_evidence=False):
+                       enable_greenhouse_evidence=False,
+                       enable_outbound_webhook=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1716,7 +1783,16 @@ def start_local_server(port=8765, enable_local_agent=False,
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
                     if enable_local_agent else None)
     scheduler = None
+    outbound = None
     try:
+        if enable_outbound_webhook:
+            destination = os.environ.get("AAS_WEBHOOK_URL", "")
+            if not destination:
+                raise OutboundError("webhook_url_required_at_process_start")
+            outbound = LocalOutboundWebhook(
+                core, home / "outbound-webhook-ledger.sqlite3",
+                url=destination,
+                secret=os.environ.get("AAS_WEBHOOK_SIGNING_SECRET", ""))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
@@ -1747,6 +1823,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_scheduler=scheduler,
+                           outbound_webhook=outbound,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
@@ -1773,6 +1850,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     finally:
         if scheduler is not None:
             scheduler.close()
+        if outbound is not None:
+            outbound.close()
         if memory_store is not None:
             memory_store.close()
         if model_safety is not None:
@@ -1835,6 +1914,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-outbound-webhook", action="store_true",
+                        help="Explicitly enable one owner-approved HTTPS webhook destination from AAS_WEBHOOK_URL environment. Never automatically send or retry.")
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
@@ -1938,8 +2019,9 @@ def main(argv=None):
                            enable_plan_actions=args.enable_plan_actions,
                            enable_hn_story_read=args.enable_hn_story_read,
                            enable_hn_job_discovery=args.enable_hn_job_discovery,
-                           enable_greenhouse_evidence=args.enable_greenhouse_evidence)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
+                           enable_greenhouse_evidence=args.enable_greenhouse_evidence,
+                           enable_outbound_webhook=args.enable_outbound_webhook)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 

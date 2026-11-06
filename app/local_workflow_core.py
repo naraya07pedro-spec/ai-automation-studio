@@ -372,6 +372,23 @@ class LocalWorkflowCore:
                      "decision": decision, "reason": reason,
                      "created_at": created_at, "external_dispatch_count": 0}
 
+    def get_run(self, wid, eid):
+        """Fetch exactly one already-recorded deterministic local receipt."""
+        if type(wid) is not str or not ID_PATTERN.fullmatch(wid):
+            return _error("invalid_workflow_id")
+        if type(eid) is not str or not EVENT_PATTERN.fullmatch(eid):
+            return _error("invalid_event_id")
+        with self._lock:
+            row = self.db.execute("""SELECT workflow_version,decision,reason,created_at
+                FROM local_runs WHERE workflow_id=? AND event_id=?""",
+                (wid, eid)).fetchone()
+        if row is None:
+            return _error("local_run_not_found", 404)
+        return 200, {"workflow_id": wid, "event_id": eid,
+                     "workflow_version": row[0], "decision": row[1],
+                     "reason": row[2], "created_at": row[3],
+                     "external_dispatch_count": 0}
+
     def list_workflows(self):
         with self._lock:
             rows = self.db.execute("""SELECT w.workflow_id,w.display_name,

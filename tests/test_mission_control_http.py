@@ -29,9 +29,11 @@ class MissionControlSmoke(unittest.TestCase):
             owner = home / ".ai-automation-studio" / "operator.json"
             LocalOperatorAuth.provision(owner, PASSWORD)
             env = dict(os.environ)
-            env.update(HOME=str(home), USERPROFILE=str(home), PYTHONUNBUFFERED="1")
+            env.update(HOME=str(home), USERPROFILE=str(home), PYTHONUNBUFFERED="1",
+                       AAS_WEBHOOK_URL="https://demo.n8n.cloud/webhook/disposable-smoke")
             proc = subprocess.Popen(
-                [sys.executable, str(ROOT / "app" / "local_server.py")],
+                [sys.executable, str(ROOT / "app" / "local_server.py"),
+                 "--enable-outbound-webhook"],
                 cwd=str(ROOT), env=env, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL)
             opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -107,6 +109,34 @@ class MissionControlSmoke(unittest.TestCase):
                     "schedule_id": created["schedule_id"], "expected_epoch": 0})
                 self.assertEqual(status, 200)
                 self.assertEqual(paused["status"], "PAUSED")
+
+                # Real configured connector, no network send.
+                with opener.open(BASE + "/api/connector-catalog", timeout=2) as response:
+                    catalog = json.load(response)
+                self.assertTrue(catalog["connectors"][0]["configured"])
+                self.assertEqual(catalog["webhook_destination_hostname"], "demo.n8n.cloud")
+                status, receipt = post("/api/local-run", {
+                    "workflow_id": "scheduled_studio", "event_id": "connector_smoke_001",
+                    "service_code": "automation", "budget_tier": 2, "timeline": "soon"})
+                self.assertEqual(status, 200)
+                self.assertEqual(receipt["status"], "RECORDED_LOCAL")
+                status, preview = post("/api/outbound-webhook-preview", {
+                    "workflow_id": "scheduled_studio", "event_id": "connector_smoke_001"})
+                self.assertEqual(status, 200)
+                self.assertEqual(preview["status"], "PREVIEW_ONLY")
+                self.assertEqual(preview["external_write_count"], 0)
+                with self.assertRaises(HTTPError) as rejected:
+                    post("/api/outbound-webhook-commit", {
+                        "workflow_id": "scheduled_studio",
+                        "event_id": "connector_smoke_001",
+                        "preview_token": preview["preview_token"],
+                        "payload_sha256": preview["payload_sha256"],
+                        "current_password": "wrong-owner-password"})
+                self.assertIn(rejected.exception.code, (401, 403, 429))
+                with opener.open(BASE + "/api/outbound-history", timeout=2) as response:
+                    ledger = json.load(response)
+                self.assertEqual(ledger["deliveries"][0]["status"], "PREVIEWED")
+                # Never attempt a network send in this CI smoke.
             finally:
                 if proc.poll() is None:
                     proc.terminate()

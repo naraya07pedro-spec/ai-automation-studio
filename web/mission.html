@@ -187,6 +187,33 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+
+<section class="panel" id="connector-panel" aria-label="Connector Hub and n8n outbound delivery" style="margin-top:20px">
+ <div class="split"><h2>06 · Connector Hub</h2><span class="pill" id="connector-status">Checking permissions</span></div>
+ <p class="sub">Inspect existing integrations and connect one real outbound action to n8n or a custom HTTPS webhook. The destination is configured privately on the server, never pasted into the browser. A saved local result can be sent only after exact preview and owner password confirmation.</p>
+ <div id="connector-catalog" class="note">Sign in to see connector capabilities.</div>
+ <div class="notice" style="margin:18px 0">A successful HTTP 2xx means the webhook endpoint accepted the request, not that an n8n workflow completed. No automatic retry of external side effects. Scheduler never invokes this connector without an explicit future authorization policy.</div>
+ <div class="grid">
+  <div>
+   <label for="webhook-workflow">Saved local workflow</label>
+   <select id="webhook-workflow"></select>
+   <label for="webhook-event">Already recorded event ID</label>
+   <input id="webhook-event" maxlength="60" placeholder="example: event_001" autocomplete="off">
+   <div class="btnrow"><button class="btn" type="button" id="webhook-preview">Preview actual outbound payload</button></div>
+   <p class="status" id="webhook-status" aria-live="polite">No external action prepared.</p>
+   <div id="webhook-preview-output" class="output">No preview token exists.</div>
+   <label for="webhook-password">Owner password (required for this one send)</label>
+   <input id="webhook-password" type="password" autocomplete="off" placeholder="Re-enter owner password to confirm">
+   <div class="btnrow"><button class="btn primary" type="button" id="webhook-send" disabled>Confirm one HTTPS POST</button></div>
+  </div>
+  <div>
+   <div class="split"><strong>External delivery ledger</strong><button class="btn" id="webhook-refresh" type="button">Refresh</button></div>
+   <p class="note">Only immutable saved local events can be sent, once each. A timeout or uncertain response requires manual reconciliation before further action.</p>
+   <div id="webhook-history" class="output">No deliveries loaded.</div>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -231,11 +258,12 @@ function lock(message){
  status("login-status",message||"Sign in with your server's operator password.");
  flows=[];$("flow-choice").replaceChildren();$("flow-output").textContent="Session locked.";flowButtons();
  recurringSchedules=[];stopSchedulerPoll();$("schedule-list").textContent="Session locked.";$("schedule-history").textContent="Session locked.";$("schedule-worker").textContent="Locked";refreshScheduleFlowChoices();
+ webhookEnabled=false;webhookPreview=null;$("webhook-password").value="";$("webhook-history").textContent="Session locked.";$("webhook-preview-output").textContent="Session locked.";refreshWebhookButtons();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors()]);
  stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf)refreshSchedules();},10000);
 }
 async function loadCapabilities(){
@@ -482,6 +510,113 @@ $("schedule-form").addEventListener("submit",async e=>{
 });
 refreshScheduleFields();
 
+
+let webhookEnabled=false,webhookPreview=null,webhookBusy=false;
+function resetWebhookPreview(){
+ webhookPreview=null;
+ $("webhook-preview-output").textContent="No valid preview. Read source event and preview again.";
+ refreshWebhookButtons();
+}
+function refreshWebhookFlowList(){
+ const el=$("webhook-workflow"),prior=el.value;el.replaceChildren();
+ for(const w of flows){
+  const option=document.createElement("option");option.value=w.workflow_id;
+  option.textContent=w.display_name+" · "+w.workflow_id;el.append(option);
+ }
+ if(flows.some(w=>w.workflow_id===prior))el.value=prior;
+ refreshWebhookButtons();
+}
+function refreshWebhookButtons(){
+ const ready=!!csrf&&!busy&&!webhookBusy&&webhookEnabled;
+ $("webhook-preview").disabled=!ready||!$("webhook-workflow").value;
+ $("webhook-send").disabled=!ready||!webhookPreview||
+  !$("webhook-password").value||
+  webhookPreview.workflow_id!==$("webhook-workflow").value||
+  webhookPreview.event_id!==$("webhook-event").value.trim();
+ $("webhook-refresh").disabled=!csrf||busy||webhookBusy;
+}
+async function loadConnectors(){
+ if(!csrf)return;
+ try{
+  const catalog=await request("/api/connector-catalog");
+  if(!csrf)return;
+  webhookEnabled=Array.isArray(catalog.connectors)&&catalog.connectors.some(
+   x=>x.id==="outbound_https_webhook"&&x.configured&&x.external_write_enabled);
+  $("connector-status").textContent=webhookEnabled?
+   "Outbound configured · approvals required":"Outbound not configured";
+  const box=$("connector-catalog");box.replaceChildren();
+  for(const item of catalog.connectors||[]){
+   const row=document.createElement("div");row.className="step";
+   const name=document.createElement("strong");name.textContent=item.label+" · "+(item.configured===true?"Configured":item.configured===false?"Not configured":"Separate read-only grant");
+   const cap=document.createElement("span");cap.textContent=(item.capabilities||[]).join(", ")+"\nPermission: "+item.permission;
+   row.append(name,cap);box.append(row);
+  }
+  if(!catalog.connectors?.length)box.textContent="No outbound connector active. Start the local server with --enable-outbound-webhook and a private AAS_WEBHOOK_URL.";
+  if(webhookEnabled)await loadWebhookHistory();
+  refreshWebhookButtons();
+ }catch(error){if(csrf)status("webhook-status","Connector catalog unavailable: "+error.message,true);}
+}
+async function loadWebhookHistory(){
+ if(!csrf||!webhookEnabled||webhookBusy)return;
+ try{
+  const history=await request("/api/outbound-history");
+  if(!csrf)return;
+  $("webhook-history").textContent=history.deliveries?.length?
+   history.deliveries.map(x=>x.updated_utc+" · "+x.status+"\n"+
+     x.workflow_id+"/"+x.event_id+"\nHTTP "+(x.http_status??"unknown")+
+     "\nDelivery "+x.delivery_id+"\n").join("\n"):
+   "No external write attempts. The outbound ledger is empty.";
+ }catch(error){if(csrf)$("webhook-history").textContent="History unavailable: "+error.message;}
+}
+$("webhook-workflow").addEventListener("change",resetWebhookPreview);
+$("webhook-event").addEventListener("input",resetWebhookPreview);
+$("webhook-password").addEventListener("input",refreshWebhookButtons);
+$("webhook-refresh").addEventListener("click",loadWebhookHistory);
+$("webhook-preview").addEventListener("click",async()=>{
+ if(!csrf||busy||webhookBusy||!webhookEnabled)return;
+ const workflow_id=$("webhook-workflow").value,event_id=$("webhook-event").value.trim();
+ resetWebhookPreview();webhookBusy=true;refreshWebhookButtons();
+ try{
+  const result=await request("/api/outbound-webhook-preview",{workflow_id,event_id});
+  if(!csrf||$("webhook-workflow").value!==workflow_id||
+     $("webhook-event").value.trim()!==event_id)return;
+  if(result.status!=="PREVIEW_ONLY"||result.external_write_count!==0)throw Error("invalid_preview");
+  webhookPreview=result;
+  $("webhook-preview-output").textContent=
+   "NO EXTERNAL REQUEST SENT\nDestination host: "+result.destination_hostname+
+   "\nPayload SHA-256: "+result.payload_sha256+
+   "\nExpires: "+result.expires_in_seconds+" seconds\n\n"+
+   JSON.stringify(result.payload,null,2);
+  status("webhook-status","Inspect the exact data and destination. Re-enter your owner password to authorize one delivery.");
+ }catch(error){if(csrf)status("webhook-status","No send prepared: "+error.message,true);}
+ finally{webhookBusy=false;refreshWebhookButtons();}
+});
+$("webhook-send").addEventListener("click",async()=>{
+ const p=webhookPreview;
+ if(!p||!csrf||webhookBusy||busy||!webhookEnabled)return;
+ if(!window.confirm("SEND EXACTLY ONE REAL HTTPS WEBHOOK POST?\n\nDestination hostname: "+
+    p.destination_hostname+"\nWorkflow: "+p.workflow_id+"\nEvent: "+p.event_id+
+    "\nSHA-256: "+p.payload_sha256+
+    "\n\nThis may trigger an external n8n workflow. There is NO automatic retry, even on a timeout."))return;
+ const pass=$("webhook-password").value;
+ if(!pass)return;
+ webhookBusy=true;webhookPreview=null;$("webhook-password").value="";refreshWebhookButtons();
+ $("webhook-preview-output").textContent="Attempt submitted. Do not manually retry if the network disconnects; check the delivery ledger and n8n.";
+ try{
+  const result=await request("/api/outbound-webhook-commit",{
+    workflow_id:p.workflow_id,event_id:p.event_id,
+    preview_token:p.preview_token,payload_sha256:p.payload_sha256,
+    current_password:pass});
+  if(!csrf)return;
+  status("webhook-status",result.status==="REMOTE_ACCEPTED"?
+   "Webhook endpoint accepted request (HTTP "+result.http_status+"). Downstream workflow completion NOT verified.":
+   "Delivery outcome UNKNOWN. Do not retry until reconciled in n8n.",
+   result.status!=="REMOTE_ACCEPTED");
+  $("webhook-preview-output").textContent=JSON.stringify(result,null,2);
+ }catch(error){if(csrf)status("webhook-status","No verified success: "+error.message+". Check ledger before any other action.",true);}
+ finally{webhookBusy=false;refreshWebhookButtons();if(csrf)loadWebhookHistory();}
+});
+
 let flows=[];
 function chosenFlow(){return flows.find(x=>x.workflow_id===$("flow-choice").value);}
 function flowButtons(){
@@ -499,7 +634,7 @@ async function refreshFlows(preferred){
   const select=$("flow-choice"),chosen=preferred||select.value;select.replaceChildren();
   for(const w of flows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" · "+w.status+" · v"+w.version;select.append(option);}
   if(flows.some(w=>w.workflow_id===chosen))select.value=chosen;
-  flowButtons();refreshScheduleFlowChoices();status("flow-status",flows.length+" saved workflow(s).");
+  flowButtons();refreshScheduleFlowChoices();refreshWebhookFlowList();status("flow-status",flows.length+" saved workflow(s).");
  }catch(error){if(csrf)status("flow-status","Cannot load workflows: "+error.message,true);}
 }
 $("flow-choice").addEventListener("change",flowButtons);
