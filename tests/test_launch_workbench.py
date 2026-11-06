@@ -61,13 +61,14 @@ class QuickstartTests(unittest.TestCase):
             owner.write_text("fixture only", encoding="utf-8")
             with patch.object(quickstart, "_operator_path", return_value=owner), \
                  patch.object(quickstart, "_port_free", return_value=True), \
-                 patch.object(quickstart.subprocess, "call", return_value=0) as launch:
+                 patch.object(quickstart, "_serve") as launch, \
+             patch.object(quickstart.subprocess, "call") as setup:
                 self.assertEqual(quickstart.main(["--mode", "full", "--no-browser"]), 0)
                 self.assertEqual(launch.call_count, 1)
-                argv = launch.call_args.args[0]
-                self.assertEqual(argv[:2], [sys.executable, str(quickstart.SERVER)])
-                self.assertIn("--enable-local-agent", argv)
-                self.assertNotIn("--enable-agent-history", argv)
+                setup.assert_not_called()
+                flags = launch.call_args.args[0]
+                self.assertIn("--enable-local-agent", flags)
+                self.assertNotIn("--enable-agent-history", flags)
 
 
 if __name__ == "__main__":
