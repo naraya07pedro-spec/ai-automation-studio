@@ -524,3 +524,7 @@ There is **no** verified public deployment, comprehensive accessibility audit, d
 ### Reviewed read-only plan execution (Slice 72)
 
 After proposing and approving an explicitly reviewed 1–3-step task plan, use **Run remaining reviewed read-only steps** to confirm the exact remaining tools/arguments once and execute them sequentially in the open browser. **Stop after current step** prevents additional dispatches but cannot cancel an in-flight request; failures never auto-retry. All actions still pass existing server authorization, source checks and persisted state checks, and final report generation remains separately owner-triggered. See [reviewed batch run safety and limits](docs/REVIEWED_READONLY_BATCH_RUN_V1.md). This is not a background autonomous agent. No Windows/Ollama device acceptance is claimed.
+
+### Remote job eligibility *evidence* triage (Slice 81)
+
+An existing explicit owner-clicked Greenhouse public ATS GET now includes a conservative, quote-backed deterministic job wording assessment. It distinguishes **work location, work authorization, remote/hybrid signals, and explicit experience years**, while retaining the original *Indonesia eligibility not verified* flags. A restrictive foreign residence phrase is surfaced for manual review, never treated as an autonomous job rejection. The tool does not auto-apply, rank or send applicant data. See [Slice 81 contract and caveats](docs/REMOTE_JOB_ELIGIBILITY_EVIDENCE_V1.md).
