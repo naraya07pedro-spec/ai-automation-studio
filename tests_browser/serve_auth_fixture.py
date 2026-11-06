@@ -20,6 +20,7 @@ from local_agent_memory import LocalAgentMemory
 from local_agent_task_plans import LocalAgentPlanStore
 from local_csv_profile import profile_selected_csv
 from local_plan_artifacts import LocalPlanArtifactExporter
+from local_tool_action_gate import LocalCSVProfileActionGate
 from local_agent_github_reader import AllowedGitHubIssuesReader
 from local_ollama_agent import AgentError
 from local_document_analysis import analyze_local_document
@@ -200,6 +201,8 @@ def main():
                        local_agent_plan_store=plans,
                        plan_artifact_exporter=LocalPlanArtifactExporter(
                            Path(home.name) / "exports"),
+                       plan_action_gate=LocalCSVProfileActionGate(
+                           plans, Path(home.name) / "exports", audit),
                        local_document_analyzer=fixture_document,
                        local_multi_document_analyzer=fixture_multi_document,
                        local_device_acceptance=fixture_device_acceptance,
