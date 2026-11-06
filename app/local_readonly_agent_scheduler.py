@@ -7,7 +7,7 @@ No automatic retry after timeout/crash; no unsupervised external writes.
 
 Prompts and outputs are private but PLAINTEXT local SQLite. Explicit opt-in.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -238,7 +238,7 @@ class LocalReadOnlyAgentSchedules:
                 if prior["attempted_runs"] >= prior["max_runs"]:
                     raise AgentScheduleError("ai_task_limit_exhausted", 409)
                 if _aware(self.clock()) >= _aware(
-                        __import__("datetime").datetime.fromisoformat(prior["expires_utc"])):
+                        datetime.fromisoformat(prior["expires_utc"])):
                     raise AgentScheduleError("ai_task_expired", 409)
                 # A timeout/crash requires operator acknowledgement through
                 # the existing model quarantine UI BEFORE this can resume.
