@@ -14,6 +14,7 @@ sys.path.insert(0,str(ROOT/"deploy"))
 from local_connector_vault import generate_master_key
 from local_service_credentials import read_runtime_secret, ServiceCredentialError
 import private_vps_service as vps
+import provision_private_vps_credential as provisioner
 import verify_private_vps_runtime as checker
 
 
@@ -154,6 +155,31 @@ class VPSFeatureUnitTests(unittest.TestCase):
 
     def test_no_optional_credentials_required_for_safe_offline_mode(self):
         self.assertEqual(vps.validate_secret_sources(),[])
+
+
+class CredentialProvisionerTests(unittest.TestCase):
+    def test_provisioner_refuses_nonroot_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest=Path(tmp)/"private"
+            with patch.object(provisioner.os,"geteuid",return_value=1000):
+                with self.assertRaisesRegex(provisioner.ProvisionError,"root_required"):
+                    provisioner.provision("vault-key",generate_master_key(),directory=dest)
+            self.assertFalse(dest.exists())
+
+    def test_provisioner_rejects_insecure_and_unsupported_values(self):
+        for name,value in (
+            ("unexpected","fixture"),
+            ("vault-key","not-a-key"),
+            ("webhook-url","http://insecure.example/hook"),
+            ("webhook-signing-secret","bad\nline")):
+            with self.subTest(name=name):
+                with self.assertRaises(provisioner.ProvisionError):
+                    provisioner._validate(name,value)
+
+    def test_provisioner_never_accepts_cli_secret_argument(self):
+        self.assertNotIn("--value",provisioner.NAMES)
+        self.assertEqual(set(provisioner.NAMES),
+                         {"vault-key","webhook-url","webhook-signing-secret"})
 
 
 class LiveProbeContractTests(unittest.TestCase):
