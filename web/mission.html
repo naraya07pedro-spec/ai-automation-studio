@@ -214,6 +214,39 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+
+<section class="panel" id="autopilot-panel" aria-label="Owner-approved scheduled webhook autopilot" style="margin-top:20px">
+ <div class="split"><h2>07 · Scheduled webhook autopilot</h2><span class="pill" id="autopilot-state">Checking</span></div>
+ <p class="sub">Bind an already active recurring task to the single configured n8n HTTPS endpoint. After you approve this exact schedule, the Python worker can send upcoming local decisions automatically without browser clicks, until the approved maximum or expiration.</p>
+ <div class="notice" style="margin:18px 0"><strong>Real external actions:</strong> arming permits automatic outbound HTTPS POSTs, not just local scheduling. Every attempt is durably claimed once. A timeout, crash or unknown delivery outcome disables the policy. HTTP 2xx means webhook acceptance only, not a confirmed n8n workflow result. Stopping prevents new attempts, but cannot cancel an already in-flight request.</div>
+ <div class="grid">
+  <div>
+   <label for="autopilot-schedule">Active recurring schedule</label><select id="autopilot-schedule"></select>
+   <label for="autopilot-max">Maximum total external POST attempts for this authorization (1–30)</label>
+   <input id="autopilot-max" type="number" min="1" max="30" step="1" value="3">
+   <label for="autopilot-days">Authorization expires after N days (1–90)</label>
+   <input id="autopilot-days" type="number" min="1" max="90" step="1" value="7">
+   <div class="btnrow"><button class="btn" id="autopilot-preview-btn" type="button">Review exact autopilot policy</button></div>
+   <p class="status" role="status" aria-live="polite" id="autopilot-status">Choose a schedule to begin.</p>
+   <div class="output" id="autopilot-preview-out">No outbound authorization prepared.</div>
+   <label for="autopilot-pass">Current owner password (required to arm)</label>
+   <input id="autopilot-pass" type="password" autocomplete="off" placeholder="Password stays in this request only">
+   <label style="font-weight:400;display:flex;gap:10px;align-items:flex-start">
+     <input id="autopilot-consent" type="checkbox" style="width:auto;margin-top:4px">
+     <span>I authorize automatic real HTTPS POSTs for this reviewed schedule, with these limits and no automatic retry if uncertain.</span>
+   </label>
+   <div class="btnrow"><button class="btn primary" id="autopilot-arm-btn" type="button" disabled>Arm limited automatic delivery</button></div>
+  </div>
+  <div>
+   <div class="split"><strong>Active & previous grants</strong><button class="btn" id="autopilot-refresh-btn" type="button">Refresh</button></div>
+   <p class="note">Stop is immediate for new claims. If an HTTPS call is already in progress it may still complete. Creating a new schedule is required for a fresh policy after an existing policy ends.</p>
+   <div id="autopilot-grants">No grants loaded.</div>
+   <label>Actual external delivery receipts</label>
+   <div id="autopilot-receipts" class="output">No automatic external writes recorded.</div>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -259,12 +292,13 @@ function lock(message){
  flows=[];$("flow-choice").replaceChildren();$("flow-output").textContent="Session locked.";flowButtons();
  recurringSchedules=[];stopSchedulerPoll();$("schedule-list").textContent="Session locked.";$("schedule-history").textContent="Session locked.";$("schedule-worker").textContent="Locked";refreshScheduleFlowChoices();
  webhookEnabled=false;webhookPreview=null;$("webhook-password").value="";$("webhook-history").textContent="Session locked.";$("webhook-preview-output").textContent="Session locked.";refreshWebhookButtons();
+ autopilotEnabled=false;autopilotPreview=null;$("autopilot-pass").value="";$("autopilot-consent").checked=false;$("autopilot-grants").textContent="Session locked.";$("autopilot-receipts").textContent="Session locked.";autopilotControls();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors()]);
- stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf)refreshSchedules();},10000);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots()]);
+ stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();}},10000);
 }
 async function loadCapabilities(){
  try{
@@ -439,6 +473,7 @@ async function refreshSchedules(){
   if(!csrf)return;
   recurringSchedules=Array.isArray(data.schedules)?data.schedules:[];
   $("schedule-worker").textContent=data.worker_running?"Worker running · SQLite":"Worker not running";
+  autopilotScheduleChoices();
   const wrap=$("schedule-list");wrap.replaceChildren();
   if(!recurringSchedules.length){wrap.textContent="No scheduled tasks yet.";return;}
   for(const row of recurringSchedules){
@@ -617,6 +652,150 @@ $("webhook-send").addEventListener("click",async()=>{
  finally{webhookBusy=false;refreshWebhookButtons();if(csrf)loadWebhookHistory();}
 });
 
+
+let autopilotEnabled=false,autopilotPreview=null,autopilotBusy=false;
+function autopilotResetPreview(){
+ autopilotPreview=null;
+ $("autopilot-preview-out").textContent="No authorized preview. Inspect the policy again.";
+ $("autopilot-pass").value="";$("autopilot-consent").checked=false;
+ autopilotControls();
+}
+function autopilotScheduleChoices(){
+ const el=$("autopilot-schedule"),chosen=el.value;
+ el.replaceChildren();
+ for(const s of recurringSchedules.filter(x=>x.status==="ACTIVE")){
+  const o=document.createElement("option");o.value=s.schedule_id;
+  o.textContent=s.workflow_id+" · "+s.config.cadence+" · "+s.schedule_id.slice(0,8);
+  el.append(o);
+ }
+ if(recurringSchedules.some(x=>x.schedule_id===chosen&&x.status==="ACTIVE"))el.value=chosen;
+ if(autopilotPreview&&autopilotPreview.schedule_id!==el.value)autopilotResetPreview();
+ autopilotControls();
+}
+function autopilotControls(){
+ const available=!!csrf&&!busy&&!autopilotBusy&&autopilotEnabled;
+ $("autopilot-preview-btn").disabled=!available||!$("autopilot-schedule").value;
+ $("autopilot-arm-btn").disabled=!available||!autopilotPreview||
+  !$("autopilot-consent").checked||!$("autopilot-pass").value||
+  $("autopilot-schedule").value!==autopilotPreview.schedule_id||
+  Number($("autopilot-max").value)!==autopilotPreview.max_external_posts||
+  Number($("autopilot-days").value)!==autopilotPreview.valid_for_days;
+ $("autopilot-refresh-btn").disabled=!csrf||busy||autopilotBusy;
+}
+async function loadAutopilots(){
+ if(!csrf||autopilotBusy)return;
+ try{
+  const data=await request("/api/autopilot-status");
+  if(!csrf)return;
+  autopilotEnabled=!!data.enabled;
+  $("autopilot-state").textContent=autopilotEnabled?
+   "Configured · owner approval required":"Disabled · configure webhook first";
+  const target=$("autopilot-grants");target.replaceChildren();
+  const policies=Array.isArray(data.policies)?data.policies:[];
+  if(!policies.length)target.textContent="No owner-armed policies.";
+  for(const p of policies){
+   const card=document.createElement("div");card.className="step";
+   const headline=document.createElement("strong");
+   headline.textContent=p.workflow_id+" · "+p.status;
+   const detail=document.createElement("span");
+   detail.textContent="Schedule "+p.schedule_id+
+    "\nAttempts: "+p.attempted_posts+" / "+p.max_external_posts+
+    "\nExpires: "+p.expires_utc+
+    "\nDestination unchanged: "+(p.destination_matches_configuration?"yes":"NO");
+   card.append(headline,detail);
+   if(p.status==="ACTIVE"){
+    const btn=document.createElement("button");btn.type="button";btn.className="btn warn";
+    btn.textContent="STOP new automatic sends";
+    btn.addEventListener("click",()=>stopAutopilot(p));
+    card.append(btn);
+   }
+   target.append(card);
+  }
+  const attempts=Array.isArray(data.attempts)?data.attempts:[];
+  $("autopilot-receipts").textContent=attempts.length?
+   attempts.map(a=>a.claimed_utc+" · "+a.status+
+     "\nSchedule "+a.schedule_id+"\nSlot "+a.scheduled_for_utc+
+     "\nHTTP "+(a.http_status??"unknown")+
+     "\nDelivery "+a.delivery_id+"\n").join("\n"):
+   "No automatic outbound request has been claimed.";
+  autopilotControls();
+ }catch(error){if(csrf)status("autopilot-status","Cannot read autopilot status: "+error.message,true);}
+}
+async function stopAutopilot(p){
+ if(!csrf||autopilotBusy)return;
+ autopilotBusy=true;autopilotControls();
+ try{
+  await request("/api/autopilot-stop",{
+   schedule_id:p.schedule_id,expected_epoch:p.control_epoch});
+  status("autopilot-status","Autopilot stopped for future claims. Any in-flight POST cannot be recalled.");
+ }catch(error){if(csrf)status("autopilot-status","Stop not confirmed: "+error.message,true);}
+ finally{autopilotBusy=false;autopilotControls();if(csrf)loadAutopilots();}
+}
+$("autopilot-schedule").addEventListener("change",autopilotResetPreview);
+for(const id of ["autopilot-max","autopilot-days"]){
+ $(id).addEventListener("input",autopilotResetPreview);
+}
+$("autopilot-pass").addEventListener("input",autopilotControls);
+$("autopilot-consent").addEventListener("change",autopilotControls);
+$("autopilot-refresh-btn").addEventListener("click",loadAutopilots);
+$("autopilot-preview-btn").addEventListener("click",async()=>{
+ if(!csrf||busy||autopilotBusy||!autopilotEnabled)return;
+ const schedule_id=$("autopilot-schedule").value;
+ const max_sends=Number($("autopilot-max").value),expires_days=Number($("autopilot-days").value);
+ autopilotResetPreview();
+ autopilotBusy=true;autopilotControls();
+ try{
+  const p=await request("/api/autopilot-preview",{
+   schedule_id,max_sends,expires_days});
+  if(!csrf||$("autopilot-schedule").value!==schedule_id||
+     Number($("autopilot-max").value)!==max_sends||
+     Number($("autopilot-days").value)!==expires_days)return;
+  if(p.status!=="PREVIEW_ONLY"||p.external_write_count!==0)
+   throw Error("invalid_autopilot_preview");
+  autopilotPreview=p;
+  $("autopilot-preview-out").textContent=
+   "NO HTTPS REQUEST SENT YET\nDestination: "+p.destination_hostname+
+   "\nSchedule: "+p.schedule_id+"\nWorkflow: "+p.workflow_id+
+   " · version "+p.source_workflow_version+
+   "\nFirst eligible UTC: "+p.first_eligible_utc+
+   "\nHard limit: "+p.max_external_posts+" real POST attempts"+
+   "\nAuthorization duration: "+p.valid_for_days+" days"+
+   "\nReview token expires in "+p.preview_expires_in_seconds+" seconds"+
+   "\n\nExact source task configuration:\n"+
+   JSON.stringify(p.schedule_config,null,2)+
+   "\n\nAfter arming, delivery can occur automatically when the NEXT eligible run finishes.";
+  status("autopilot-status","Review the grant carefully, check the consent box and re-enter owner password.");
+ }catch(error){if(csrf)status("autopilot-status","Cannot prepare policy: "+error.message,true);}
+ finally{autopilotBusy=false;autopilotControls();}
+});
+$("autopilot-arm-btn").addEventListener("click",async()=>{
+ const p=autopilotPreview;
+ if(!p||!csrf||!autopilotEnabled||autopilotBusy||busy||
+     !$("autopilot-consent").checked)return;
+ if(!window.confirm("AUTHORIZE AUTOMATIC REAL EXTERNAL REQUESTS?\n\n"+
+  p.destination_hostname+"\nSchedule "+p.schedule_id+
+  "\nUp to "+p.max_external_posts+" separate HTTPS POST attempts"+
+  "\nValid "+p.valid_for_days+" days"+
+  "\n\nNo further prompt before each due send. Unknown outcomes never retry."))return;
+ const current_password=$("autopilot-pass").value;
+ if(!current_password)return;
+ autopilotBusy=true;autopilotPreview=null;
+ $("autopilot-pass").value="";$("autopilot-consent").checked=false;
+ autopilotControls();
+ try{
+  const result=await request("/api/autopilot-arm",{
+   schedule_id:p.schedule_id,max_sends:p.max_external_posts,
+   expires_days:p.valid_for_days,preview_token:p.preview_token,
+   current_password});
+  if(!csrf)return;
+  status("autopilot-status","Autopilot armed: "+result.status+
+   ", hard cap "+result.max_external_posts+" posts. Check receipts for results.");
+  $("autopilot-preview-out").textContent="Policy persisted. Future due slots may issue real HTTPS POSTs while the server is running.";
+ }catch(error){if(csrf)status("autopilot-status","Not armed or outcome uncertain: "+error.message+
+   ". Check grants before another attempt.",true);}
+ finally{autopilotBusy=false;autopilotControls();if(csrf)loadAutopilots();}
+});
+
 let flows=[];
 function chosenFlow(){return flows.find(x=>x.workflow_id===$("flow-choice").value);}
 function flowButtons(){
@@ -634,7 +813,7 @@ async function refreshFlows(preferred){
   const select=$("flow-choice"),chosen=preferred||select.value;select.replaceChildren();
   for(const w of flows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" · "+w.status+" · v"+w.version;select.append(option);}
   if(flows.some(w=>w.workflow_id===chosen))select.value=chosen;
-  flowButtons();refreshScheduleFlowChoices();refreshWebhookFlowList();status("flow-status",flows.length+" saved workflow(s).");
+  flowButtons();refreshScheduleFlowChoices();refreshWebhookFlowList();autopilotScheduleChoices();status("flow-status",flows.length+" saved workflow(s).");
  }catch(error){if(csrf)status("flow-status","Cannot load workflows: "+error.message,true);}
 }
 $("flow-choice").addEventListener("change",flowButtons);

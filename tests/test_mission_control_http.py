@@ -136,7 +136,42 @@ class MissionControlSmoke(unittest.TestCase):
                 with opener.open(BASE + "/api/outbound-history", timeout=2) as response:
                     ledger = json.load(response)
                 self.assertEqual(ledger["deliveries"][0]["status"], "PREVIEWED")
-                # Never attempt a network send in this CI smoke.
+                # Owner approves a bounded future-only automatic webhook policy.
+                # This does NOT wait for a due minute, so no real internet send.
+                status, resumed = post("/api/local-schedule-resume", {
+                    "schedule_id": created["schedule_id"], "expected_epoch": 1})
+                self.assertEqual(status, 200)
+                self.assertEqual(resumed["status"], "ACTIVE")
+                status, policy = post("/api/autopilot-preview", {
+                    "schedule_id": created["schedule_id"],
+                    "max_sends": 1, "expires_days": 1})
+                self.assertEqual(status, 200)
+                self.assertEqual(policy["status"], "PREVIEW_ONLY")
+                self.assertEqual(policy["destination_hostname"], "demo.n8n.cloud")
+                with self.assertRaises(HTTPError) as wrong:
+                    post("/api/autopilot-arm", {
+                        "schedule_id": created["schedule_id"],
+                        "max_sends": 1, "expires_days": 1,
+                        "preview_token": policy["preview_token"],
+                        "current_password": "not-the-owner-password"})
+                self.assertIn(wrong.exception.code, (401, 403, 429))
+                status, armed = post("/api/autopilot-arm", {
+                    "schedule_id": created["schedule_id"],
+                    "max_sends": 1, "expires_days": 1,
+                    "preview_token": policy["preview_token"],
+                    "current_password": PASSWORD})
+                self.assertEqual(status, 201)
+                self.assertEqual(armed["status"], "ACTIVE")
+                with opener.open(BASE + "/api/autopilot-status", timeout=2) as response:
+                    policies = json.load(response)
+                self.assertTrue(policies["enabled"])
+                self.assertEqual(len(policies["policies"]), 1)
+                self.assertEqual(policies["policies"][0]["attempted_posts"], 0)
+                status, stopped = post("/api/autopilot-stop", {
+                    "schedule_id": created["schedule_id"], "expected_epoch": 0})
+                self.assertEqual(status, 200)
+                self.assertEqual(stopped["status"], "STOPPED")
+                # No real network is ever contacted by this CI smoke.
             finally:
                 if proc.poll() is None:
                     proc.terminate()
