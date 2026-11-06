@@ -75,7 +75,7 @@ def render_unit(*, username, checkout, home, python, mode,
         f"Environment=HOME={home}\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n"
         + credentials
-        f"ExecStart={python} {checkout}/app/local_server.py"
+        + f"ExecStart={python} {checkout}/app/local_server.py"
         + (f" {arguments}\n" if arguments else "\n")
         + "Restart=on-failure\n"
         "RestartSec=5s\n"
