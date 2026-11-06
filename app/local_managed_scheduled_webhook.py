@@ -15,6 +15,8 @@ from local_connector_manager import ManagedConnectorError, _validate_id
 from local_outbound_webhook import send_https_once, validate_https_target
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 
+MAX_MANAGED_DISPATCH_PER_TICK = 3
+
 
 class _ManagedTarget:
     """Never cache a sensitive URL or signing secret across revocation."""
@@ -61,7 +63,8 @@ class _ScopedScheduledWebhook(ScheduledWebhookAutopilot):
 
     def __init__(self, connector_id, *args, **kwargs):
         self.connector_id = connector_id
-        super().__init__(*args, dispatch_action="MANAGED_AUTOPILOT_DISPATCH", **kwargs)
+        super().__init__(*args, dispatch_action="MANAGED_AUTOPILOT_DISPATCH",
+                         max_dispatch_per_tick=1, **kwargs)
 
     def _payload(self, schedule_id, receipt, workflow_id):
         payload = super()._payload(schedule_id, receipt, workflow_id)
@@ -88,7 +91,8 @@ class ManagedScheduledWebhookAutopilot:
         self.clock = clock
         self.lock = threading.RLock()
         self._policies = {}
-        # Limits handled independently per connector by the original worker.
+        self._scan_cursor = 0
+        # One POST at most per connector per scan, three across all connectors.
         self.manager.scheduled_enabled = True
 
     def _path(self, connector_id):
@@ -179,8 +183,19 @@ class ManagedScheduledWebhookAutopilot:
             connections = self.manager.list()["connectors"]
         except (ManagedConnectorError, OSError, sqlite3.Error, ValueError):
             return 0
+        if not connections:
+            return 0
+        # Round-robin preserves fairness when four active targets compete for
+        # the three-send global tick budget. Do not block the local scheduler
+        # on an unbounded number of sequential HTTPS timeouts.
+        with self.lock:
+            cursor = self._scan_cursor % len(connections)
+            self._scan_cursor = (cursor + 1) % len(connections)
+        ordered = connections[cursor:] + connections[:cursor]
         # Only pre-existing policy files are scanned, never arbitrary paths.
-        for connection in connections:
+        for connection in ordered:
+            if count >= MAX_MANAGED_DISPATCH_PER_TICK:
+                break
             cid = connection["connector_id"]
             if not self._path(cid).is_file():
                 continue
