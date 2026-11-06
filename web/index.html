@@ -316,7 +316,14 @@ aas:timeline:urgent
 </section>
 <section class="panel" id="hn-source-panel" aria-label="Owner-granted Hacker News public story connector" style="margin:22px 0">
 <div class="kicker">SECOND PROVIDER · HACKER NEWS PUBLIC API · OWNER GRANTS</div>
-<h2>Read a specific public Hacker News story or job thread</h2>
+<h2>Discover, review and grant individual Hacker News jobs</h2>
+<p class="muted">Discover a few recent public HN job-title previews with one explicit click. Discovery does NOT grant any story ID, validate eligibility, or run a model. Choose an ID, copy it into the separate password-confirmed grant form, review the exact plan, then execute a read-only step.</p>
+<div class="core-actions"><button id="hn-job-discover" type="button" class="secondary" disabled>Preview latest 5 HN job titles (read-only)</button></div>
+<div id="hn-job-discovery-status" class="setup-msg" role="status" aria-live="polite">Discovery disabled. Requires --enable-hn-story-read and --enable-hn-job-discovery.</div>
+<pre id="hn-job-discovery-output" class="trace">No discovery request made. Public job posts are unverified; no grants were made.</pre>
+<div class="field"><label for="hn-job-preview-choice">Choose a previewed job ID (no permission granted)</label>
+<select id="hn-job-preview-choice" disabled></select></div>
+<div class="core-actions"><button id="hn-job-use-id" type="button" class="secondary" disabled>Copy selected ID into grant form</button></div>
 <p class="muted">The owner must grant each exact numerical story ID with the local password. The reviewed agent reads only that item and up to two direct comments from Hacker News' fixed public HTTPS API. No account tokens, arbitrary URLs, external writes, full-comment scraping, background polling or automatic job applications. HN users' posts are unverified and do not establish that jobs are open or accept applicants from Indonesia.</p>
 <div class="layout"><div>
 <div class="field"><label for="hn-story-id">Hacker News story ID (digits only)</label>
@@ -818,6 +825,89 @@ $("public-github-commit").addEventListener("click",async()=>{
  }
 });
 let hnStoryEnabled=false;
+let hnJobDiscoveryEnabled=false;
+let hnJobPreview=null;
+let hnJobPreviewRevision=0;
+const clearHNJobPreview=(message="No discovery preview in this session.")=>{
+ hnJobPreviewRevision++;
+ hnJobPreview=null;
+ $("hn-job-preview-choice").replaceChildren();
+ $("hn-job-preview-choice").disabled=true;
+ $("hn-job-use-id").disabled=true;
+ $("hn-job-discovery-output").textContent=message;
+};
+$("hn-job-discover").addEventListener("click",async()=>{
+ if(!operatorCsrf||!hnStoryEnabled||!hnJobDiscoveryEnabled)return;
+ const revision=++hnJobPreviewRevision;
+ hnJobPreview=null;
+ $("hn-job-discover").disabled=true;
+ $("hn-job-use-id").disabled=true;
+ $("hn-job-preview-choice").disabled=true;
+ $("hn-job-preview-choice").replaceChildren();
+ $("hn-job-discovery-status").textContent=
+  "Fetching up to five public titles from the exact official HN API. No grants or model calls.";
+ $("hn-job-discovery-output").textContent="Read-only public metadata request started…";
+ try{
+  const response=await appFetch("/api/local-hn-jobstories-preview",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({})});
+  const out=await response.json();
+  if(revision!==hnJobPreviewRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(out.error||"hn_discovery_unavailable");
+  if(out.source!=="HACKER_NEWS_PUBLIC_JOBSTORIES_PREVIEW_V1"||
+     out.auto_grant_count!==0||out.external_write_count!==0||
+     out.model_calls!==0||out.local_file_write_count!==0||
+     out.requires_separate_owner_grant!==true||
+     !Array.isArray(out.jobs)||out.jobs.length>5||
+     !/^[0-9a-f]{64}$/.test(out.source_sha256))
+   throw Error("invalid_hn_discovery_preview");
+  hnJobPreview=out;
+  const select=$("hn-job-preview-choice");
+  select.replaceChildren();
+  for(const job of out.jobs){
+   if(!Number.isInteger(job.story_id)||job.story_id<1||
+      job.story_id>999999999||job.owner_story_grant!==false||
+      typeof job.title!=="string")throw Error("invalid_hn_discovery_job");
+   const option=document.createElement("option");
+   option.value=String(job.story_id);
+   option.textContent="#"+job.story_id+" · "+job.title;
+   select.appendChild(option);
+  }
+  select.disabled=!select.options.length;
+  $("hn-job-use-id").disabled=!select.options.length;
+  $("hn-job-discovery-output").textContent=JSON.stringify({
+   fetched_at_utc:out.fetched_at_utc,source_sha256:out.source_sha256,
+   ids_in_feed:out.feed_ids_returned,ids_considered:out.ids_considered,
+   jobs:out.jobs,external_read_count:out.external_read_count,
+   auto_grant_count:out.auto_grant_count,
+   external_write_count:out.external_write_count,
+   job_active_verified:out.job_active_verified,
+   indonesia_eligibility_verified:out.indonesia_eligibility_verified
+  },null,2);
+  $("hn-job-discovery-status").textContent=
+   "Read-only preview of "+out.jobs.length+
+   " public job titles. Select an ID and grant it separately with your password. No permission was changed.";
+ }catch(error){
+  if(revision===hnJobPreviewRevision&&operatorCsrf){
+   clearHNJobPreview("Discovery unavailable: "+error.message+
+    ". No grant or task was executed.");
+   $("hn-job-discovery-status").textContent=
+    "Provider preview failed or invalid; no source permission was granted.";
+  }
+ }finally{
+  if(revision===hnJobPreviewRevision&&operatorCsrf)
+   $("hn-job-discover").disabled=!hnStoryEnabled||!hnJobDiscoveryEnabled;
+ }
+});
+$("hn-job-use-id").addEventListener("click",()=>{
+ const id=Number($("hn-job-preview-choice").value);
+ if(!operatorCsrf||!hnStoryEnabled||!hnJobPreview||
+    !Number.isInteger(id)||!hnJobPreview.jobs.some(j=>j.story_id===id))return;
+ $("hn-story-id").value=String(id);
+ $("hn-story-status").textContent=
+  "Selected HN story ID "+id+
+  ". No grant yet. Re-enter your current local password and click Grant exact story ID.";
+});
 const refreshHNStories=async()=>{
  try{
   const response=await appFetch("/api/local-hn-stories");
@@ -848,6 +938,7 @@ const changeHNStory=async operation=>{
   const data=await localPost("/api/local-hn-story-"+operation,
    {story_id:Number(raw),current_password:pwd});
   $("hn-story-password").value="";
+  clearHNJobPreview("Source grants changed. Run discovery again for a fresh preview.");
   status.textContent=data.status+" · approval epoch "+data.epoch+
    ". Existing previously approved HN plans may need to be recreated.";
   await refreshHNStories();
@@ -1243,6 +1334,15 @@ const refreshLocalAgent=async()=>{
   agentPlanCsvEnabled=agentPlanEnabled&&data.plan_csv===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
+  hnJobDiscoveryEnabled=agentPlanEnabled&&data.hn_job_discovery===true&&
+   Array.isArray(data.tool_registry)&&data.tool_registry.some(t=>
+    t.name==="hn_jobstories_preview"&&t.enabled===true&&
+    t.effect==="PUBLIC_READ"&&t.batch_allowed===false&&
+    t.model_plannable===false&&t.owner_confirmation_required===true);
+  $("hn-job-discover").disabled=!hnStoryEnabled||!hnJobDiscoveryEnabled;
+  $("hn-job-discovery-status").textContent=hnJobDiscoveryEnabled
+   ?"Public HN job-title preview enabled. One click reads at most 6 official API items; no grants or model calls."
+   :"Discovery disabled. Requires --enable-hn-story-read and --enable-hn-job-discovery.";
   $("agent-plan-hn-status").textContent=agentPlanEnabled&&data.hn_story_read===true
    ?"HN story read-only connector enabled. Grant exact story IDs above, then review and approve each plan. User-generated content is unverified."
    :"HN agent reads disabled. Start with --enable-local-agent --enable-agent-plans --enable-hn-story-read.";
@@ -2449,6 +2549,10 @@ const lockOperatorUI=message=>{
  $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
  $("agent-plan-hn-status").textContent="Session locked; HN source permissions hidden.";
  hnStoryEnabled=false;
+ hnJobDiscoveryEnabled=false;
+ $("hn-job-discover").disabled=true;
+ $("hn-job-discovery-status").textContent="Session locked; no discovery allowed.";
+ clearHNJobPreview("Session locked; public job previews hidden.");
  for(const id of ["hn-story-id","hn-story-password","hn-story-grant","hn-story-revoke"])
   $(id).disabled=true;
  $("hn-story-password").value="";
