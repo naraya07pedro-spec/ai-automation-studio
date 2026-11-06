@@ -1,0 +1,56 @@
+name: Google Gmail OAuth metadata connector acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_google_gmail.py'
+      - 'app/local_connector_vault.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'tools/connect_google_gmail.py'
+      - 'tests/test_google_gmail_metadata.py'
+      - 'web/mission.html'
+      - '.github/workflows/google-gmail-metadata.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_google_gmail.py'
+      - 'app/local_connector_vault.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'tools/connect_google_gmail.py'
+      - 'tests/test_google_gmail_metadata.py'
+      - 'web/mission.html'
+      - '.github/workflows/google-gmail-metadata.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  google-metadata-readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install real AES-GCM dependency
+        run: python -m pip install -r requirements-vault.txt
+      - name: Test OAuth PKCE and encrypted Gmail metadata connector
+        run: python -m unittest discover -s tests -p 'test_google_gmail_metadata.py' -v
+      - name: Compile integration modules
+        run: python -m py_compile app/local_google_gmail.py app/local_connector_vault.py app/local_server.py tools/connect_google_gmail.py app/launch_workbench.py
+      - name: Validate Mission Control JavaScript syntax
+        run: |
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(!scripts.length) throw Error('No inline script');
+          for(const entry of scripts) new vm.Script(entry[1]);
+          console.log('Mission Control JavaScript compiles');
+          NODE
