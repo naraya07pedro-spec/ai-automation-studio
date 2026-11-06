@@ -108,7 +108,7 @@ def exchange_code(client_id, client_secret, code, verifier, redirect_uri,
     if type(answer) is not dict:
         raise GmailConnectorError("google_oauth_exchange_failed")
     granted = answer.get("scope")
-    if type(granted) is not str or GMAIL_SCOPE not in granted.split():
+    if type(granted) is not str or set(granted.split()) != {GMAIL_SCOPE}:
         raise GmailConnectorError("google_metadata_scope_not_granted", 403)
     refresh = answer.get("refresh_token")
     if type(refresh) is not str or len(refresh) < 16:
