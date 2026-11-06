@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "app/local_greenhouse_job_evidence.py"
+      - "app/local_remote_job_eligibility.py"
+      - "tests/test_local_remote_job_eligibility.py"
       - "app/local_server.py"
       - "app/local_tool_registry.py"
       - "tests/test_local_greenhouse_job_evidence.py"
@@ -60,6 +62,13 @@ jobs:
           assert item["accepting_applications_verified"] is False
           assert item["remote_work_verified"] is False
           assert item["indonesia_eligibility_verified"] is False
+          triage=item["eligibility_triage"]
+          assert triage["version"]=="ATS_PUBLIC_ELIGIBILITY_TRIAGE_V1"
+          assert triage["candidate_work_location"]=="Indonesia"
+          assert triage["indonesia_candidate_verdict"] in (
+              "MANUAL_REVIEW_REQUIRED","POSTING_LOCATION_CONFLICT_FOR_INDONESIA")
+          assert triage["source_is_public_employer_claim_not_legally_verified"] is True
+          assert triage["no_auto_apply_or_filter"] is True
           assert item["hn_to_ats_match_verified"] is False
           assert item["external_read_count"]==1
           assert item["external_write_count"]==0
