@@ -54,6 +54,7 @@ class LocalConnectorManager:
         self._sender = sender
         self._clock = clock
         self._failed = False
+        self.scheduled_enabled = False  # Set only by explicit encrypted autopilot opt-in.
         self._vault = (EncryptedConnectorVault(self.path,vault_key)
                        if vault_key is not None else None)
         if self._vault is None:
@@ -132,14 +133,14 @@ class LocalConnectorManager:
             raise ManagedConnectorError("connector_registry_requires_restart", 503) from None
         self._entries = entries
 
-    @staticmethod
-    def _public(row):
+    def _public(self, row):
         host = validate_https_target(row["url"])[0] if row["status"] == "ACTIVE" else None
         return {"connector_id":row["connector_id"], "label":row["label"],
                 "kind":"https_webhook", "status":row["status"],
                 "destination_hostname":host, "created_utc":row["created_utc"],
                 "supports_manual_send":row["status"] == "ACTIVE",
-                "supports_scheduled_send":False,
+                "supports_scheduled_send":(self.scheduled_enabled and self._vault is not None
+                                          and row["status"] == "ACTIVE"),
                 "secret_exportable":False}
 
     def list(self):
@@ -151,7 +152,8 @@ class LocalConnectorManager:
                     "storage":("AES_256_GCM_EXTERNAL_MASTER_KEY" if self._vault is not None
                                else "OS_PERMISSION_PROTECTED_NOT_ENCRYPTED"),
                     "requires_fresh_owner_password_for_changes":True,
-                    "model_tool_access":False, "scheduled_dispatch_enabled":False}
+                    "model_tool_access":False,
+                    "scheduled_dispatch_enabled":self.scheduled_enabled and self._vault is not None}
 
     def _entry(self, connector_id, *, require_active=True):
         _validate_id(connector_id)
