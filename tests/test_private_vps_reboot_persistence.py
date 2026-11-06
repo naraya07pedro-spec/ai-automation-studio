@@ -234,6 +234,62 @@ class RebootContractTests(unittest.TestCase):
                     checker.live_snapshot()
                 call.assert_not_called()
 
+    def test_live_snapshot_requires_permanent_enabled_unit_and_exact_user(self):
+        checks=[]
+        def systemd(args):
+            checks.append(tuple(args))
+            return "fixtureuser" if args[0]=="show" else "enabled"
+        synthetic={"owner_config_sha256":"f"*64,
+                   "stores":{p[0]:{"present":False,"task_count":0,
+                                  "ids_sha256":None,"run_count":0}
+                             for p in checker.STATE_STORES}}
+        with patch("verify_private_vps_reboot._linux_systemd",return_value=True), \
+             patch("verify_private_vps_reboot.os.geteuid",return_value=1001), \
+             patch("verify_private_vps_reboot.pwd.getpwuid",
+                   return_value=SimpleNamespace(pw_name="fixtureuser",pw_dir="/fixture")), \
+             patch("verify_private_vps_reboot._systemctl",side_effect=systemd), \
+             patch("verify_private_vps_reboot.runtime.probe",
+                   return_value={"status":"LIVE_PRIVATE_VPS_SNAPSHOT_PASSED"}), \
+             patch("verify_private_vps_reboot.read_state_snapshot",
+                   return_value=synthetic), \
+             patch("verify_private_vps_reboot._boot_id",return_value=BOOT1):
+            result=checker.live_snapshot()
+        self.assertEqual(result["boot_id"],BOOT1)
+        self.assertEqual(checks,[("show","--property=User","--value"),
+                                  ("is-enabled",)])
+        self.assertTrue(result["checks"]["systemd_service_enabled"])
+
+    def test_live_snapshot_rejects_enabled_runtime_and_disabled(self):
+        for state in ("enabled-runtime","disabled","static","masked"):
+            with self.subTest(systemd=state):
+                def systemd(args):
+                    return "fixtureuser" if args[0]=="show" else state
+                with patch("verify_private_vps_reboot._linux_systemd",return_value=True), \
+                     patch("verify_private_vps_reboot.os.geteuid",return_value=1001), \
+                     patch("verify_private_vps_reboot.pwd.getpwuid",
+                           return_value=SimpleNamespace(pw_name="fixtureuser",pw_dir="/fixture")), \
+                     patch("verify_private_vps_reboot._systemctl",side_effect=systemd), \
+                     patch("verify_private_vps_reboot.runtime.probe") as probe:
+                    with self.assertRaisesRegex(
+                            checker.RebootAcceptanceError,"not_persistently_enabled"):
+                        checker.live_snapshot()
+                    probe.assert_not_called()
+
+    def test_live_snapshot_rejects_wrong_service_user_and_root(self):
+        with patch("verify_private_vps_reboot._linux_systemd",return_value=True), \
+             patch("verify_private_vps_reboot.os.geteuid",return_value=1001), \
+             patch("verify_private_vps_reboot.pwd.getpwuid",
+                   return_value=SimpleNamespace(pw_name="fixtureuser",pw_dir="/fixture")), \
+             patch("verify_private_vps_reboot._systemctl",return_value="anotheruser"):
+            with self.assertRaisesRegex(checker.RebootAcceptanceError,
+                                         "matching_systemd_service_user"):
+                checker.live_snapshot()
+        with patch("verify_private_vps_reboot._linux_systemd",return_value=True), \
+             patch("verify_private_vps_reboot.os.geteuid",return_value=0):
+            with self.assertRaisesRegex(checker.RebootAcceptanceError,
+                                         "run_as_dedicated_nonroot"):
+                checker.live_snapshot()
+
     def test_main_after_without_a_real_baseline_fails(self):
         self.create_rule_schedule()
         with patch("verify_private_vps_reboot.live_snapshot",
