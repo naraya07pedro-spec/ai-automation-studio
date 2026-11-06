@@ -210,6 +210,30 @@ class AutopilotContract(unittest.TestCase):
             self.autopilot.arm({**req,"preview_token":newer["preview_token"]})
         self.assertEqual(self.events,[])
 
+    def test_dormant_policies_cannot_starve_later_due_schedules(self):
+        for num in range(3):
+            self.clock.advance(seconds=1)
+            dormant = self.scheduler.create({
+                "workflow_id": "scheduled_outbound", "cadence": "hours",
+                "timezone": "Asia/Jakarta", "service_code": "automation",
+                "budget_tier": 2, "timeline": "soon", "every": 2})
+            req = {"schedule_id": dormant["schedule_id"],
+                   "max_sends": 2, "expires_days": 7}
+            preview = self.autopilot.preview(req)
+            self.autopilot.arm({**req, "preview_token":preview["preview_token"]})
+        self.clock.advance(seconds=1)
+        fast = self.scheduler.create({
+            "workflow_id": "scheduled_outbound", "cadence": "minutes",
+            "timezone": "Asia/Jakarta", "service_code": "automation",
+            "budget_tier": 2, "timeline": "soon", "every": 1})
+        req = {"schedule_id": fast["schedule_id"],
+               "max_sends": 2, "expires_days": 7}
+        preview = self.autopilot.preview(req)
+        self.autopilot.arm({**req,"preview_token":preview["preview_token"]})
+        self.assertEqual(self.tick(minutes=1), 1)
+        self.assertEqual(len(self.events), 1)
+        self.assertEqual(self.events[0][1]["schedule_id"], fast["schedule_id"])
+
     def test_claimed_attempt_does_not_duplicate_after_tick_or_restart(self):
         self.arm(cap=5)
         self.assertEqual(self.tick(minutes=1),1)
