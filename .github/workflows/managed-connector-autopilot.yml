@@ -1,0 +1,84 @@
+name: Encrypted managed connector scheduled autopilot acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_managed_scheduled_webhook.py'
+      - 'app/local_scheduled_webhook.py'
+      - 'app/local_recurring_scheduler.py'
+      - 'app/local_connector_manager.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_managed_scheduled_webhook.py'
+      - 'tests/test_managed_scheduled_webhook_http.py'
+      - '.github/workflows/managed-connector-autopilot.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_managed_scheduled_webhook.py'
+      - 'app/local_scheduled_webhook.py'
+      - 'app/local_recurring_scheduler.py'
+      - 'app/local_connector_manager.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_managed_scheduled_webhook.py'
+      - 'tests/test_managed_scheduled_webhook_http.py'
+      - '.github/workflows/managed-connector-autopilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  managed-autopilot-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install actual authenticated encryption library
+        run: python -m pip install -r requirements-vault.txt
+      - name: Test encrypted multi-destination scheduler including real localhost HTTP
+        run: |
+          python -m unittest discover -s tests -p 'test_managed_scheduled_webhook.py' -v
+          python -m unittest discover -s tests -p 'test_managed_scheduled_webhook_http.py' -v
+      - name: Protect the existing single-destination autopilot
+        run: python -m unittest discover -s tests -p 'test_scheduled_webhook_autopilot.py' -v
+      - name: Compile updated Python files and Mission Control UI script
+        run: |
+          python -m py_compile app/local_managed_scheduled_webhook.py app/local_scheduled_webhook.py app/local_server.py app/local_recurring_scheduler.py app/local_connector_manager.py app/launch_workbench.py deploy/private_vps_service.py
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(!scripts.length)throw Error('No inline Mission Control script');
+          for(const x of scripts)new vm.Script(x[1]);
+          console.log('Mission Control JavaScript parsed');
+          NODE
+      - name: Verify VPS unit with opt-in connector scheduling
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,sys,tempfile
+          sys.path.insert(0,'deploy')
+          from private_vps_service import render_unit
+          with tempfile.TemporaryDirectory() as tmp:
+              p=pathlib.Path(tmp)/'ai-automation-studio.service'
+              u=render_unit(username='runner',home='/home/runner',
+                  checkout='/home/runner/ai-automation-studio',
+                  python='/usr/bin/python3',mode='offline',
+                  encrypted_webhooks=True,managed_autopilot=True)
+              assert '--enable-managed-autopilot' in u
+              assert 'LoadCredential=aas-vault-key:' in u
+              p.write_text(u)
+              subprocess.run(['systemd-analyze','verify',str(p)],check=True)
+          PY
