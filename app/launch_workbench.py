@@ -84,7 +84,7 @@ def _open_browser_after_ready(stop):
         except (OSError, ValueError):
             continue
         if confirmed and not stop.is_set():
-            webbrowser.open(URL)
+            webbrowser.open(URL.rstrip("/") + "/mission")
             return
 
 

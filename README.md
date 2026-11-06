@@ -1,5 +1,11 @@
 # AI Automation Studio
 
+## Mission Control: use the functional app first
+
+Launch the app with `START_AI_STUDIO.cmd` (Windows) or connect to an already running private VPS via `CONNECT_PRIVATE_VPS.cmd`; both now open **http://127.0.0.1:8765/mission** after confirming the loopback HTTP service is responding. This is the **real task-first interface**: sign in, detect a local Ollama model, ask a question, propose a durable 1–3-step plan, inspect/approve exact tool arguments, execute approved steps, monitor server-owned read-only runs and download a sourced report. **Even without Ollama**, use the same page to create/activate/run a real SQLite-backed deterministic workflow with pseudonymous events. All of these use existing authenticated server APIs; there are no mocked responses on this new page. The old five synthetic demo panels remain in the [Advanced workbench](http://127.0.0.1:8765/).
+
+**Boundaries:** no public URL or confirmed Tencent deployment, no unsolicited model testing, no general shell/browser autonomy, no external email/CRM writes, no background task scheduler and no inferred permission grants. Installed Ollama and its model are required for AI inference. Never enter sensitive customer data in the local workflow test. [VPS runbook](docs/PRIVATE_VPS_ALWAYS_ON_V1.md). Device-specific acceptance remains deferred as previously requested.
+
 ## Always-on PRIVATE Linux VPS deployment (SSH tunnel, NOT public HTTP)
 
 This repo now includes a reviewed **Linux systemd service installer** (`deploy/private_vps_service.py`) and **Windows SSH tunnel launcher** (`CONNECT_PRIVATE_VPS.cmd`). The app can stay running on a **verified, active VPS** when the operator's Windows PC is off; to use it remotely, connect via encrypted SSH and open the existing `http://127.0.0.1:8765`. Its server is **still localhost-only** and must **not** be exposed through a public firewall port or reverse proxy. A VPS-side Ollama model is separately required for agent inference; the service running 24/7 is **not** unattended task scheduling or business-action automation. **No live Tencent VPS deploy or public URL has been verified.** [VPS setup, controls and live acceptance gate](docs/PRIVATE_VPS_ALWAYS_ON_V1.md).

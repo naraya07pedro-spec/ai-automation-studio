@@ -2434,3 +2434,16 @@ Each slice must report: goal, exact files changed, checks run and their results,
 **Live release status:** `BLOCKED_ON_REAL_TENCENT_INSTANCE_ACCESS`. **NOT DEPLOYED**, **NOT VERIFIED ONLINE**, no public HTTPS URL. No additional feature/CI slice was fabricated to disguise a missing access dependency.
 
 **Tracking:** [Issue #92 — Live Tencent VPS activation gate](https://github.com/naraya07pedro-spec/ai-automation-studio/issues/92). Required next proof: correct CVM/Lighthouse account and region, instance `Running`, OS/SSH reachability (without publishing private credentials), local-only systemd service + SSH tunnel login + SQLite persistence check. Real owner Windows/Ollama testing remains separately deferred in #68. Do not use bank/account identifiers, SSH keys or payment details in this PUBLIC repo.
+
+
+## Mission Control: build-first product usability · 2026-11-06
+
+**Owner priority update:** ship usable functionality before expanding the test matrix or adding more peripheral connector microfeatures. No unverified VPS deployment is claimed.
+
+**Delivered code:** `web/mission.html` provides a single task-first page with local owner login/session restoration, installed-model lookup, actual local Ollama chat, durable agent plan creation, exact plan argument review, explicit approval, step-wise execution, separately confirmed reviewed read-only batch, status polling, persisted task list, final report generation/download, operator logout and safe rendering of provider/model text. It also exposes a **real non-AI** SQLite workflow create/activate/run path, so a locally running app has useful deterministic operations even before a model is installed. `app/local_server.py` serves the new route while preserving existing localhost and CSRF checks. `app/launch_workbench.py` and `tools/connect_private_vps.py` open the new page. The old complex workbench remains accessible at `/`. `README.md` updated.
+
+**Minimal safety check only:** one disposable localhost HTTP smoke in `tests/test_mission_control_http.py` checks the actual page, denial of protected APIs without login, owner login and offline capabilities. The mission page inline JavaScript was independently syntax-compiled without execution. No new external actions, agent model privileges, cloud infrastructure or credentials are introduced.
+
+**Known limits:** live local Ollama or Tencent VM has not been tested on the owner's actual host; the advanced source-grant and file selection panels stay in the existing full UI; no public HTTPS, external sending, CRM write or autonomous unsupervised business scheduling. No claim of universal-agent completion.
+
+**PR/merge/verification:** PENDING until verified. The deployment bottleneck remains issue #92; Windows/Ollama device acceptance remains deferred in #68.
