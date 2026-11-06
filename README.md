@@ -3,6 +3,16 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Independently check one published Greenhouse ATS job (Slice 80)
+
+A separately opted-in, authenticated **owner-clicked** official [Greenhouse Job Board API](https://docs.greenhouse.io/job-board) check now verifies whether an **exact job post** is publicly retrievable on the provider's board at check time. Enter the employer's public Greenhouse board token and exact numeric job post ID, then click **Check official ATS posting (read-only)**. View a sanitized bounded title, location label, company name, description excerpt, timestamps, canonical Greenhouse link and source fingerprint. One fixed TLS-verified `GET` goes to `boards-api.greenhouse.io/v1/boards/<token>/jobs/<id>`; no arbitrary host, redirect, application POST, CV submission or model tool invocation.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-greenhouse-evidence
+```
+
+An optional HN story ID is only an **owner-supplied, unverified reference**, not an independently established HN-to-ATS match. Even a publicly accessible ATS posting **does not prove** it accepts applications now, supports remote work, permits a candidate in Indonesia or is suitable for the candidate's tenure. These fields are explicitly marked unverified. The registry keeps this public read out of both model-generated plans and background/server batches. The read is response-only, with only payload-free audit events stored. [Detailed ATS evidence contract](docs/GREENHOUSE_PUBLIC_ATS_EVIDENCE_V1.md). Live CI checks one real currently listed Greenhouse company job. Real owner-PC Ollama/Windows acceptance is still deferred.
+
 ## Discover recent HN public job titles before per-ID permission (Slice 79)
 
 The authenticated local workbench now has a separate **user-clicked discovery preview** for the [official Hacker News `jobstories` API](https://github.com/HackerNews/API). It lists up to **five** latest public HN job titles, IDs, canonical source links and timestamps, using **at most six read-only HTTPS requests** to fixed official endpoints. Titles are sanitized untrusted public metadata, not verified employment opportunities or eligibility decisions.
