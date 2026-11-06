@@ -198,7 +198,10 @@ class GoogleGmailMetadata:
                 GMAIL_BASE + "/messages/" + message_id +
                 "?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date",
                 access)
-            headers = detail.get("payload", {}).get("headers", [])
+            payload = detail.get("payload")
+            if type(payload) is not dict:
+                raise GmailConnectorError("google_gmail_response_invalid")
+            headers = payload.get("headers", [])
             if type(headers) is not list or len(headers) > 100:
                 raise GmailConnectorError("google_gmail_response_invalid")
             fields = {}
