@@ -1,0 +1,59 @@
+name: Private VPS deployment contract and systemd unit verification
+
+on:
+  pull_request:
+    paths:
+      - "deploy/private_vps_service.py"
+      - "tools/connect_private_vps.py"
+      - "CONNECT_PRIVATE_VPS.cmd"
+      - "tests/test_private_vps_release.py"
+      - "docs/PRIVATE_VPS_ALWAYS_ON_V1.md"
+      - ".github/workflows/private-vps-deployment.yml"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/private_vps_service.py"
+      - "tools/connect_private_vps.py"
+      - "CONNECT_PRIVATE_VPS.cmd"
+      - "tests/test_private_vps_release.py"
+      - "docs/PRIVATE_VPS_ALWAYS_ON_V1.md"
+      - ".github/workflows/private-vps-deployment.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-private-vps-contract:
+    name: Linux service and private SSH tunnel release contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate private deployment and fail-closed installer tests
+        run: python -m unittest discover -s tests -p test_private_vps_release.py -v
+      - name: Verify generated unit parses using real systemd tooling
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os, pathlib, subprocess, sys, tempfile
+          sys.path.insert(0, "deploy")
+          from private_vps_service import render_unit
+          with tempfile.TemporaryDirectory() as temp:
+              path = pathlib.Path(temp) / "ai-automation-studio.service"
+              path.write_text(
+                  render_unit(
+                      username="runner", checkout=os.getcwd(), home="/home/runner",
+                      python=sys.executable, mode="offline"),
+                  encoding="utf-8")
+              subprocess.run(["systemd-analyze", "verify", str(path)], check=True)
+              print("Unit parsed by systemd; no system service was installed")
+          PY
+      - name: Run actual disposable local HTTP startup smoke
+        run: python -m unittest discover -s tests -p test_launch_workbench_e2e.py -v
+      - name: State unverified external operations
+        run: echo "NO Tencent Cloud access, SSH to real VPS, real owner data, public bind, or Ollama inference in CI."

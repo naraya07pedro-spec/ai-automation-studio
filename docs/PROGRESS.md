@@ -2410,3 +2410,16 @@ Each slice must report: goal, exact files changed, checks run and their results,
 **Public 24/7 status:** NOT DEPLOYED. Do not expose the loopback HTTP server through a VPS/public reverse proxy. Cloud-ready security, real delivery connector, and tested always-on hosting are separate prerequisites.
 
 **PR/CI/merge FINAL · 2026-11-06:** [PR #90](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/90) squash-merged to main as `b4e41d28f9b57ae26bf6433ce21b17171a7756e8`; final tested PR head `d352a8a0a81f7bdad1b2bc61336e4497b0f09954`. All **5 GitHub Actions workflows / 8 jobs completed SUCCESS** on that exact head: Python 3.11/3.12/3.13, Chromium 58/58 real browser tests, disposable Windows single-process localhost quickstart 8 unit + 1 actual HTTP boot test, Windows ACL diagnostics, and 2 public GitHub read-only live probes. This is **synthetic operator fixture / real HTTP on CI**, not owner's Windows/Ollama acceptance and **NOT cloud deployment**. The app's public 24/7 status remains NOT DEPLOYED.
+
+
+## Private VPS always-on deployment release · 2026-11-06
+
+**Mission:** replace endless provider-read increments with an actionable, securely isolated process deployment on the operator's existing Linux VPS, plus remote interactive access. This is the production-path foundation, not an online-hosting success claim.
+
+**Implemented:** `deploy/private_vps_service.py` renders and explicitly installs a fixed Linux systemd service; nonroot user ownership and existing private owner credential are required; restrictive paths and systemd privilege/sandbox controls; explicit `--mode offline|local-ai|full`; no automatic model install, password reset, external dispatch, history storage, new network ingress, firewall mutation, or cloud billing. A separate Windows `CONNECT_PRIVATE_VPS.cmd` uses `tools/connect_private_vps.py` for fixed SSH localhost forwarding, validates the destination and refuses local port collision; keeps SSH host-key verification enabled and never stores credentials. Documentation: `docs/PRIVATE_VPS_ALWAYS_ON_V1.md`.
+
+**Tests introduced:** `tests/test_private_vps_release.py` checks safe unit rendering, nonroot and path injection rejection, installer root/existing-unit fail-closed gates, exact systemctl operations, SSH input sanitization and key-checking preservation, port collision and early-exit denial. `.github/workflows/private-vps-deployment.yml` exercises those tests, systemd's real unit parser and existing disposable Python HTTP startup smoke.
+
+**Explicit limitation:** an actual cloud instance, IP/SSH session, provider credentials and VM OS have not been verified through connected tools. Public 24/7 URL is **NOT DEPLOYED**. SSH tunnel is a private access route, not public HTTPS or a webhook endpoint. Existing product lacks unattended event scheduling and write-capable external CRM/email integrations. Ollama on the owner's VPS is **UNTESTED**. Continue to defer owner's actual Windows/Ollama acceptance per issue #68 until requested.
+
+**PR, final SHA, checks and merge:** PENDING. Do not mark live deployment success based on CI. The next live gate needs actual Tencent instance access, systemd active + localhost port verification, SSH tunnel sign-in and persistence across a service restart.

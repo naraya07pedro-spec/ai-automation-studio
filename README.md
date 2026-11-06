@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Always-on PRIVATE Linux VPS deployment (SSH tunnel, NOT public HTTP)
+
+This repo now includes a reviewed **Linux systemd service installer** (`deploy/private_vps_service.py`) and **Windows SSH tunnel launcher** (`CONNECT_PRIVATE_VPS.cmd`). The app can stay running on a **verified, active VPS** when the operator's Windows PC is off; to use it remotely, connect via encrypted SSH and open the existing `http://127.0.0.1:8765`. Its server is **still localhost-only** and must **not** be exposed through a public firewall port or reverse proxy. A VPS-side Ollama model is separately required for agent inference; the service running 24/7 is **not** unattended task scheduling or business-action automation. **No live Tencent VPS deploy or public URL has been verified.** [VPS setup, controls and live acceptance gate](docs/PRIVATE_VPS_ALWAYS_ON_V1.md).
+
 ## Run the actual local app now (Windows)
 
 **Double-click `START_AI_STUDIO.cmd`** from a complete checkout with Python 3.11+. On first launch, create a private local owner password; the app opens at **http://127.0.0.1:8765**. Existing workflows and optional permissioned local-agent tools can then be used in the browser. No cloud account or Administrator permission is required to **start the local app**. For deterministic workflows without Ollama: `START_AI_STUDIO.cmd --mode offline`. An installed, independently running Ollama model is required for AI inference and has not yet been tested on the owner's PC. **This is not 24/7 public hosting** and does not yet send emails or write to live CRMs. See [Launch instructions, scope and deployment gate](docs/LAUNCH_NOW_V1.md).
