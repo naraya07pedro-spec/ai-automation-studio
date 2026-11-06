@@ -16,6 +16,8 @@ _TOOL_ROWS = (
     ("local_multi_document_question", "SELECTED_SNAPSHOT_READ", "documents", True, "Question against selected document set"),
     ("hn_public_story", "PUBLIC_READ", "hn", True,
      "Grant-bound public Hacker News story/job and two direct comments"),
+    ("hn_jobstories_preview", "PUBLIC_READ", "hn_discovery", False,
+     "Owner-clicked preview of latest 5 public HN job titles; no automatic grants"),
     ("local_csv_profile", "SELECTED_SNAPSHOT_READ", "csv", True, "Deterministic profile of selected CSV"),
     ("local_markdown_report_export", "LOCAL_CREATE_ONLY", "artifact", False,
      "Separately confirmed existing Markdown report export from completed plan"),
@@ -27,6 +29,8 @@ BATCH_READ_TOOLS = frozenset(r[0] for r in _TOOL_ROWS if r[3])
 ACTION_TOOL = "local_csv_profile_json_export"
 MARKDOWN_ACTION_TOOL = "local_markdown_report_export"
 OWNER_ACTION_TOOLS = frozenset((ACTION_TOOL, MARKDOWN_ACTION_TOOL))
+HN_DISCOVERY_PREVIEW = "hn_jobstories_preview"
+EXPLICIT_CLICK_READS = frozenset((HN_DISCOVERY_PREVIEW,))
 
 
 class ToolPermissionError(ValueError):
@@ -42,8 +46,18 @@ def require_owner_action(name, *, enabled):
     return name
 
 
+def require_discovery_preview(name, *, enabled):
+    """Only the exact UI-only public metadata preview has this read grant."""
+    if (type(name) is not str or name != HN_DISCOVERY_PREVIEW
+            or not enabled or name in BATCH_READ_TOOLS
+            or _TOOL_MAP[name][1] != "PUBLIC_READ"):
+        raise ToolPermissionError("hn_discovery_permission_denied")
+    return name
+
+
 def registered_tools(*, planning, github=False, document=False, documents=False,
-                     csv=False, hn=False, artifact=False, action=False):
+                     csv=False, hn=False, hn_discovery=False,
+                     artifact=False, action=False):
     """One stable capability map with explicit effects and availability."""
     conditions = {
         "always": bool(planning),
@@ -52,6 +66,7 @@ def registered_tools(*, planning, github=False, document=False, documents=False,
         "documents": bool(planning and documents),
         "csv": bool(planning and csv),
         "hn": bool(planning and hn),
+        "hn_discovery": bool(planning and hn and hn_discovery),
         "artifact": bool(planning and artifact),
         "action": bool(planning and csv and artifact and action),
     }
@@ -60,7 +75,9 @@ def registered_tools(*, planning, github=False, document=False, documents=False,
         "effect": effect,
         "enabled": conditions[flag],
         "batch_allowed": batch,
-        "owner_confirmation_required": name in OWNER_ACTION_TOOLS,
-        "model_plannable": name not in OWNER_ACTION_TOOLS,
+        "owner_confirmation_required": (
+            name in OWNER_ACTION_TOOLS or name in EXPLICIT_CLICK_READS),
+        "model_plannable": (
+            name not in OWNER_ACTION_TOOLS and name not in EXPLICIT_CLICK_READS),
         "scope": description,
     } for name, effect, flag, batch, description in _TOOL_ROWS]

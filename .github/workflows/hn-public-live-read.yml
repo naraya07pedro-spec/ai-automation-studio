@@ -9,6 +9,9 @@ on:
       - "app/local_server.py"
       - "app/local_tool_registry.py"
       - "tests/test_local_hn_story_connector.py"
+      - "app/local_hn_job_discovery.py"
+      - "tests/test_local_hn_job_discovery.py"
+      - "docs/HN_JOB_DISCOVERY_V1.md"
       - ".github/workflows/hn-public-live-read.yml"
   workflow_dispatch:
 
@@ -46,4 +49,43 @@ jobs:
           assert output["model_calls"] == 0
           assert len(output["source_sha256"]) == 64
           print("Verified real official Hacker News public GET: 8863; read-only.")
+          PY
+
+  official-hn-current-jobstories-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Real bounded public jobstories feed and 5 exact job titles; NO grants
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "app")
+          from local_hn_job_discovery import HNJobDiscovery
+          from local_hn_story_policy import HNStoryPolicy
+          permission = HNStoryPolicy()
+          assert not permission.snapshot()["allowed_story_ids"]
+          result = HNJobDiscovery().preview()
+          assert result["source"] == "HACKER_NEWS_PUBLIC_JOBSTORIES_PREVIEW_V1"
+          assert 1 <= len(result["jobs"]) <= 5
+          assert result["ids_considered"] <= 5
+          assert result["external_read_count"] <= 6
+          assert result["auto_grant_count"] == 0
+          assert result["external_write_count"] == 0
+          assert result["local_file_write_count"] == 0
+          assert result["model_calls"] == 0
+          assert result["requires_separate_owner_grant"] is True
+          assert result["indonesia_eligibility_verified"] is False
+          assert all(j["owner_story_grant"] is False and
+                     j["story_url"] ==
+                         "https://news.ycombinator.com/item?id="+str(j["story_id"])
+                     for j in result["jobs"])
+          assert len(result["source_sha256"]) == 64
+          assert not permission.snapshot()["allowed_story_ids"]
+          print("Verified real official HN jobstories + job metadata GET; no grants, no writes.")
           PY

@@ -338,6 +338,84 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-triage-report")).to_contain_text(
             "No triage report yet")
 
+    def test_explicit_hn_job_discovery_to_manual_grant_and_reviewed_read(self):
+        """Discovery is not approval: owner selects ID and separately grants."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#hn-job-discover")).to_be_enabled()
+        expect(self.page.locator("#hn-job-use-id")).to_be_disabled()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
+        with self.page.expect_response(
+                lambda res: res.url.endswith(
+                    "/api/local-hn-jobstories-preview")) as discovery:
+            self.page.locator("#hn-job-discover").click()
+        out=discovery.value.json()
+        self.assertEqual(200,discovery.value.status)
+        self.assertEqual("HACKER_NEWS_PUBLIC_JOBSTORIES_PREVIEW_V1",
+                         out["source"])
+        self.assertEqual(5,len(out["jobs"]))
+        self.assertEqual(6,out["external_read_count"])
+        self.assertEqual(0,out["auto_grant_count"])
+        self.assertEqual(0,out["external_write_count"])
+        self.assertFalse(out["indonesia_eligibility_verified"])
+        expect(self.page.locator("#hn-job-discovery-output")).to_contain_text(
+            "SYNTHETIC_HN_JOB_77712301")
+        expect(self.page.locator("#hn-job-discovery-links a")).to_have_count(5)
+        self.assertEqual(
+            "https://news.ycombinator.com/item?id=77712301",
+            self.page.locator("#hn-job-discovery-links a").first.get_attribute(
+                "href"))
+        expect(self.page.locator("#hn-job-use-id")).to_be_enabled()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
+        self.assertEqual("",
+                         self.page.locator("#hn-story-id").input_value())
+        self.page.locator("#hn-job-use-id").click()
+        expect(self.page.locator("#hn-story-id")).to_have_value("77712301")
+        expect(self.page.locator("#hn-story-status")).to_contain_text(
+            "No grant yet")
+        expect(self.page.locator("#agent-plan-next")).to_be_disabled()
+        self.page.locator("#hn-story-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#hn-story-grant").click()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "77712301")
+        # Grant mutation must invalidate previous discovery preview.
+        expect(self.page.locator("#hn-job-use-id")).to_be_disabled()
+        self.page.locator("#agent-plan-goal").fill(
+            "Read owner-granted Hacker News job story 77712301")
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"hn_public_story"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "PREPARED"')
+        self.assertNotIn("SYNTHETIC_HN_JOB_",
+                         self.page.locator("#agent-plan-details").inner_text())
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "APPROVED"')
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "SYNTHETIC_HN_JOB_77712301")
+        # Release the completed test-owned plan, too. The browser fixture
+        # intentionally has a real 12-plan global capacity across methods.
+        # Changing production capacity just to conceal test state would be
+        # the wrong fix.
+        expect(self.page.locator("#agent-plan-delete")).to_be_enabled()
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "No selected plan")
+        # The browser fixture is process-shared across methods. Release this
+        # exact new grant, not just its UI selection; the next test must not
+        # inherit a privileged allowed item.
+        self.page.locator("#hn-story-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#hn-story-revoke").click()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
+
     def test_hn_owner_grant_read_and_revoke_blocks_existing_approval(self):
         """Real Chromium: per-item HN grant, planner, execution, revocation."""
         self.page.locator("#local-agent-model").fill("fixture:model")
@@ -365,13 +443,19 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-approve").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "APPROVED"')
+        expected_epoch=json.loads(
+            self.page.locator("#agent-plan-details").inner_text()
+        )["hn_approval_epoch"]
+        self.assertIsInstance(expected_epoch,int)
+        self.assertGreater(expected_epoch,0)
         self.page.locator("#agent-plan-next").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "COMPLETED"')
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             "Fixture public HN discussion")
-        expect(self.page.locator("#agent-plan-details")).to_contain_text(
-            '"hn_approval_epoch": 1')
+        self.assertEqual(expected_epoch,json.loads(
+            self.page.locator("#agent-plan-details").inner_text()
+        )["hn_approval_epoch"])
         self.page.locator("#agent-plan-goal").fill(
             "Read owner-granted Hacker News story 8863 again")
         self.page.locator("#agent-plan-propose").click()

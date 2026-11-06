@@ -15,6 +15,7 @@ from local_operator_auth import LocalOperatorAuth
 from local_source_policy import LocalPublicSourcePolicy
 from local_hn_story_policy import HNStoryPolicy
 from local_hn_story_reader import AllowedHNStoryReader
+from local_hn_job_discovery import HNJobDiscovery
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
@@ -42,6 +43,11 @@ def main():
     policy = LocalPublicSourcePolicy()
     hn_policy = HNStoryPolicy()
     def fixture_hn_fetch(ident):
+        if ident in range(77712301,77712306):
+            return {"id":ident,"type":"job",
+                    "title":"SYNTHETIC_HN_JOB_"+str(ident)+" / Remote eligibility unverified",
+                    "time":1735689600,"text":"<p>Source unverified; no hiring checks.</p>",
+                    "kids":[]}
         if ident == 8863:
             return {"id":8863,"type":"story",
                     "title":"Fixture public HN discussion", "time":1175714200,
@@ -103,9 +109,10 @@ def main():
             assert all(set(c)=={"id","text"} for c in memory_context)
             assert all(c["id"].startswith("fixture_") for c in memory_context)
         if "hacker news" in goal.lower():
-            assert hn_allowed_ids == [8863]
+            selected=77712301 if "77712301" in goal else 8863
+            assert selected in hn_allowed_ids
             return {"model":model,"goal":goal,
-                    "steps":[{"tool":"hn_public_story","args":{"story_id":8863}}]}
+                    "steps":[{"tool":"hn_public_story","args":{"story_id":selected}}]}
         if csv_context is not None:
             assert csv_context["columns"] == ["revenue", "stage"]
             assert csv_context["row_count"] == 3
@@ -214,6 +221,9 @@ def main():
         create_handler(local_core=core, operator_auth=owner,
                        source_policy=policy, security_audit=audit,
                        hn_policy=hn_policy,
+                       hn_job_discovery=HNJobDiscovery(
+                           list_fetcher=lambda:list(range(77712301,77712307)),
+                           item_fetcher=fixture_hn_fetch),
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
                        agent_memory_store=memory_cards,

@@ -26,6 +26,9 @@ on:
       - "app/local_hn_story_reader.py"
       - "tests/test_local_hn_story_connector.py"
       - "docs/HN_PUBLIC_STORY_CONNECTOR_V1.md"
+      - "app/local_hn_job_discovery.py"
+      - "tests/test_local_hn_job_discovery.py"
+      - "docs/HN_JOB_DISCOVERY_V1.md"
       - "docs/OWNER_SELECTED_CSV_PROFILE_V1.md"
   workflow_dispatch:
 
@@ -101,6 +104,10 @@ jobs:
         shell: pwsh
         run: |
           python -m unittest discover -s tests -p test_local_hn_story_connector.py -v
+      - name: Owner-clicked HN job preview tests on disposable Windows files
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_local_hn_job_discovery.py -v
       - name: Scope and cleanup
         shell: pwsh
         run: |
