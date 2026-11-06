@@ -139,8 +139,12 @@ def _systemctl(args):
     return result.stdout.strip()
 
 
+def _linux_systemd():
+    return sys.platform == "linux" and Path("/run/systemd/system").is_dir()
+
+
 def live_snapshot():
-    if sys.platform != "linux" or not Path("/run/systemd/system").is_dir():
+    if not _linux_systemd():
         raise RebootAcceptanceError("linux_systemd_host_required")
     uid = os.geteuid()
     if uid == 0:
