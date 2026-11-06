@@ -84,7 +84,14 @@ def assess_public_job_language(*, title, location, description):
     auth = _matches(body, _WORK_AUTH, "public_job_description")
     remote = _matches(body, (_REMOTE,), "public_job_description")
     onsite = _matches(body, (_ONSITE,), "public_job_description")
-    years = _evidence(body, _YEARS, "public_job_description")
+    all_years = list(_YEARS.finditer(body))[:50]
+    years_value = (max(int(m.group(1)) for m in all_years)
+                   if all_years else None)
+    years = _evidence(body, re.compile(
+        r"(?<![\\d\\-–])\\b" + str(years_value) +
+        r"\\s*\\+?\\s*(?:years|yrs)\\s+(?:of\\s+)?"
+        r"(?:relevant\\s+|professional\\s+|commercial\\s+|hands[\\s-]+on\\s+)?experience\\b",
+        re.I), "public_job_description") if years_value is not None else None
     if not remote and _REMOTE.search(loc+" "+job_title):
         remote = _matches(loc, (_REMOTE,), "public_location_label")
         if not remote:
@@ -123,7 +130,7 @@ def assess_public_job_language(*, title, location, description):
         "foreign_work_authorization_signal": (
             "FOREIGN_AUTHORIZATION_OR_SPONSORSHIP_TERM_FOUND" if auth else "UNSPECIFIED"),
         "seniority_signal": "EXPLICIT_YEARS_MENTIONED" if years else "UNSPECIFIED",
-        "seniority_years_mentioned": int(_YEARS.search(body).group(1)) if years else None,
+        "seniority_years_mentioned": years_value,
         "evidence": {
             "location_restrictions": excluded,
             "indonesia_mentions": indonesia,
