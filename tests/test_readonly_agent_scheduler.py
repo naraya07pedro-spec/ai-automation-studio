@@ -87,6 +87,21 @@ class ReadOnlyAIScheduleTests(unittest.TestCase):
         self.assertEqual(self.engine.list()["tasks"][0]["attempted_runs"],1)
         self.assertEqual(self.safety.phase(),"IDLE")
 
+    def test_idle_polling_does_not_write_shared_model_checkpoint(self):
+        # Idle polling runs every five seconds and must not write a durable
+        # safety transaction thousands of times per day.
+        original=self.safety.begin
+        def should_not_run():
+            raise AssertionError("checkpoint must not begin when no AI task is due")
+        self.safety.begin=should_not_run
+        try:
+            self.assertEqual(self.engine.run_due(),0)
+            self.make()
+            self.assertEqual(self.engine.run_due(),0)
+        finally:
+            self.safety.begin=original
+        self.assertEqual(self.safety.phase(),"IDLE")
+
     def test_no_model_call_without_due_and_no_unbounded_catchup(self):
         self.make()
         self.assertEqual(self.engine.run_due(),0)
