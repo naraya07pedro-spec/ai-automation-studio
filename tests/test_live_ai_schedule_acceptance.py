@@ -108,7 +108,8 @@ class LiveAcceptanceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("verify_live_ai_schedule.Path.home",return_value=Path(tmp)):
                 report={"task_id":"a"*24,
-                        "status":"SYNTHETIC_DISPOSABLE_SCHEDULER_PASSED",
+                        "status":"LIVE_LOCAL_OLLAMA_SCHEDULE_ACCEPTANCE_PASSED",
+                        "inference_source":"REAL_LOCAL_OLLAMA_127_0_0_1_11434",
                         "answer_sha256":"f"*64}
                 self.assertTrue(save_redacted_evidence(report))
                 path=Path(tmp)/".ai-automation-studio"/"live-acceptance"/("live-local-ollama-"+ "a"*24+".json")
@@ -130,5 +131,31 @@ class LiveAcceptanceContractTests(unittest.TestCase):
             (root/"live-acceptance").symlink_to(ext,target_is_directory=True)
             with patch("verify_live_ai_schedule.Path.home",return_value=base):
                 with self.assertRaisesRegex(LiveAcceptanceError,"unsafe_evidence_directory"):
-                    save_redacted_evidence({"task_id":"a"*24})
+                    save_redacted_evidence({
+                        "status":"LIVE_LOCAL_OLLAMA_SCHEDULE_ACCEPTANCE_PASSED",
+                        "inference_source":"REAL_LOCAL_OLLAMA_127_0_0_1_11434",
+                        "task_id":"a"*24})
             self.assertEqual(list(ext.iterdir()),[])
+
+
+    def test_evidence_saver_refuses_synthetic_report_even_if_owner_requests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("verify_live_ai_schedule.Path.home",return_value=Path(tmp)):
+                with self.assertRaisesRegex(LiveAcceptanceError,
+                                             "only_genuine_live_reports"):
+                    save_redacted_evidence({
+                        "status":"SYNTHETIC_DISPOSABLE_SCHEDULER_PASSED",
+                        "inference_source":"CALLER_INJECTED_NOT_LIVE_EVIDENCE",
+                        "task_id":"a"*24})
+                self.assertFalse((Path(tmp)/".ai-automation-studio").exists())
+
+    def test_evidence_saver_blocks_path_traversal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("verify_live_ai_schedule.Path.home",return_value=Path(tmp)):
+                with self.assertRaisesRegex(LiveAcceptanceError,
+                                             "only_genuine_live_reports"):
+                    save_redacted_evidence({
+                        "status":"LIVE_LOCAL_OLLAMA_SCHEDULE_ACCEPTANCE_PASSED",
+                        "inference_source":"REAL_LOCAL_OLLAMA_127_0_0_1_11434",
+                        "task_id":"../../unauthorized"})
+                self.assertFalse((Path(tmp)/".ai-automation-studio").exists())
