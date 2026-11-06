@@ -42,13 +42,18 @@ def _digest(raw):
 class ScheduledWebhookAutopilot:
     def __init__(self, scheduler, outbound, audit=None, database=":memory:",
                  clock=lambda: datetime.now(timezone.utc),
-                 dispatch_action="WEBHOOK_AUTOPILOT_DISPATCH"):
+                 dispatch_action="WEBHOOK_AUTOPILOT_DISPATCH",
+                 max_dispatch_per_tick=MAX_DISPATCH_PER_TICK):
         if outbound is None or not outbound.host:
             raise AutopilotError("webhook_not_configured", 403)
         self.scheduler = scheduler
         self.outbound = outbound
         self.audit = audit
         self.dispatch_action = dispatch_action
+        if (type(max_dispatch_per_tick) is not int or
+                not 1 <= max_dispatch_per_tick <= MAX_DISPATCH_PER_TICK):
+            raise AutopilotError("invalid_dispatch_per_tick_limit")
+        self.max_dispatch_per_tick = max_dispatch_per_tick
         self.clock = clock
         self.lock = threading.RLock()
         self.dispatch_lock = threading.Lock()
@@ -439,7 +444,7 @@ class ScheduledWebhookAutopilot:
                     ORDER BY created_utc""").fetchall()
             count = 0
             for row in rows:
-                if count >= MAX_DISPATCH_PER_TICK:
+                if count >= self.max_dispatch_per_tick:
                     break
                 try:
                     count += self._run_policy(self._row(row))
