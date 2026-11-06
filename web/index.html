@@ -336,6 +336,21 @@ aas:timeline:urgent
 <div><div class="kicker">ALLOWED ID LIST · OWNER LOCAL STORAGE</div>
 <pre id="hn-story-allowed" class="trace">No public story grants loaded.</pre>
 <p class="muted">After granting an ID, propose a task such as “Read allowed Hacker News story ID 8863” in the task planner below. Revoke invalidates any older approvals, including revoke-and-regrant. Only 12 active IDs may be granted.</p></div></div></section>
+<section class="panel" id="greenhouse-evidence-panel" aria-label="Greenhouse official ATS public job evidence" style="margin:22px 0">
+<div class="kicker">INDEPENDENT PRIMARY SOURCE · PUBLIC ATS JOB POST · EXPLICIT CLICK</div>
+<h2>Check one public Greenhouse job posting</h2>
+<p class="muted">A posting returned directly by the official public Greenhouse Job Board API is stronger evidence of a published listing than a social-media job claim. It still does not prove the position accepts applications, is truly remote, or is open to candidates in Indonesia. A Hacker News ID, if supplied, is only an owner-asserted reference, NOT a verified match.</p>
+<div class="layout"><div>
+<div class="field"><label for="greenhouse-board-token">Verified-from-careers-page Greenhouse board token</label><input id="greenhouse-board-token" autocomplete="off" spellcheck="false" maxlength="64" placeholder="greenhouse" disabled></div>
+<div class="field"><label for="greenhouse-job-id">Greenhouse job post ID</label><input id="greenhouse-job-id" inputmode="numeric" maxlength="9" autocomplete="off" placeholder="Post ID from the company's careers link" disabled></div>
+<div class="field"><label for="greenhouse-hn-reference">Optional Hacker News story ID (owner's claim of relationship only)</label><input id="greenhouse-hn-reference" inputmode="numeric" maxlength="9" autocomplete="off" placeholder="Leave blank unless independently related" disabled></div>
+<div class="core-actions"><button id="greenhouse-check" type="button" class="secondary" disabled>Check official ATS posting (read-only)</button></div>
+<div id="greenhouse-status" class="setup-msg" role="status" aria-live="polite">Disabled. Start with --enable-local-agent --enable-agent-plans --enable-greenhouse-evidence.</div>
+</div><div>
+<div class="kicker">SOURCE · VERIFIED VS NOT VERIFIED</div>
+<div id="greenhouse-source-links" class="core-list"></div>
+<pre id="greenhouse-result" class="trace">No Greenhouse ATS posting checked. No conclusion about an employer, job status or Indonesia eligibility.</pre>
+</div></div></section>
 <section class="panel" id="agent-task-plans-panel" aria-label="Local agent task plans" style="margin:22px 0">
 <div class="kicker">EXPLICIT APPROVAL · DURABLE READ-ONLY TASKS</div>
 <h2>Plan a small local task</h2>
@@ -823,6 +838,69 @@ $("public-github-commit").addEventListener("click",async()=>{
  }}finally{
   publicGithubBusy=false;$("public-github-repo").disabled=false;
   $("local-run-choice").disabled=false;refreshPublicGithubButton();
+ }
+});
+let greenhouseEvidenceEnabled=false;
+let greenhouseEvidenceRevision=0;
+const clearGreenhouseEvidence=(reason="No currently verified ATS posting.")=>{
+ greenhouseEvidenceRevision++;
+ $("greenhouse-source-links").replaceChildren();
+ $("greenhouse-result").textContent=reason;
+};
+$("greenhouse-check").addEventListener("click",async()=>{
+ if(!operatorCsrf||!greenhouseEvidenceEnabled)return;
+ const board=$("greenhouse-board-token").value.trim();
+ const raw=$("greenhouse-job-id").value.trim();
+ const hn=$("greenhouse-hn-reference").value.trim();
+ if(!/^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/.test(board)||
+    board==="internal"||!/^[1-9][0-9]{0,8}$/.test(raw)||
+    (hn!==""&&!/^[1-9][0-9]{0,8}$/.test(hn))){
+  $("greenhouse-status").textContent="Enter a valid lowercase board token, numeric job ID and optional numeric HN reference.";
+  return;
+ }
+ const revision=++greenhouseEvidenceRevision;
+ $("greenhouse-check").disabled=true;
+ $("greenhouse-source-links").replaceChildren();
+ $("greenhouse-result").textContent="Checking exactly one public ATS posting; no form or application is submitted…";
+ const input={board_token:board,job_id:Number(raw)};
+ if(hn!=="")input.hn_story_id=Number(hn);
+ try{
+  const response=await appFetch("/api/local-greenhouse-job-preview",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify(input)});
+  const out=await response.json();
+  if(revision!==greenhouseEvidenceRevision||!operatorCsrf)return;
+  if(!response.ok)throw Error(out.error||"greenhouse_evidence_unavailable");
+  if(out.source!=="GREENHOUSE_OFFICIAL_PUBLIC_JOB_BOARD_V1"||
+     out.board_token!==board||out.job_id!==input.job_id||
+     out.public_job_post_observed!==true||
+     out.indonesia_eligibility_verified!==false||
+     out.hn_to_ats_match_verified!==false||
+     out.accepting_applications_verified!==false||
+     out.external_read_count!==1||out.external_write_count!==0||
+     out.model_calls!==0||out.applicant_data_sent!==false||
+     !/^[0-9a-f]{64}$/.test(out.source_sha256))
+   throw Error("invalid_greenhouse_evidence_response");
+  const safeLink="https://job-boards.greenhouse.io/"+board+"/jobs/"+input.job_id;
+  if(out.canonical_job_url!==safeLink)
+   throw Error("unexpected_greenhouse_source_url");
+  const link=document.createElement("a");
+  link.href=safeLink;link.target="_blank";link.rel="noopener noreferrer";
+  link.textContent="Open public Greenhouse posting #"+input.job_id;
+  $("greenhouse-source-links").replaceChildren(link);
+  $("greenhouse-result").textContent=JSON.stringify(out,null,2);
+  $("greenhouse-status").textContent=
+   "Public Greenhouse record observed at the stated check time. Employer verification, application acceptance and Indonesia eligibility remain unverified.";
+ }catch(error){
+  if(revision===greenhouseEvidenceRevision&&operatorCsrf){
+   $("greenhouse-source-links").replaceChildren();
+   $("greenhouse-result").textContent="No verified ATS record: "+error.message;
+   $("greenhouse-status").textContent=
+    "Official posting not confirmed. Do not interpret this as definitive rejection: board and job ID may be wrong, the posting may be gone, or the provider may be unavailable.";
+  }
+ }finally{
+  if(revision===greenhouseEvidenceRevision&&operatorCsrf)
+   $("greenhouse-check").disabled=!greenhouseEvidenceEnabled;
  }
 });
 let hnStoryEnabled=false;
@@ -1353,6 +1431,17 @@ const refreshLocalAgent=async()=>{
   agentPlanCsvEnabled=agentPlanEnabled&&data.plan_csv===true;
   // Plan memory only when both owner-curated memory and task planning are opted in.
   planMemoryField.disabled=!(agentPlanEnabled&&data.plan_memory===true);
+  greenhouseEvidenceEnabled=agentPlanEnabled&&data.greenhouse_evidence===true&&
+   Array.isArray(data.tool_registry)&&data.tool_registry.some(t=>
+    t.name==="greenhouse_job_evidence"&&t.enabled===true&&
+    t.effect==="PUBLIC_READ"&&t.batch_allowed===false&&
+    t.model_plannable===false&&t.owner_confirmation_required===true);
+  for(const id of ["greenhouse-board-token","greenhouse-job-id",
+                   "greenhouse-hn-reference","greenhouse-check"])
+   $(id).disabled=!greenhouseEvidenceEnabled;
+  $("greenhouse-status").textContent=greenhouseEvidenceEnabled
+   ?"Greenhouse ATS read-only evidence enabled. Enter one exact board token and job post ID."
+   :"Disabled. Requires --enable-local-agent --enable-agent-plans --enable-greenhouse-evidence.";
   hnJobDiscoveryEnabled=agentPlanEnabled&&data.hn_job_discovery===true&&
    Array.isArray(data.tool_registry)&&data.tool_registry.some(t=>
     t.name==="hn_jobstories_preview"&&t.enabled===true&&
@@ -2567,6 +2656,12 @@ const lockOperatorUI=message=>{
  planStatus.textContent="Session locked; task plans unavailable.";
  $("agent-plan-github-status").textContent="Session locked; source permission details hidden.";
  $("agent-plan-hn-status").textContent="Session locked; HN source permissions hidden.";
+ greenhouseEvidenceEnabled=false;
+ $("greenhouse-status").textContent="Session locked; ATS evidence unavailable.";
+ clearGreenhouseEvidence("Session locked; ATS evidence hidden.");
+ for(const id of ["greenhouse-board-token","greenhouse-job-id",
+                  "greenhouse-hn-reference","greenhouse-check"])
+  $(id).disabled=true;
  hnStoryEnabled=false;
  hnJobDiscoveryEnabled=false;
  $("hn-job-discover").disabled=true;

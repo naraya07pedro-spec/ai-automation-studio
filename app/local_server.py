@@ -20,6 +20,9 @@ from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
 from local_hn_story_reader import AllowedHNStoryReader
 from local_hn_job_discovery import HNJobDiscovery, HNDiscoveryError
+from local_greenhouse_job_evidence import (
+    GreenhouseJobEvidence, GreenhouseEvidenceError,
+    validate_greenhouse_target)
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from local_csv_profile import profile_selected_csv, csv_source_metadata
@@ -33,7 +36,7 @@ from local_agent_batch_runner import LocalAgentBatchRunner
 from local_plan_artifacts import LocalPlanArtifactExporter, PlanArtifactError
 from local_tool_registry import (
     ACTION_TOOL, MARKDOWN_ACTION_TOOL, HN_DISCOVERY_PREVIEW,
-    require_owner_action, require_discovery_preview,
+    GREENHOUSE_EVIDENCE, require_owner_action, require_discovery_preview,
     ToolPermissionError, registered_tools)
 from local_tool_action_gate import LocalCSVProfileActionGate, ToolActionError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
@@ -85,7 +88,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_device_preflight=None, model_safety_state=None,
                    agent_memory_store=None, plan_artifact_exporter=None,
                    plan_action_gate=None, hn_policy=None,
-                   hn_job_discovery=None):
+                   hn_job_discovery=None, greenhouse_evidence=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -101,6 +104,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     batch = LocalCSVBatchIntake(core)
     agent_gate = threading.BoundedSemaphore(1)
     hn_discovery_gate = threading.Lock()
+    greenhouse_check_gate = threading.Lock()
     # Production injects a durable local SQLite checkpoint. Tests default to
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
@@ -328,6 +332,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                      hn=(local_agent_plan_store is not None
                                          and local_agent_plan_store.hn_reader is not None),
                                      hn_discovery=(hn_job_discovery is not None),
+                                     greenhouse=(greenhouse_evidence is not None),
                                      document=(local_agent_plan_store is not None
                                                and local_agent_plan_store.document_analyzer is not None),
                                      documents=(local_agent_plan_store is not None
@@ -356,6 +361,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "plan_memory": (local_agent_planner is not None
                                                  and local_agent_plan_store is not None
                                                  and agent_memory_store is not None),
+                                 "greenhouse_evidence": bool(
+                                     local_agent_planner is not None
+                                     and local_agent_plan_store is not None
+                                     and greenhouse_evidence is not None),
                                  "hn_job_discovery": bool(
                                      local_agent_planner is not None
                                      and local_agent_plan_store is not None
@@ -557,6 +566,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if self.path not in ("/api/operator-login", "/api/operator-logout",
                                  "/api/operator-rotate",
                                  "/api/local-hn-jobstories-preview",
+                                 "/api/local-greenhouse-job-preview",
                                  "/api/local-hn-story-grant",
                                  "/api/local-hn-story-revoke",
                                  "/api/local-github-source-grant",
@@ -1243,6 +1253,78 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 self._send(code, outcome,
                            cookie_header=self._no_cookie() if code == 200 else None)
                 return
+            if self.path == "/api/local-greenhouse-job-preview":
+                keys = {"board_token", "job_id"}
+                if (type(data) is not dict or
+                        set(data) not in (keys, keys | {"hn_story_id"})):
+                    self._send(422, {"error": "invalid_greenhouse_evidence_request"})
+                    return
+                try:
+                    validate_greenhouse_target(
+                        data["board_token"], data["job_id"],
+                        data.get("hn_story_id"))
+                except GreenhouseEvidenceError as exc:
+                    self._send(422, {"error": str(exc)})
+                    return
+                try:
+                    require_discovery_preview(
+                        GREENHOUSE_EVIDENCE,
+                        enabled=(greenhouse_evidence is not None
+                                 and local_agent_planner is not None
+                                 and local_agent_plan_store is not None))
+                except ToolPermissionError:
+                    self._send(403, {"error": "greenhouse_evidence_disabled"})
+                    return
+                if not greenhouse_check_gate.acquire(blocking=False):
+                    self._send(429, {"error": "greenhouse_evidence_busy"})
+                    return
+                try:
+                    if not self._audit_event("GREENHOUSE_JOB_CHECK", "ATTEMPT"):
+                        self._send(503, {"error": "security_audit_restart_required"})
+                        return
+                    try:
+                        result = greenhouse_evidence.preview(
+                            data["board_token"], data["job_id"],
+                            data.get("hn_story_id"))
+                    except GreenhouseEvidenceError as exc:
+                        if not self._audit_event("GREENHOUSE_JOB_CHECK", "FAILED"):
+                            self._send(503, {"error": "security_audit_restart_required"})
+                        else:
+                            err = str(exc)
+                            self._send(
+                                404 if err == "greenhouse_job_not_published_or_not_found"
+                                else 502 if err.startswith("greenhouse_provider")
+                                or err == "greenhouse_response_size_rejected"
+                                else 422,
+                                {"error": err})
+                        return
+                    except Exception:
+                        self._audit_event("GREENHOUSE_JOB_CHECK", "FAILED")
+                        self._send(503, {"error": "greenhouse_evidence_unavailable"})
+                        return
+                    if (type(result) is not dict
+                            or result.get("source") !=
+                               "GREENHOUSE_OFFICIAL_PUBLIC_JOB_BOARD_V1"
+                            or result.get("job_id") != data["job_id"]
+                            or result.get("board_token") != data["board_token"]
+                            or result.get("public_job_post_observed") is not True
+                            or result.get("indonesia_eligibility_verified") is not False
+                            or result.get("hn_to_ats_match_verified") is not False
+                            or result.get("external_read_count") != 1
+                            or result.get("external_write_count") != 0
+                            or result.get("model_calls") != 0
+                            or result.get("local_file_write_count") != 0
+                            or result.get("applicant_data_sent") is not False):
+                        self._audit_event("GREENHOUSE_JOB_CHECK", "FAILED")
+                        self._send(502, {"error": "invalid_greenhouse_evidence_output"})
+                        return
+                    if not self._audit_event("GREENHOUSE_JOB_CHECK", "SUCCESS"):
+                        self._send(503, {"error": "security_audit_restart_required"})
+                        return
+                    self._send(200, result)
+                finally:
+                    greenhouse_check_gate.release()
+                return
             if self.path == "/api/local-hn-jobstories-preview":
                 if type(data) is not dict or data:
                     self._send(422, {"error":"invalid_hn_discovery_request"})
@@ -1495,7 +1577,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_plan_artifacts=False,
                        enable_plan_csv=False, enable_plan_actions=False,
                        enable_hn_story_read=False,
-                       enable_hn_job_discovery=False):
+                       enable_hn_job_discovery=False,
+                       enable_greenhouse_evidence=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1520,6 +1603,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("hn_story_read_requires_agent_plans")
     if enable_hn_job_discovery and not enable_hn_story_read:
         raise ValueError("hn_job_discovery_requires_hn_story_read")
+    if enable_greenhouse_evidence and not enable_agent_plans:
+        raise ValueError("greenhouse_evidence_requires_agent_plans")
     if enable_plan_artifacts and not enable_agent_plans:
         raise ValueError("plan_artifacts_require_agent_plans")
     if enable_plan_csv and not enable_agent_plans:
@@ -1560,6 +1645,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            hn_policy=hn_policy,
                            hn_job_discovery=(
                                HNJobDiscovery() if enable_hn_job_discovery else None),
+                           greenhouse_evidence=(
+                               GreenhouseJobEvidence()
+                               if enable_greenhouse_evidence else None),
                            local_agent_runner=run_agent if enable_local_agent else None,
                            agent_conversation=conversation,
                            local_agent_models=installed_models if enable_local_agent else None,
@@ -1657,6 +1745,8 @@ def main(argv=None):
                         help="Opt in to separate preview and one-use owner-confirmed create-only CSV profile JSON exports; also requires --enable-plan-csv and --enable-plan-artifacts.")
     parser.add_argument("--enable-plan-artifacts", action="store_true",
                         help="Allow explicit, write-once Markdown report export to the local owner workspace.")
+    parser.add_argument("--enable-greenhouse-evidence", action="store_true",
+                        help="Opt in to exact owner-clicked public Greenhouse job-post evidence checks. Requires reviewed agent plans.")
     parser.add_argument("--enable-hn-job-discovery", action="store_true",
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
@@ -1678,6 +1768,8 @@ def main(argv=None):
         parser.error("--enable-hn-story-read requires --enable-agent-plans")
     if args.enable_hn_job_discovery and not args.enable_hn_story_read:
         parser.error("--enable-hn-job-discovery requires --enable-hn-story-read")
+    if args.enable_greenhouse_evidence and not args.enable_agent_plans:
+        parser.error("--enable-greenhouse-evidence requires --enable-agent-plans")
     if args.enable_plan_artifacts and not args.enable_agent_plans:
         parser.error("--enable-plan-artifacts requires --enable-agent-plans")
     if args.enable_plan_csv and not args.enable_agent_plans:
@@ -1761,7 +1853,8 @@ def main(argv=None):
                            enable_plan_csv=args.enable_plan_csv,
                            enable_plan_actions=args.enable_plan_actions,
                            enable_hn_story_read=args.enable_hn_story_read,
-                           enable_hn_job_discovery=args.enable_hn_job_discovery)
+                           enable_hn_job_discovery=args.enable_hn_job_discovery,
+                           enable_greenhouse_evidence=args.enable_greenhouse_evidence)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")

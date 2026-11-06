@@ -16,6 +16,7 @@ from local_source_policy import LocalPublicSourcePolicy
 from local_hn_story_policy import HNStoryPolicy
 from local_hn_story_reader import AllowedHNStoryReader
 from local_hn_job_discovery import HNJobDiscovery
+from local_greenhouse_job_evidence import GreenhouseJobEvidence
 from local_security_audit import LocalSecurityAudit
 from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
@@ -224,6 +225,19 @@ def main():
                        hn_job_discovery=HNJobDiscovery(
                            list_fetcher=lambda:list(range(77712301,77712307)),
                            item_fetcher=fixture_hn_fetch),
+                       greenhouse_evidence=GreenhouseJobEvidence(
+                           fetcher=lambda board,job: {
+                               "id":1234567,
+                               "title":"SYNTHETIC ATS Integration Engineer",
+                               "company_name":"Fixture Corp",
+                               "location":{"name":"US-only / simulated"},
+                               "first_published":"2026-10-01T10:00:00Z",
+                               "updated_at":"2026-10-03T10:00:00Z",
+                               "content":"<p>Mock ATS public job, no eligibility claim.</p>",
+                               "absolute_url":"https://evil.invalid/untrusted",
+                           } if board=="fixturecorp" and job==1234567
+                             else (_ for _ in ()).throw(
+                                 RuntimeError("unapproved ATS target"))),
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
                        agent_memory_store=memory_cards,

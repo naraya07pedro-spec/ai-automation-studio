@@ -174,7 +174,7 @@ class JobDiscoveryUnits(unittest.TestCase):
     def test_discovery_registry_is_not_a_model_or_batch_tool(self):
         registry=registered_tools(planning=True,hn=True,hn_discovery=True)
         item=next(v for v in registry if v["name"]==HN_DISCOVERY_PREVIEW)
-        self.assertEqual(12,len(registry))
+        self.assertEqual(13,len(registry))
         self.assertEqual("PUBLIC_READ",item["effect"])
         self.assertTrue(item["enabled"])
         self.assertFalse(item["model_plannable"])

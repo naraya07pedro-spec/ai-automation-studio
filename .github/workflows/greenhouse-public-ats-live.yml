@@ -1,0 +1,70 @@
+name: Live official Greenhouse public job evidence
+
+on:
+  pull_request:
+    paths:
+      - "app/local_greenhouse_job_evidence.py"
+      - "app/local_server.py"
+      - "app/local_tool_registry.py"
+      - "tests/test_local_greenhouse_job_evidence.py"
+      - ".github/workflows/greenhouse-public-ats-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-public-greenhouse-post-get:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: List public posts on Greenhouse's own board, then verify one exact post
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python - <<'PY'
+          import http.client
+          import json
+          import ssl
+          import sys
+          sys.path.insert(0, "app")
+          from local_greenhouse_job_evidence import GreenhouseJobEvidence
+          host = "boards-api.greenhouse.io"
+          c = http.client.HTTPSConnection(
+              host, timeout=8, context=ssl.create_default_context())
+          try:
+              c.request("GET", "/v1/boards/greenhouse/jobs",
+                        headers={"Accept":"application/json"})
+              res=c.getresponse()
+              assert res.status==200, res.status
+              assert res.getheader("Content-Type", "").lower().startswith(
+                  "application/json")
+              raw=res.read(524289)
+              assert 0<len(raw)<=524288
+              jobs=json.loads(raw.decode("utf-8"))["jobs"]
+          finally:
+              c.close()
+          assert isinstance(jobs,list) and len(jobs)>=1
+          selected=next(j for j in jobs
+                        if isinstance(j,dict)
+                        and type(j.get("id")) is int
+                        and 0<j["id"]<=999999999)
+          item=GreenhouseJobEvidence().preview("greenhouse",selected["id"])
+          assert item["job_id"]==selected["id"]
+          assert item["source"]=="GREENHOUSE_OFFICIAL_PUBLIC_JOB_BOARD_V1"
+          assert item["public_job_post_observed"] is True
+          assert item["accepting_applications_verified"] is False
+          assert item["remote_work_verified"] is False
+          assert item["indonesia_eligibility_verified"] is False
+          assert item["hn_to_ats_match_verified"] is False
+          assert item["external_read_count"]==1
+          assert item["external_write_count"]==0
+          assert item["model_calls"]==0
+          assert item["applicant_data_sent"] is False
+          assert len(item["source_sha256"])==64
+          print("Verified REAL Greenhouse public board list and exact job GET; no application, no eligibility claim.")
+          PY
