@@ -363,6 +363,14 @@ aas:timeline:urgent
 <button id="agent-plan-report-export" type="button" class="secondary" disabled>Save .md into local workspace</button>
 </div>
 <pre id="agent-plan-export-result" class="trace" aria-label="Local artifact export status">No file saved to the local workspace.</pre>
+<div class="kicker">TOOL REGISTRY · SEPARATELY APPROVED LOCAL ACTION</div>
+<p class="muted">Tool capabilities are fixed in server code. A completed, owner-reviewed CSV plan can generate a JSON summary artifact for other applications. This action is NEVER model-plannable or allowed in the server's read-only batch. Preview is read-only; saving requires a second, single-use permission and explicit native confirmation. No CSV rows or raw cell values are exported.</p>
+<div id="agent-plan-actions-status" class="setup-msg" role="status" aria-live="polite">Owner-only JSON action disabled. Start with --enable-local-agent --enable-agent-plans --enable-plan-csv --enable-plan-artifacts --enable-plan-actions.</div>
+<div class="core-actions">
+<button id="agent-plan-action-preview" type="button" class="secondary" disabled>Preview CSV profile JSON (no write)</button>
+<button id="agent-plan-action-commit" type="button" class="primary" disabled>Confirm &amp; save verified JSON</button>
+</div>
+<pre id="agent-plan-action-output" class="trace" aria-label="Verified profile action preview and local receipt">No action preview or local JSON file saved.</pre>
 <pre id="agent-plan-report-display" class="trace" aria-label="Completed task final report">No report. Complete the plan before generating one.</pre>
 <div id="agent-plan-status" class="setup-msg" role="status" aria-live="polite">Plan execution is disabled by default.</div>
 <pre id="agent-plan-details" class="trace" aria-label="Reviewed plan and results">No selected plan.</pre>
@@ -1165,6 +1173,14 @@ const refreshLocalAgent=async()=>{
   refreshDocumentButton();
   agentPlanEnabled=localAgentEnabled&&data.planning===true;
   agentPlanArtifactsEnabled=agentPlanEnabled&&data.plan_artifact_export===true;
+  agentPlanActionsEnabled=agentPlanEnabled&&data.plan_action_export===true&&
+   Array.isArray(data.tool_registry)&&data.tool_registry.some(t=>
+    t.name==="local_csv_profile_json_export"&&t.enabled===true&&
+    t.effect==="LOCAL_CREATE_ONLY"&&t.batch_allowed===false&&
+    t.model_plannable===false&&t.owner_confirmation_required===true);
+  $("agent-plan-actions-status").textContent=agentPlanActionsEnabled
+   ?"Local create-only CSV JSON action enabled. Preview is read-only; a new owner confirmation and one-use ticket are required to save."
+   :"Disabled. Requires --enable-local-agent --enable-agent-plans --enable-plan-csv --enable-plan-artifacts --enable-plan-actions.";
   agentPlanDocumentsEnabled=agentPlanEnabled&&data.plan_documents===true;
   agentPlanMultiDocumentsEnabled=agentPlanEnabled&&data.plan_multi_documents===true;
   agentPlanCsvEnabled=agentPlanEnabled&&data.plan_csv===true;
@@ -1253,6 +1269,8 @@ localAgentSend.addEventListener("click",async()=>{
 // Slice 52: every effectful transition requires its own owner-authorized button.
 let agentPlanEnabled=false;
 let agentPlanArtifactsEnabled=false;
+let agentPlanActionsEnabled=false;
+let selectedActionPreview=null;
 let agentPlanDocumentsEnabled=false;
 let agentPlanMultiDocumentsEnabled=false;
 let agentPlanCsvEnabled=false;
@@ -1303,13 +1321,15 @@ const planAnalysisReport=$("agent-plan-analysis-report");
 const planListOutput=$("agent-plan-list-output");
 const planReportDisplay=$("agent-plan-report-display");
 const planExportResult=$("agent-plan-export-result");
+const planActionOutput=$("agent-plan-action-output");
 let selectedPlanReportMarkdown="";
 const planIdInput=$("agent-plan-id");
 const planButtons=["agent-plan-propose","agent-plan-list","agent-plan-load",
  "agent-plan-approve","agent-plan-next","agent-plan-run-remaining",
  "agent-plan-resume","agent-plan-cancel",
  "agent-plan-delete","agent-plan-report-generate","agent-plan-report-copy",
- "agent-plan-report-download","agent-plan-report-export"];
+ "agent-plan-report-download","agent-plan-report-export",
+ "agent-plan-action-preview","agent-plan-action-commit"];
 const buildPlanReportMarkdown=plan=>{
  const report=plan?.report;
  if(!plan||!report)return "";
@@ -1351,6 +1371,7 @@ const buildPlanReportMarkdown=plan=>{
  return lines.join("\n");
 };
 const renderPlan=plan=>{
+ selectedActionPreview=null;
  selectedPlan=plan;
  selectedPlanReportMarkdown=buildPlanReportMarkdown(plan);
  // The logout flow also calls renderPlan(null); never replace the
@@ -1469,6 +1490,13 @@ const refreshPlanButtons=()=>{
  $("agent-plan-report-download").disabled=!ready||!selectedPlanReportMarkdown;
  $("agent-plan-report-export").disabled=!ready||!agentPlanArtifactsEnabled||
    !same||status!=="COMPLETED"||!selectedPlan?.report;
+ const hasCsvProfile=same&&Array.isArray(selectedPlan.steps)&&
+  selectedPlan.steps.some(s=>s.tool==="local_csv_profile");
+ $("agent-plan-action-preview").disabled=!ready||!agentPlanActionsEnabled||
+  !same||status!=="COMPLETED"||!selectedPlan.csv_source||!hasCsvProfile;
+ $("agent-plan-action-commit").disabled=!ready||!agentPlanActionsEnabled||
+  !same||status!=="COMPLETED"||!selectedActionPreview||
+  selectedActionPreview.plan_id!==id;
 };
 planIdInput.addEventListener("input",()=>{
  agentPlanRevision++;selectedPlan=null;
@@ -1478,6 +1506,8 @@ planIdInput.addEventListener("input",()=>{
  selectedPlanReportMarkdown="";
  planReportDisplay.textContent="No report for the selected plan.";
  planExportResult.textContent="No file saved for the currently selected plan.";
+ selectedActionPreview=null;
+ planActionOutput.textContent="No action preview for this plan.";
  refreshPlanButtons();
 });
 const planRequest=async(path,body)=>{
@@ -1738,6 +1768,92 @@ $("agent-plan-report-export").addEventListener("click",async()=>{
    planExportResult.textContent="No verified new artifact: "+error.message+
     ". Inspect the local workspace before retrying.";
    planStatus.textContent="Local artifact export rejected.";
+  }
+ }finally{
+  if(rev===agentPlanRevision){agentPlanBusy=false;refreshPlanButtons();}
+ }
+});
+
+// Slice 77: separate owner-only, read-only PREVIEW followed by a one-use
+// confirmed local write. The model, previous tool outputs and read-only batch
+// have no route to trigger this action.
+$("agent-plan-action-preview").addEventListener("click",async()=>{
+ const pid=planIdInput.value.trim();
+ if(!operatorCsrf||!agentPlanEnabled||!agentPlanActionsEnabled||agentPlanBusy||
+    !selectedPlan||selectedPlan.plan_id!==pid||
+    selectedPlan.status!=="COMPLETED"||!selectedPlan.csv_source)return;
+ const rev=++agentPlanRevision;
+ selectedActionPreview=null;
+ agentPlanBusy=true;refreshPlanButtons();
+ planActionOutput.textContent="Computing read-only preview from saved CSV profile…";
+ try{
+  const response=await appFetch("/api/local-agent-action-preview",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({action:"local_csv_profile_json_export",plan_id:pid})});
+  const data=await response.json();
+  if(!operatorCsrf||rev!==agentPlanRevision||planIdInput.value.trim()!==pid)return;
+  if(!response.ok)throw Error(data.error||"action_preview_failed");
+  if(data.action!=="local_csv_profile_json_export"||
+     data.plan_id!==pid||data.risk!=="ONE_LOCAL_CREATE_ONLY_PLAINTEXT_FILE"||
+     data.side_effects?.external_write_count!==0||
+     data.side_effects?.existing_file_overwrite_allowed!==false||
+     !/^[0-9a-f]{64}$/.test(data.preview_sha256))
+   throw Error("invalid_local_action_preview");
+  selectedActionPreview=data;
+  planActionOutput.textContent="NO FILE WRITTEN · Read-only preview\n"+
+   data.relative_workspace+"/"+data.filename+"\n"+
+   data.bytes+" bytes · SHA-256 "+data.preview_sha256+"\n"+
+   "Token expires after "+data.expires_in_seconds+" seconds.\n"+
+   JSON.stringify(data.preview,null,2);
+  planStatus.textContent="Inspect the exact aggregate content, filename and SHA-256. Confirm separately to save.";
+ }catch(error){
+  if(operatorCsrf&&rev===agentPlanRevision){
+   planActionOutput.textContent="Preview rejected: "+error.message;
+   planStatus.textContent="No local JSON file was created.";
+  }
+ }finally{
+  if(rev===agentPlanRevision){agentPlanBusy=false;refreshPlanButtons();}
+ }
+});
+$("agent-plan-action-commit").addEventListener("click",async()=>{
+ const pid=planIdInput.value.trim(),preview=selectedActionPreview;
+ if(!operatorCsrf||!agentPlanActionsEnabled||agentPlanBusy||!preview||
+    !selectedPlan||selectedPlan.plan_id!==pid||
+    selectedPlan.status!=="COMPLETED"||preview.plan_id!==pid)return;
+ if(!window.confirm("AUTHORIZE ONE LOCAL PLAINTEXT FILE CREATE?\n\n"+
+   preview.relative_workspace+"/"+preview.filename+"\n"+
+   preview.bytes+" bytes · SHA-256 "+preview.preview_sha256+
+   "\n\nThe exact previewed aggregate JSON will be revalidated. "+
+   "Existing files will NEVER be overwritten. No model or network calls."))return;
+ selectedActionPreview=null;
+ const rev=++agentPlanRevision;
+ agentPlanBusy=true;refreshPlanButtons();
+ planActionOutput.textContent="Commit requested; inspect workspace if connection drops…";
+ try{
+  const response=await appFetch("/api/local-agent-action-commit",{
+   method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({
+    action:"local_csv_profile_json_export",plan_id:pid,
+    preview_token:preview.preview_token,
+    preview_sha256:preview.preview_sha256})});
+  const receipt=await response.json();
+  if(!operatorCsrf||rev!==agentPlanRevision||planIdInput.value.trim()!==pid)return;
+  if(!response.ok)throw Error(receipt.error||"action_commit_failed");
+  if(!["CREATED","EXISTS_IDENTICAL"].includes(receipt.status)||
+     receipt.sha256!==preview.preview_sha256||
+     receipt.filename!==preview.filename||receipt.external_write_count!==0||
+     receipt.model_calls!==0)throw Error("invalid_action_receipt");
+  planActionOutput.textContent=receipt.status+" · "+
+   receipt.relative_workspace+"/"+receipt.filename+"\n"+
+   receipt.bytes+" bytes · SHA-256 "+receipt.sha256+
+   "\nPlaintext JSON aggregates only; values still need source-data review.";
+  planStatus.textContent="Owner-approved local JSON "+
+   (receipt.status==="CREATED"?"created":"already exists unchanged")+".";
+ }catch(error){
+  if(operatorCsrf&&rev===agentPlanRevision){
+   planActionOutput.textContent="No verified success: "+error.message+
+    ". Inspect the fixed local workspace before requesting a fresh preview.";
+   planStatus.textContent="Action failed or outcome uncertain; no automatic retry.";
   }
  }finally{
   if(rev===agentPlanRevision){agentPlanBusy=false;refreshPlanButtons();}
@@ -2174,6 +2290,8 @@ deviceAcceptanceRun.addEventListener("click",async()=>{
 });
 
 const operatorReady=()=>{
+ selectedActionPreview=null;
+ planActionOutput.textContent="No action preview or local JSON file saved.";
  // Prior logout locks the artifact receipt. A fresh login starts with no
  // selected plan and must not keep displaying the locked-session placeholder.
  planExportResult.textContent="No file saved to the local workspace.";
@@ -2235,6 +2353,10 @@ const lockOperatorUI=message=>{
  $("local-memory-id-list").replaceChildren();
  refreshMemoryButtons();
  agentPlanEnabled=false;
+ agentPlanActionsEnabled=false;
+ selectedActionPreview=null;
+ planActionOutput.textContent="Session locked; action previews and receipts hidden.";
+ $("agent-plan-actions-status").textContent="Session locked; action permission hidden.";
  agentPlanDocumentsEnabled=false;
  agentPlanMultiDocumentsEnabled=false;
  agentPlanCsvEnabled=false;
