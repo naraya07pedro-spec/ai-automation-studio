@@ -27,6 +27,7 @@ The service is not deployed to the owner's Tencent VM by this PR; any 24/7 claim
 
 ## Identity, grants, durability and failure modes
 
+- Dispatch fairness: at most **three managed HTTPS POST attempts per worker scan**, at most **one per connector per scan**, with rotating connector order. Slow remote endpoints can still delay the current Python worker tick; this is **not** an isolated async job queue or sub-second scheduler SLA.
 - Each encrypted connector has an immutable, permanently reserved ID. Each connector has its own persistent `managed-scheduled-webhook-ledgers/CONNECTOR_ID.sqlite3` file and per-schedule policy/attempt uniqueness. The generated delivery ID includes **connector ID + schedule ID + scheduled slot**, preventing collision between separately authorized destinations.
 - The owner review token expires after five minutes. It binds connector destination URL hash, schedule configuration/epoch, workflow version, earliest due slot, total attempts and expiry. Changes require fresh approval. No wildcard URLs or model-selected arbitrary payloads.
 - All external effects are preceded by durable SQLite `IN_FLIGHT` claims. After crash/timeout/uncertain network response, the corresponding policy is paused. No blind retries. HTTP 2xx means **endpoint accepted**, not proof the downstream n8n workflow or CRM action completed. Check independent n8n delivery IDs for confirmation.
