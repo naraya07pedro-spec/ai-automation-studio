@@ -399,6 +399,14 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             '"status": "COMPLETED"')
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             "SYNTHETIC_HN_JOB_77712301")
+        # Release the completed test-owned plan, too. The browser fixture
+        # intentionally has a real 12-plan global capacity across methods.
+        # Changing production capacity just to conceal test state would be
+        # the wrong fix.
+        expect(self.page.locator("#agent-plan-delete")).to_be_enabled()
+        self.page.locator("#agent-plan-delete").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            "No selected plan")
         # The browser fixture is process-shared across methods. Release this
         # exact new grant, not just its UI selection; the next test must not
         # inherit a privileged allowed item.
