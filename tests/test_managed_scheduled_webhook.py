@@ -231,6 +231,26 @@ class ManagedAutopilotTests(unittest.TestCase):
         self.assertEqual(self.autopilot.dispatch_due(),0)
         self.assertEqual(len(self.events),1)
 
+    def test_registry_unavailable_does_not_kill_other_schedule_tasks(self):
+        self.arm()
+        self.manager._failed=True
+        self.clock.advance(minutes=1)
+        self.scheduler.run_due()
+        self.assertEqual(self.autopilot.dispatch_due(),0)
+        self.assertEqual(self.events,[])
+        self.manager._failed=False
+        self.assertEqual(self.autopilot.dispatch_due(),1)
+        self.assertEqual(len(self.events),1)
+
+    def test_symlinked_ledger_directory_is_rejected(self):
+        target=self.base/"external"
+        target.mkdir()
+        pointer=self.base/"unsafe-managed-path"
+        pointer.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(AutopilotError,"unsafe_storage_path"):
+            ManagedScheduledWebhookAutopilot(
+                self.scheduler,self.manager,None,pointer,clock=self.clock)
+
     def test_invalid_storage_is_not_silently_recreated(self):
         self.arm()
         self.autopilot.close()
