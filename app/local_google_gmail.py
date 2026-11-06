@@ -6,6 +6,7 @@ master key supplied independently. Only fixed official Google endpoints are
 called, never URLs obtained from responses, users or the model.
 """
 import json
+import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -33,9 +34,13 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def _official_json(url, form=None, bearer=None):
     """Do not follow redirects carrying bearer credentials."""
+    message_detail = re.fullmatch(
+        re.escape(GMAIL_BASE) +
+        r"/messages/[A-Za-z0-9_-]{1,128}\?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date",
+        url) is not None
     if not (url == TOKEN_ENDPOINT or url == GMAIL_BASE + "/profile"
-            or url.startswith(GMAIL_BASE + "/messages?")
-            or url.startswith(GMAIL_BASE + "/messages/")):
+            or url == GMAIL_BASE + "/messages?maxResults=5&labelIds=INBOX"
+            or message_detail):
         raise GmailConnectorError("google_endpoint_not_allowed", 422)
     if not url.startswith("https://"):
         raise GmailConnectorError("google_https_required", 422)
