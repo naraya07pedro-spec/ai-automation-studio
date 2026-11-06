@@ -15,8 +15,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from launch_workbench import feature_flags
+from local_connector_vault import decode_master_key, VaultError
 
 UNIT_NAME = "ai-automation-studio.service"
+PRIVATE_CREDENTIAL_ROOT = Path("/etc/ai-automation-studio")
 UNIT_FILE = Path("/etc/systemd/system") / UNIT_NAME
 _ALLOWED_PATH = re.compile(r"/[A-Za-z0-9_./-]+", re.ASCII)
 _ALLOWED_USER = re.compile(r"[a-z_][a-z0-9_-]{0,31}", re.ASCII)
@@ -33,7 +35,9 @@ def _path(value):
     return path
 
 
-def render_unit(*, username, checkout, home, python, mode):
+def render_unit(*, username, checkout, home, python, mode,
+                encrypted_webhooks=False, gmail_metadata=False,
+                outbound_webhook=False, signed_webhook=False):
     """Render a fixed-name loopback service with no user-controlled directives."""
     if not _ALLOWED_USER.fullmatch(username) or username == "root":
         raise PrivateVPSDeploymentError("dedicated_nonroot_user_required")
@@ -41,7 +45,23 @@ def render_unit(*, username, checkout, home, python, mode):
     flags = feature_flags(mode)
     if "--enable-agent-history" in flags:
         raise PrivateVPSDeploymentError("plaintext_history_not_enabled_in_vps")
-    arguments = " ".join(flags)
+    if signed_webhook and not outbound_webhook:
+        raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
+    extra = ()
+    credentials = ""
+    if encrypted_webhooks:
+        extra += ("--enable-encrypted-managed-webhooks",)
+    if gmail_metadata:
+        extra += ("--enable-google-gmail-metadata",)
+    if outbound_webhook:
+        extra += ("--enable-outbound-webhook",)
+    if encrypted_webhooks or gmail_metadata:
+        credentials += "LoadCredential=aas-vault-key:/etc/ai-automation-studio/aas-vault-key\n"
+    if outbound_webhook:
+        credentials += "LoadCredential=aas-webhook-url:/etc/ai-automation-studio/aas-webhook-url\n"
+    if signed_webhook:
+        credentials += "LoadCredential=aas-webhook-signing-secret:/etc/ai-automation-studio/aas-webhook-signing-secret\n"
+    arguments = " ".join((*flags, *extra))
     return (
         "[Unit]\n"
         "Description=AI Automation Studio private SSH-tunnel workbench\n"
@@ -54,6 +74,7 @@ def render_unit(*, username, checkout, home, python, mode):
         f"WorkingDirectory={checkout}\n"
         f"Environment=HOME={home}\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n"
+        + credentials
         f"ExecStart={python} {checkout}/app/local_server.py"
         + (f" {arguments}\n" if arguments else "\n")
         + "Restart=on-failure\n"
