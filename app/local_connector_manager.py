@@ -20,6 +20,7 @@ import threading
 
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError, validate_https_target
 from local_source_policy import secure_replace_json, SourcePolicyError
+from local_connector_vault import EncryptedConnectorVault, VaultError
 
 ID = re.compile(r"^[a-z][a-z0-9_-]{2,31}$", re.ASCII)
 MAX_ACTIVE = 4
@@ -45,7 +46,7 @@ def _now():
 
 
 class LocalConnectorManager:
-    def __init__(self, core, filename, sender=None, clock=None):
+    def __init__(self, core, filename, sender=None, clock=None, vault_key=None):
         self.core = core
         self.path = Path(filename).expanduser()
         self._lock = threading.RLock()
@@ -53,7 +54,10 @@ class LocalConnectorManager:
         self._sender = sender
         self._clock = clock
         self._failed = False
-        self._init_store()
+        self._vault = (EncryptedConnectorVault(self.path,vault_key)
+                       if vault_key is not None else None)
+        if self._vault is None:
+            self._init_store()
         self._entries = self._read()
 
     def _init_store(self):
@@ -75,9 +79,12 @@ class LocalConnectorManager:
 
     def _read(self):
         try:
-            if self.path.stat().st_size > 4096:
-                raise ValueError("too large")
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if self._vault is not None:
+                data = self._vault.read()
+            else:
+                if self.path.stat().st_size > 4096:
+                    raise ValueError("too large")
+                data = json.loads(self.path.read_text(encoding="utf-8"))
             if (type(data) is not dict or set(data) != {"version","entries"}
                     or data["version"] != 1 or type(data["entries"]) is not list
                     or len(data["entries"]) > MAX_TOTAL):
@@ -107,15 +114,18 @@ class LocalConnectorManager:
                     raise ValueError("revoked credential retained")
             return data["entries"]
         except (OSError, UnicodeError, ValueError, KeyError, TypeError, OutboundError,
-                ManagedConnectorError):
-            raise ManagedConnectorError("connector_registry_corrupt_or_unavailable", 503) from None
+                ManagedConnectorError, VaultError):
+            raise ManagedConnectorError("connector_registry_corrupt_or_locked", 503) from None
 
     def _persist(self, entries):
         if self._failed:
             raise ManagedConnectorError("connector_registry_requires_restart", 503)
         try:
-            secure_replace_json(self.path, {"version":1,"entries":entries})
-        except (SourcePolicyError, OSError):
+            if self._vault is not None:
+                self._vault.write({"version":1,"entries":entries})
+            else:
+                secure_replace_json(self.path, {"version":1,"entries":entries})
+        except (SourcePolicyError, OSError, VaultError):
             # Writes may have reached the filesystem before the reported
             # durability error. Refuse to operate until a fresh restart.
             self._failed = True
@@ -138,7 +148,8 @@ class LocalConnectorManager:
                 raise ManagedConnectorError("connector_registry_requires_restart",503)
             return {"connectors":[self._public(x) for x in self._entries],
                     "max_active":MAX_ACTIVE, "max_total":MAX_TOTAL,
-                    "storage":"OS_PERMISSION_PROTECTED_NOT_ENCRYPTED",
+                    "storage":("AES_256_GCM_EXTERNAL_MASTER_KEY" if self._vault is not None
+                               else "OS_PERMISSION_PROTECTED_NOT_ENCRYPTED"),
                     "requires_fresh_owner_password_for_changes":True,
                     "model_tool_access":False, "scheduled_dispatch_enabled":False}
 
@@ -154,7 +165,9 @@ class LocalConnectorManager:
         return row
 
     def _ledger_path(self, connector_id):
-        return self.path.parent / "managed-webhook-ledgers" / (connector_id+".sqlite3")
+        directory = ("vault-managed-webhook-ledgers" if self._vault is not None
+                     else "managed-webhook-ledgers")
+        return self.path.parent / directory / (connector_id+".sqlite3")
 
     def _client(self, row):
         key = row["connector_id"]
