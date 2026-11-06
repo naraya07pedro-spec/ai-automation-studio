@@ -19,6 +19,7 @@ from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
 from local_hn_story_reader import AllowedHNStoryReader
+from local_hn_job_discovery import HNJobDiscovery, HNDiscoveryError
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_csv_batch import LocalCSVBatchIntake
 from local_csv_profile import profile_selected_csv, csv_source_metadata
@@ -31,7 +32,8 @@ from local_multi_document_analysis import (analyze_multiple_documents,
 from local_agent_batch_runner import LocalAgentBatchRunner
 from local_plan_artifacts import LocalPlanArtifactExporter, PlanArtifactError
 from local_tool_registry import (
-    ACTION_TOOL, MARKDOWN_ACTION_TOOL, require_owner_action,
+    ACTION_TOOL, MARKDOWN_ACTION_TOOL, HN_DISCOVERY_PREVIEW,
+    require_owner_action, require_discovery_preview,
     ToolPermissionError, registered_tools)
 from local_tool_action_gate import LocalCSVProfileActionGate, ToolActionError
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
@@ -82,7 +84,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_device_acceptance=None,
                    local_device_preflight=None, model_safety_state=None,
                    agent_memory_store=None, plan_artifact_exporter=None,
-                   plan_action_gate=None, hn_policy=None):
+                   plan_action_gate=None, hn_policy=None,
+                   hn_job_discovery=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -97,6 +100,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
     agent_gate = threading.BoundedSemaphore(1)
+    hn_discovery_gate = threading.Lock()
     # Production injects a durable local SQLite checkpoint. Tests default to
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
@@ -323,6 +327,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                              and local_agent_plan_store.github_reader is not None),
                                      hn=(local_agent_plan_store is not None
                                          and local_agent_plan_store.hn_reader is not None),
+                                     hn_discovery=(hn_job_discovery is not None),
                                      document=(local_agent_plan_store is not None
                                                and local_agent_plan_store.document_analyzer is not None),
                                      documents=(local_agent_plan_store is not None
@@ -351,6 +356,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "plan_memory": (local_agent_planner is not None
                                                  and local_agent_plan_store is not None
                                                  and agent_memory_store is not None),
+                                 "hn_job_discovery": bool(
+                                     local_agent_planner is not None
+                                     and local_agent_plan_store is not None
+                                     and local_agent_plan_store.hn_reader is not None
+                                     and hn_policy is not None
+                                     and hn_job_discovery is not None),
                                  "hn_story_read": bool(
                                      local_agent_planner is not None
                                      and local_agent_plan_store is not None
@@ -544,7 +555,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
 
         def do_POST(self):
             if self.path not in ("/api/operator-login", "/api/operator-logout",
-                                 "/api/operator-rotate", "/api/local-hn-story-grant",
+                                 "/api/operator-rotate",
+                                 "/api/local-hn-jobstories-preview",
+                                 "/api/local-hn-story-grant",
                                  "/api/local-hn-story-revoke",
                                  "/api/local-github-source-grant",
                                  "/api/local-github-source-revoke",
@@ -1230,6 +1243,64 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 self._send(code, outcome,
                            cookie_header=self._no_cookie() if code == 200 else None)
                 return
+            if self.path == "/api/local-hn-jobstories-preview":
+                if type(data) is not dict or data:
+                    self._send(422, {"error":"invalid_hn_discovery_request"})
+                    return
+                try:
+                    require_discovery_preview(
+                        HN_DISCOVERY_PREVIEW,
+                        enabled=(hn_job_discovery is not None
+                                 and hn_policy is not None
+                                 and local_agent_planner is not None
+                                 and local_agent_plan_store is not None
+                                 and local_agent_plan_store.hn_reader is not None))
+                except ToolPermissionError:
+                    self._send(403, {"error":"hn_discovery_permission_denied"})
+                    return
+                if not hn_discovery_gate.acquire(blocking=False):
+                    self._send(429, {"error":"hn_discovery_busy"})
+                    return
+                try:
+                    if not self._audit_event("HN_JOB_DISCOVERY", "ATTEMPT"):
+                        self._send(503, {"error":"security_audit_restart_required"})
+                        return
+                    try:
+                        preview = hn_job_discovery.preview()
+                    except HNDiscoveryError as exc:
+                        if not self._audit_event("HN_JOB_DISCOVERY", "FAILED"):
+                            self._send(503, {"error":"security_audit_restart_required"})
+                        else:
+                            err = str(exc)
+                            self._send(502 if err.startswith(
+                                "hn_discovery_provider") or err ==
+                                "hn_discovery_item_unavailable" else 503,
+                                {"error":err})
+                        return
+                    except Exception:
+                        self._audit_event("HN_JOB_DISCOVERY", "FAILED")
+                        self._send(503, {"error":"hn_discovery_unavailable"})
+                        return
+                    if (type(preview) is not dict
+                            or preview.get("source") !=
+                               "HACKER_NEWS_PUBLIC_JOBSTORIES_PREVIEW_V1"
+                            or preview.get("external_write_count") != 0
+                            or preview.get("auto_grant_count") != 0
+                            or preview.get("model_calls") != 0
+                            or preview.get("local_file_write_count") != 0
+                            or preview.get("requires_separate_owner_grant") is not True
+                            or type(preview.get("jobs")) is not list
+                            or len(preview["jobs"]) > 5):
+                        self._audit_event("HN_JOB_DISCOVERY", "FAILED")
+                        self._send(502, {"error":"invalid_hn_discovery_output"})
+                        return
+                    if not self._audit_event("HN_JOB_DISCOVERY", "SUCCESS"):
+                        self._send(503, {"error":"security_audit_restart_required"})
+                        return
+                    self._send(200, preview)
+                finally:
+                    hn_discovery_gate.release()
+                return
             if self.path in ("/api/local-hn-story-grant",
                              "/api/local-hn-story-revoke"):
                 if (type(data) is not dict or
@@ -1423,7 +1494,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_agent_memory=False,
                        enable_plan_artifacts=False,
                        enable_plan_csv=False, enable_plan_actions=False,
-                       enable_hn_story_read=False):
+                       enable_hn_story_read=False,
+                       enable_hn_job_discovery=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1446,6 +1518,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("github_plan_read_requires_agent_plans")
     if enable_hn_story_read and not enable_agent_plans:
         raise ValueError("hn_story_read_requires_agent_plans")
+    if enable_hn_job_discovery and not enable_hn_story_read:
+        raise ValueError("hn_job_discovery_requires_hn_story_read")
     if enable_plan_artifacts and not enable_agent_plans:
         raise ValueError("plan_artifacts_require_agent_plans")
     if enable_plan_csv and not enable_agent_plans:
@@ -1484,6 +1558,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             create_handler(local_core=core, operator_auth=operator,
                            source_policy=source_policy, security_audit=audit,
                            hn_policy=hn_policy,
+                           hn_job_discovery=(
+                               HNJobDiscovery() if enable_hn_job_discovery else None),
                            local_agent_runner=run_agent if enable_local_agent else None,
                            agent_conversation=conversation,
                            local_agent_models=installed_models if enable_local_agent else None,
@@ -1581,6 +1657,8 @@ def main(argv=None):
                         help="Opt in to separate preview and one-use owner-confirmed create-only CSV profile JSON exports; also requires --enable-plan-csv and --enable-plan-artifacts.")
     parser.add_argument("--enable-plan-artifacts", action="store_true",
                         help="Allow explicit, write-once Markdown report export to the local owner workspace.")
+    parser.add_argument("--enable-hn-job-discovery", action="store_true",
+                        help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
     parser.add_argument("--enable-agent-github-read", action="store_true",
@@ -1598,6 +1676,8 @@ def main(argv=None):
         parser.error("--enable-agent-github-read requires --enable-agent-plans")
     if args.enable_hn_story_read and not args.enable_agent_plans:
         parser.error("--enable-hn-story-read requires --enable-agent-plans")
+    if args.enable_hn_job_discovery and not args.enable_hn_story_read:
+        parser.error("--enable-hn-job-discovery requires --enable-hn-story-read")
     if args.enable_plan_artifacts and not args.enable_agent_plans:
         parser.error("--enable-plan-artifacts requires --enable-agent-plans")
     if args.enable_plan_csv and not args.enable_agent_plans:
@@ -1680,7 +1760,8 @@ def main(argv=None):
                            enable_plan_artifacts=args.enable_plan_artifacts,
                            enable_plan_csv=args.enable_plan_csv,
                            enable_plan_actions=args.enable_plan_actions,
-                           enable_hn_story_read=args.enable_hn_story_read)
+                           enable_hn_story_read=args.enable_hn_story_read,
+                           enable_hn_job_discovery=args.enable_hn_job_discovery)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
