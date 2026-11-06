@@ -201,14 +201,31 @@ def main(argv=None):
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
+                        help="Opt in to encrypted managed n8n webhook connections.")
+    parser.add_argument("--enable-google-gmail-metadata", action="store_true",
+                        help="Opt in to existing Gmail metadata-only OAuth connector.")
+    parser.add_argument("--enable-webhook", action="store_true",
+                        help="Opt in to existing outbound n8n webhook.")
+    parser.add_argument("--enable-webhook-signing", action="store_true",
+                        help="Opt in to root-owned HMAC signature credential.")
     parser.add_argument("--install", action="store_true",
                         help="Explicit opt-in: write systemd unit, enable and start the service as root")
     args = parser.parse_args(argv)
     try:
         home = validate_host(username=args.user, checkout=args.checkout)
         unit = render_unit(username=args.user, checkout=args.checkout,
-                           home=home, python=sys.executable, mode=args.mode)
+                           home=home, python=sys.executable, mode=args.mode,
+                           encrypted_webhooks=args.enable_encrypted_managed_webhooks,
+                           gmail_metadata=args.enable_google_gmail_metadata,
+                           outbound_webhook=args.enable_webhook,
+                           signed_webhook=args.enable_webhook_signing)
         if args.install:
+            validate_secret_sources(
+                encrypted_webhooks=args.enable_encrypted_managed_webhooks,
+                gmail_metadata=args.enable_google_gmail_metadata,
+                outbound_webhook=args.enable_webhook,
+                signed_webhook=args.enable_webhook_signing)
             install_unit(unit)
             print("SYSTEMD_ACTIVE: " + UNIT_NAME + "; bind=127.0.0.1:8765")
             print("Remote access must use an SSH tunnel; no public web URL is created.")
