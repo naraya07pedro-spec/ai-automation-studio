@@ -57,7 +57,7 @@ class ActionGateTests(unittest.TestCase):
     def test_registry_is_fixed_and_does_not_allow_action_in_model_or_batch(self):
         names = registered_tools(
             planning=True, csv=True, artifact=True, action=True)
-        self.assertEqual(11, len(names))
+        self.assertEqual(12, len(names))
         markdown = next(t for t in names
                         if t["name"] == MARKDOWN_ACTION_TOOL)
         self.assertEqual("LOCAL_CREATE_ONLY", markdown["effect"])
