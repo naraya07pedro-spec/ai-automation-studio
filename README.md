@@ -3,6 +3,18 @@
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
+## Discover recent HN public job titles before per-ID permission (Slice 79)
+
+The authenticated local workbench now has a separate **user-clicked discovery preview** for the [official Hacker News `jobstories` API](https://github.com/HackerNews/API). It lists up to **five** latest public HN job titles, IDs, canonical source links and timestamps, using **at most six read-only HTTPS requests** to fixed official endpoints. Titles are sanitized untrusted public metadata, not verified employment opportunities or eligibility decisions.
+
+Click **Preview latest 5 HN job titles**, inspect a source link and select an ID. **Copy selected ID into grant form** only fills the ID field: it does *not* grant permission, create a plan, or execute an agent. Explicitly re-enter the local password to grant that exact ID, then separately review, approve and execute an `hn_public_story` task to obtain its content.
+
+```powershell
+python app/local_server.py --enable-local-agent --enable-agent-plans --enable-hn-story-read --enable-hn-job-discovery
+```
+
+The new `hn_jobstories_preview` registry entry is `PUBLIC_READ`, owner-click-only, **not** model-plannable or batch-enabled. Preview results are not persisted to plan SQLite and never grant IDs automatically; audit logs record events without titles/IDs. No ATS verification, employer authenticity, Indonesia work eligibility, full HN scraping, application, external mutation or provider credential is implied. [Exact limits and verification rules](docs/HN_JOB_DISCOVERY_V1.md). Real local Ollama/Windows machine validation remains deferred.
+
 ## Independent external read-only provider: exact owner-granted Hacker News story (Slice 78)
 
 The local planner now supports **a second external provider beyond the existing public GitHub issue reader**. Use an explicitly owner-granted Hacker News **public story/job item ID**, never an arbitrary URL, to read the public item and at most **two direct comments** from the official Firebase-backed HN API, with strict HTML-to-text sanitization and a durable SHA-256-backed provenance receipt. The provider data is untrusted public user prose; HN job posts are **not** confirmed to be live, legitimate, Indonesia-eligible or open for applications.
