@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Private VPS deployment v2: secure credentials + live acceptance gate
+
+**New after PR #99:** the existing loopback-only systemd VPS service can now opt in to encrypted managed webhooks, Gmail metadata OAuth and single n8n outbound webhook using private root-owned systemd `LoadCredential` files rather than embedding vault master keys or webhook secrets in unit files. A hidden-prompt credential provisioner and read-only `deploy/verify_private_vps_runtime.py` check systemd service state, exact private bind, secure Mission Control response and anonymous API rejection. The original Windows SSH tunnel and schedule persistence path stay unchanged. **No Tencent VM was accessed, started or deployed from CI; Google consent and live n8n delivery remain unverified.** [Production setup, secure credential requirements, and live acceptance runbook](docs/PRIVATE_VPS_CREDENTIAL_READINESS_V2.md).
+
 ## Native Google Gmail OAuth: metadata-only (explicit opt-in)
 
 Mission Control **09 · Google Gmail metadata** now has a real direct official Google OAuth 2.0 Desktop application connector (PKCE S256, state-protected loopback callback) with a distinct AES-256-GCM encrypted refresh grant. Set up your own Gmail API project/Desktop OAuth client, opt in via `python tools/connect_google_gmail.py --client-id YOUR_GOOGLE_DESKTOP_CLIENT_ID`, then launch `START_AI_STUDIO.cmd --mode offline --enable-google-gmail-metadata`. Each official Gmail API read requires a fresh owner password and returns only account counts or five inbox headers. **No sending, changing messages, auto-scheduling, agent tool access, shared ChatGPT plugin credentials, or verified live Google consent is claimed.** The Gmail metadata OAuth scope is **restricted** and may require Google verification for public distribution. [Configuration, verification and privacy limits](docs/GOOGLE_GMAIL_OAUTH_METADATA_V1.md).

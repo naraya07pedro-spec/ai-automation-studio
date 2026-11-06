@@ -15,8 +15,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from launch_workbench import feature_flags
+from local_connector_vault import decode_master_key, VaultError
 
 UNIT_NAME = "ai-automation-studio.service"
+PRIVATE_CREDENTIAL_ROOT = Path("/etc/ai-automation-studio")
 UNIT_FILE = Path("/etc/systemd/system") / UNIT_NAME
 _ALLOWED_PATH = re.compile(r"/[A-Za-z0-9_./-]+", re.ASCII)
 _ALLOWED_USER = re.compile(r"[a-z_][a-z0-9_-]{0,31}", re.ASCII)
@@ -33,7 +35,9 @@ def _path(value):
     return path
 
 
-def render_unit(*, username, checkout, home, python, mode):
+def render_unit(*, username, checkout, home, python, mode,
+                encrypted_webhooks=False, gmail_metadata=False,
+                outbound_webhook=False, signed_webhook=False):
     """Render a fixed-name loopback service with no user-controlled directives."""
     if not _ALLOWED_USER.fullmatch(username) or username == "root":
         raise PrivateVPSDeploymentError("dedicated_nonroot_user_required")
@@ -41,7 +45,23 @@ def render_unit(*, username, checkout, home, python, mode):
     flags = feature_flags(mode)
     if "--enable-agent-history" in flags:
         raise PrivateVPSDeploymentError("plaintext_history_not_enabled_in_vps")
-    arguments = " ".join(flags)
+    if signed_webhook and not outbound_webhook:
+        raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
+    extra = ()
+    credentials = ""
+    if encrypted_webhooks:
+        extra += ("--enable-encrypted-managed-webhooks",)
+    if gmail_metadata:
+        extra += ("--enable-google-gmail-metadata",)
+    if outbound_webhook:
+        extra += ("--enable-outbound-webhook",)
+    if encrypted_webhooks or gmail_metadata:
+        credentials += "LoadCredential=aas-vault-key:/etc/ai-automation-studio/aas-vault-key\n"
+    if outbound_webhook:
+        credentials += "LoadCredential=aas-webhook-url:/etc/ai-automation-studio/aas-webhook-url\n"
+    if signed_webhook:
+        credentials += "LoadCredential=aas-webhook-signing-secret:/etc/ai-automation-studio/aas-webhook-signing-secret\n"
+    arguments = " ".join((*flags, *extra))
     return (
         "[Unit]\n"
         "Description=AI Automation Studio private SSH-tunnel workbench\n"
@@ -54,7 +74,8 @@ def render_unit(*, username, checkout, home, python, mode):
         f"WorkingDirectory={checkout}\n"
         f"Environment=HOME={home}\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n"
-        f"ExecStart={python} {checkout}/app/local_server.py"
+        + credentials
+        + f"ExecStart={python} {checkout}/app/local_server.py"
         + (f" {arguments}\n" if arguments else "\n")
         + "Restart=on-failure\n"
         "RestartSec=5s\n"
@@ -77,6 +98,49 @@ def render_unit(*, username, checkout, home, python, mode):
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
+
+
+def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
+                            outbound_webhook=False, signed_webhook=False,
+                            directory=PRIVATE_CREDENTIAL_ROOT, expected_uid=0):
+    """Validate exact root-only sources before an explicit privileged install."""
+    if signed_webhook and not outbound_webhook:
+        raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
+    expected = []
+    if encrypted_webhooks or gmail_metadata:
+        expected.append("aas-vault-key")
+    if outbound_webhook:
+        expected.append("aas-webhook-url")
+    if signed_webhook:
+        expected.append("aas-webhook-signing-secret")
+    if not expected:
+        return []
+    folder = Path(directory)
+    if (folder.is_symlink() or not folder.is_dir()
+            or folder.stat().st_uid != expected_uid
+            or stat.S_IMODE(folder.stat().st_mode) & 0o077):
+        raise PrivateVPSDeploymentError("credential_directory_must_be_root_only")
+    for name in expected:
+        path = folder / name
+        if (path.is_symlink() or not path.is_file()
+                or path.stat().st_uid != expected_uid
+                or stat.S_IMODE(path.stat().st_mode) & 0o077
+                or not 1 <= path.stat().st_size <= 8192):
+            raise PrivateVPSDeploymentError("required_root_0600_credential_missing_or_unsafe")
+        if name == "aas-vault-key":
+            try:
+                decode_master_key(path.read_text(encoding="ascii").removesuffix("\n"))
+            except (VaultError, UnicodeError):
+                raise PrivateVPSDeploymentError("invalid_vault_master_key_credential") from None
+        if name == "aas-webhook-url":
+            try:
+                url = path.read_text(encoding="utf-8").removesuffix("\n")
+            except UnicodeError:
+                raise PrivateVPSDeploymentError("invalid_webhook_url_credential") from None
+            if (not url.startswith("https://") or "\n" in url or "\r" in url
+                    or len(url) > 420):
+                raise PrivateVPSDeploymentError("invalid_webhook_url_credential")
+    return expected
 
 
 def validate_host(*, username, checkout):
@@ -137,14 +201,31 @@ def main(argv=None):
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
+                        help="Opt in to encrypted managed n8n webhook connections.")
+    parser.add_argument("--enable-google-gmail-metadata", action="store_true",
+                        help="Opt in to existing Gmail metadata-only OAuth connector.")
+    parser.add_argument("--enable-webhook", action="store_true",
+                        help="Opt in to existing outbound n8n webhook.")
+    parser.add_argument("--enable-webhook-signing", action="store_true",
+                        help="Opt in to root-owned HMAC signature credential.")
     parser.add_argument("--install", action="store_true",
                         help="Explicit opt-in: write systemd unit, enable and start the service as root")
     args = parser.parse_args(argv)
     try:
         home = validate_host(username=args.user, checkout=args.checkout)
         unit = render_unit(username=args.user, checkout=args.checkout,
-                           home=home, python=sys.executable, mode=args.mode)
+                           home=home, python=sys.executable, mode=args.mode,
+                           encrypted_webhooks=args.enable_encrypted_managed_webhooks,
+                           gmail_metadata=args.enable_google_gmail_metadata,
+                           outbound_webhook=args.enable_webhook,
+                           signed_webhook=args.enable_webhook_signing)
         if args.install:
+            validate_secret_sources(
+                encrypted_webhooks=args.enable_encrypted_managed_webhooks,
+                gmail_metadata=args.enable_google_gmail_metadata,
+                outbound_webhook=args.enable_webhook,
+                signed_webhook=args.enable_webhook_signing)
             install_unit(unit)
             print("SYSTEMD_ACTIVE: " + UNIT_NAME + "; bind=127.0.0.1:8765")
             print("Remote access must use an SSH tunnel; no public web URL is created.")

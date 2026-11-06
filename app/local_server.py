@@ -20,6 +20,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError
 from local_connector_manager import LocalConnectorManager, ManagedConnectorError
 from local_connector_vault import VaultError
+from local_service_credentials import read_runtime_secret, ServiceCredentialError
 from local_google_gmail import GoogleGmailMetadata, GmailConnectorError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
@@ -2004,7 +2005,7 @@ def start_local_server(port=8765, enable_local_agent=False,
         if enable_encrypted_managed_webhooks:
             # Explicitly separate file from plaintext v1. Never auto-import
             # plaintext or silently downgrade if the crypto/key is absent.
-            master_key = os.environ.get("AAS_VAULT_MASTER_KEY","")
+            master_key = read_runtime_secret("AAS_VAULT_MASTER_KEY")
             if not master_key:
                 raise VaultError("AAS_VAULT_MASTER_KEY_required")
             managed = LocalConnectorManager(
@@ -2014,19 +2015,19 @@ def start_local_server(port=8765, enable_local_agent=False,
         if enable_google_gmail_metadata:
             # Read-only and off by default. Consent is enrolled separately via
             # tools/connect_google_gmail.py on the owner's PC.
-            master_key = os.environ.get("AAS_VAULT_MASTER_KEY", "")
+            master_key = read_runtime_secret("AAS_VAULT_MASTER_KEY")
             if not master_key:
                 raise VaultError("AAS_VAULT_MASTER_KEY_required")
             gmail = GoogleGmailMetadata(
                 home / "google-gmail-vault.json", master_key)
         if enable_outbound_webhook:
-            destination = os.environ.get("AAS_WEBHOOK_URL", "")
+            destination = read_runtime_secret("AAS_WEBHOOK_URL")
             if not destination:
                 raise OutboundError("webhook_url_required_at_process_start")
             outbound = LocalOutboundWebhook(
                 core, home / "outbound-webhook-ledger.sqlite3",
                 url=destination,
-                secret=os.environ.get("AAS_WEBHOOK_SIGNING_SECRET", ""))
+                secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
         if outbound is not None:
             autopilot = ScheduledWebhookAutopilot(
@@ -2277,7 +2278,7 @@ def main(argv=None):
                            enable_managed_webhooks=args.enable_managed_webhooks,
                            enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks,
                            enable_google_gmail_metadata=args.enable_google_gmail_metadata)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError) as exc:
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
