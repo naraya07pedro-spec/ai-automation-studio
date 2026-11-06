@@ -24,6 +24,7 @@ from local_service_credentials import read_runtime_secret, ServiceCredentialErro
 from local_google_gmail import GoogleGmailMetadata, GmailConnectorError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
+from local_n8n_delivery_proof import SignedN8NDeliveryProof, N8NProofError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
@@ -102,7 +103,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    hn_job_discovery=None, greenhouse_evidence=None,
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
-                   google_gmail=None, managed_autopilot=None):
+                   google_gmail=None, managed_autopilot=None, n8n_proofs=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -581,6 +582,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (sqlite3.Error,OSError):
                     self._send(503,{"error":"managed_connector_storage_unavailable"})
                 return
+            if route.path == "/api/n8n-delivery-proofs" and not route.query:
+                if n8n_proofs is None:
+                    self._send(200, {"enabled":False,"records":[]})
+                else:
+                    try:
+                        self._send(200,n8n_proofs.list())
+                    except (N8NProofError,sqlite3.Error,OSError,ManagedConnectorError):
+                        self._send(503,{"error":"n8n_proof_ledger_unavailable"})
+                return
             if route.path == "/api/managed-autopilot-status" and not route.query:
                 if managed_autopilot is None:
                     self._send(200, {"enabled":False,"policies":[],"attempts":[]})
@@ -697,6 +707,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-schedule-resume",
                                  "/api/outbound-webhook-preview",
                                  "/api/outbound-webhook-commit",
+                                 "/api/n8n-delivery-proof-import",
                                  "/api/managed-autopilot-preview",
                                  "/api/managed-autopilot-arm",
                                  "/api/managed-autopilot-stop",
@@ -1716,6 +1727,50 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path == "/api/n8n-delivery-proof-import":
+                if n8n_proofs is None:
+                    self._send(403,{"error":"n8n_proof_import_disabled"})
+                    return
+                action="N8N_DELIVERY_PROOF_IMPORT"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                required={"connector_id","schedule_id","delivery_id",
+                          "outcome","execution_id","proof_hmac_sha256",
+                          "current_password"}
+                if (type(data) is not dict or set(data)!=required or
+                        type(data.get("current_password")) is not str):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"invalid_n8n_proof_import_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                try:
+                    result=n8n_proofs.reconcile(
+                        {k:v for k,v in data.items() if k!="current_password"})
+                except N8NProofError as exc:
+                    self._audit_event(action,"DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"n8n_proof_result_uncertain_check_ledger"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"n8n_proof_audit_uncertain_check_ledger"})
+                else:
+                    self._send(200,result)
+                return
             if self.path in ("/api/managed-autopilot-preview",
                              "/api/managed-autopilot-arm",
                              "/api/managed-autopilot-stop"):
@@ -2065,6 +2120,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     outbound = None
     autopilot = None
     managed_autopilot = None
+    n8n_proofs = None
     managed = None
     gmail = None
     try:
@@ -2099,6 +2155,7 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
             scheduler.managed_autopilot = managed_autopilot
+            n8n_proofs = SignedN8NDeliveryProof(managed_autopilot)
         if outbound is not None:
             autopilot = ScheduledWebhookAutopilot(
                 scheduler,outbound,audit,home / "scheduled-webhook-autopilot.sqlite3")
@@ -2136,6 +2193,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            scheduled_autopilot=autopilot,
                            managed_connectors=managed,
                            managed_autopilot=managed_autopilot,
+                           n8n_proofs=n8n_proofs,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
