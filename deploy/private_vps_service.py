@@ -100,6 +100,49 @@ def render_unit(*, username, checkout, home, python, mode,
     )
 
 
+def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
+                            outbound_webhook=False, signed_webhook=False,
+                            directory=PRIVATE_CREDENTIAL_ROOT):
+    """Validate exact root-only sources before an explicit privileged install."""
+    if signed_webhook and not outbound_webhook:
+        raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
+    expected = []
+    if encrypted_webhooks or gmail_metadata:
+        expected.append("aas-vault-key")
+    if outbound_webhook:
+        expected.append("aas-webhook-url")
+    if signed_webhook:
+        expected.append("aas-webhook-signing-secret")
+    if not expected:
+        return []
+    folder = Path(directory)
+    if (folder.is_symlink() or not folder.is_dir()
+            or folder.stat().st_uid != 0
+            or stat.S_IMODE(folder.stat().st_mode) & 0o077):
+        raise PrivateVPSDeploymentError("credential_directory_must_be_root_only")
+    for name in expected:
+        path = folder / name
+        if (path.is_symlink() or not path.is_file()
+                or path.stat().st_uid != 0
+                or stat.S_IMODE(path.stat().st_mode) & 0o077
+                or not 1 <= path.stat().st_size <= 8192):
+            raise PrivateVPSDeploymentError("required_root_0600_credential_missing_or_unsafe")
+        if name == "aas-vault-key":
+            try:
+                decode_master_key(path.read_text(encoding="ascii").removesuffix("\n"))
+            except (VaultError, UnicodeError):
+                raise PrivateVPSDeploymentError("invalid_vault_master_key_credential") from None
+        if name == "aas-webhook-url":
+            try:
+                url = path.read_text(encoding="utf-8").removesuffix("\n")
+            except UnicodeError:
+                raise PrivateVPSDeploymentError("invalid_webhook_url_credential") from None
+            if (not url.startswith("https://") or "\n" in url or "\r" in url
+                    or len(url) > 420):
+                raise PrivateVPSDeploymentError("invalid_webhook_url_credential")
+    return expected
+
+
 def validate_host(*, username, checkout):
     """Refuse deployment without a previously provisioned private owner."""
     if os.name != "posix" or not Path("/run/systemd/system").is_dir():
