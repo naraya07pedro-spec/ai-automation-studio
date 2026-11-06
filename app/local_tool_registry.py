@@ -18,6 +18,8 @@ _TOOL_ROWS = (
      "Grant-bound public Hacker News story/job and two direct comments"),
     ("hn_jobstories_preview", "PUBLIC_READ", "hn_discovery", False,
      "Owner-clicked preview of latest 5 public HN job titles; no automatic grants"),
+    ("greenhouse_job_evidence", "PUBLIC_READ", "greenhouse", False,
+     "Owner-clicked exact public ATS job lookup, never implicit hiring eligibility"),
     ("local_csv_profile", "SELECTED_SNAPSHOT_READ", "csv", True, "Deterministic profile of selected CSV"),
     ("local_markdown_report_export", "LOCAL_CREATE_ONLY", "artifact", False,
      "Separately confirmed existing Markdown report export from completed plan"),
@@ -30,7 +32,8 @@ ACTION_TOOL = "local_csv_profile_json_export"
 MARKDOWN_ACTION_TOOL = "local_markdown_report_export"
 OWNER_ACTION_TOOLS = frozenset((ACTION_TOOL, MARKDOWN_ACTION_TOOL))
 HN_DISCOVERY_PREVIEW = "hn_jobstories_preview"
-EXPLICIT_CLICK_READS = frozenset((HN_DISCOVERY_PREVIEW,))
+GREENHOUSE_EVIDENCE = "greenhouse_job_evidence"
+EXPLICIT_CLICK_READS = frozenset((HN_DISCOVERY_PREVIEW, GREENHOUSE_EVIDENCE))
 
 
 class ToolPermissionError(ValueError):
@@ -47,8 +50,8 @@ def require_owner_action(name, *, enabled):
 
 
 def require_discovery_preview(name, *, enabled):
-    """Only the exact UI-only public metadata preview has this read grant."""
-    if (type(name) is not str or name != HN_DISCOVERY_PREVIEW
+    """Only the fixed owner-click UI public read effects have this grant."""
+    if (type(name) is not str or name not in EXPLICIT_CLICK_READS
             or not enabled or name in BATCH_READ_TOOLS
             or _TOOL_MAP[name][1] != "PUBLIC_READ"):
         raise ToolPermissionError("hn_discovery_permission_denied")
@@ -57,7 +60,7 @@ def require_discovery_preview(name, *, enabled):
 
 def registered_tools(*, planning, github=False, document=False, documents=False,
                      csv=False, hn=False, hn_discovery=False,
-                     artifact=False, action=False):
+                     greenhouse=False, artifact=False, action=False):
     """One stable capability map with explicit effects and availability."""
     conditions = {
         "always": bool(planning),
@@ -67,6 +70,7 @@ def registered_tools(*, planning, github=False, document=False, documents=False,
         "csv": bool(planning and csv),
         "hn": bool(planning and hn),
         "hn_discovery": bool(planning and hn and hn_discovery),
+        "greenhouse": bool(planning and greenhouse),
         "artifact": bool(planning and artifact),
         "action": bool(planning and csv and artifact and action),
     }
