@@ -98,6 +98,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--enable-google-gmail-metadata", action="store_true",
+                        help="Enable one owner-clicked Google OAuth Gmail metadata-only read; requires encrypted vault grant.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
                         help="Use AES-256-GCM encrypted connector vault, requires pip install -r requirements-vault.txt and AAS_VAULT_MASTER_KEY.")
     parser.add_argument("--enable-managed-webhooks", action="store_true",
@@ -119,6 +121,8 @@ def main(argv=None):
             flags += ("--enable-outbound-webhook",)
         if args.enable_managed_webhooks and args.enable_encrypted_managed_webhooks:
             raise ValueError("choose legacy plaintext or encrypted managed-webhooks, not both")
+        if args.enable_google_gmail_metadata:
+            flags += ("--enable-google-gmail-metadata",)
         if args.enable_managed_webhooks:
             flags += ("--enable-managed-webhooks",)
         if args.enable_encrypted_managed_webhooks:
@@ -156,6 +160,8 @@ def main(argv=None):
         print("WARNING: local chat history is saved as plaintext.")
     if args.mode == "full":
         print("Public provider reads still require explicit actions/permissions in the UI.")
+    if args.enable_google_gmail_metadata:
+        print("Gmail metadata-only API is opt-in; each read requires owner password. No automated inbox polling or sends.")
     if args.enable_managed_webhooks:
         print("LEGACY managed webhooks: private OS files but NOT ENCRYPTED; prefer the encrypted mode for new connections.")
     if args.enable_encrypted_managed_webhooks:
