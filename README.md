@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Real recurring schedules: 1 minute through monthly
+
+**New:** Mission Control now includes a **server-executed scheduler** for ACTUAL persisted local deterministic rule workflows: every N minutes/hours, daily, weekly or monthly in WIB/UTC. The application worker starts with the Python server, saves schedule definitions and run receipts in SQLite, persists through restart, handles one safe catch-up after downtime, and supports pause/resume and owner-visible history. To use it, first create + activate a local workflow in section 04, then set a recurring trigger in section 05. **No Ollama model is required for deterministic scheduled evaluations.** The browser can close; the Python process must stay online. **No external writes, unrestricted agents, universal plugin connections, or public VPS hosting are implied.** [Start guide and recovery behavior](docs/SCHEDULER_REAL_V1.md).
+
 ## Mission Control: use the functional app first
 
 Launch the app with `START_AI_STUDIO.cmd` (Windows) or connect to an already running private VPS via `CONNECT_PRIVATE_VPS.cmd`; both now open **http://127.0.0.1:8765/mission** after confirming the loopback HTTP service is responding. This is the **real task-first interface**: sign in, detect a local Ollama model, ask a question, propose a durable 1–3-step plan, inspect/approve exact tool arguments, execute approved steps, monitor server-owned read-only runs and download a sourced report. **Even without Ollama**, use the same page to create/activate/run a real SQLite-backed deterministic workflow with pseudonymous events. All of these use existing authenticated server APIs; there are no mocked responses on this new page. The old five synthetic demo panels remain in the [Advanced workbench](http://127.0.0.1:8765/).
