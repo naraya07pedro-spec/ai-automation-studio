@@ -137,11 +137,11 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null;
+let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false;
 const readTools=new Set(["calculate","utc_now","github_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
 function status(id,message,error=false){$(id).textContent=message;$(id).classList.toggle("error",error);}
 function stopPolling(){if(poller!==null){clearInterval(poller);poller=null;}}
-function setBusy(value){busy=value;for(const id of ["ask","propose","find-models","refresh-list","reload"]){$(id).disabled=value||!csrf;}refreshActions();}
+function setBusy(value){busy=value;for(const id of ["find-models","refresh-list","reload"]){$(id).disabled=value||!csrf;}$("ask").disabled=value||!csrf||!chatEnabled;$("propose").disabled=value||!csrf||!planningEnabled;refreshActions();}
 async function request(path,body){
  const method=body===undefined?"GET":"POST";
  const headers={};
@@ -157,7 +157,7 @@ async function request(path,body){
  return result;
 }
 function lock(message){
- revision++;csrf="";plan=null;reportText="";stopPolling();
+ revision++;csrf="";plan=null;reportText="";chatEnabled=false;planningEnabled=false;stopPolling();
  $("gate").hidden=false;$("logout").hidden=true;$("plan-detail").hidden=true;
  $("saved-list").textContent="Sign in to load tasks.";
  $("chat-output").textContent="No private content displayed.";
@@ -173,11 +173,12 @@ async function loadCapabilities(){
  try{
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
+  chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":"AI disabled in server";
   $("scope").textContent=enabled?
    "Live local AI is enabled. Plans use a strict tool allowlist and explicit review. Real email sending, arbitrary websites, CRM mutation and shell execution are not enabled.":
    "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.";
-  $("ask").disabled=!enabled;$("propose").disabled=!info.planning;
+  setBusy(false);
  }catch(error){status("chat-status","Cannot load agent capabilities: "+error.message,true);}
 }
 async function loadModels(){
@@ -304,10 +305,9 @@ async function planAction(endpoint){
    status("plan-status",updated.batch_run_status==="RUNNING"?
      "Server executing reviewed read-only steps. Status updates automatically.":
      "Task saved · "+updated.status);
-   await loadList();
   }
  }catch(error){if(csrf&&rev===revision)status("plan-status","Task not completed: "+error.message,true);}
- finally{setBusy(false);}
+ finally{setBusy(false);if(csrf)loadList();}
 }
 $("login-form").addEventListener("submit",async e=>{
  e.preventDefault();const password=$("password").value;
@@ -345,9 +345,9 @@ $("plan-form").addEventListener("submit",async e=>{
  const rev=++revision;
  try{
   const data=await request("/api/local-agent-plan-create",{goal:$("goal").value,model});
-  if(csrf&&rev===revision){renderPlan(data);status("plan-status","Review every tool and argument before approving.");await loadList();}
+  if(csrf&&rev===revision){renderPlan(data);status("plan-status","Review every tool and argument before approving.");}
  }catch(error){if(csrf&&rev===revision)status("plan-status","Plan not created: "+error.message,true);}
- finally{setBusy(false);}
+ finally{setBusy(false);if(csrf)loadList();}
 });
 for(const [id,action] of [["approve","approve"],["next","next"],["run-remaining","batch-start"],["stop","batch-stop"],["cancel","cancel"],["resume","resume"],["report","report"]]){
  $(id).addEventListener("click",()=>planAction(action));
