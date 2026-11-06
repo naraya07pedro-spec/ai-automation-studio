@@ -102,7 +102,7 @@ def render_unit(*, username, checkout, home, python, mode,
 
 def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
                             outbound_webhook=False, signed_webhook=False,
-                            directory=PRIVATE_CREDENTIAL_ROOT):
+                            directory=PRIVATE_CREDENTIAL_ROOT, expected_uid=0):
     """Validate exact root-only sources before an explicit privileged install."""
     if signed_webhook and not outbound_webhook:
         raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
@@ -117,13 +117,13 @@ def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
         return []
     folder = Path(directory)
     if (folder.is_symlink() or not folder.is_dir()
-            or folder.stat().st_uid != 0
+            or folder.stat().st_uid != expected_uid
             or stat.S_IMODE(folder.stat().st_mode) & 0o077):
         raise PrivateVPSDeploymentError("credential_directory_must_be_root_only")
     for name in expected:
         path = folder / name
         if (path.is_symlink() or not path.is_file()
-                or path.stat().st_uid != 0
+                or path.stat().st_uid != expected_uid
                 or stat.S_IMODE(path.stat().st_mode) & 0o077
                 or not 1 <= path.stat().st_size <= 8192):
             raise PrivateVPSDeploymentError("required_root_0600_credential_missing_or_unsafe")
