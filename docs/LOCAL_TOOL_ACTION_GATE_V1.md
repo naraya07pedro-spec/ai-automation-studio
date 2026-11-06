@@ -16,7 +16,7 @@ No Windows/Ollama real-device acceptance is claimed.
 
 ## Registry / effect policy
 
-The frozen `app/local_tool_registry.py` has nine named capabilities. The eight preexisting plan tools remain either `READ_ONLY`, `PUBLIC_READ` (separate owner-allowlisted repository grants), or `SELECTED_SNAPSHOT_READ` (only selected documents/CSV). These eight names are **the source of truth for the batch read-only allowlist**. The ninth, `local_csv_profile_json_export`, has effect class `LOCAL_CREATE_ONLY`, `batch_allowed=false`, `model_plannable=false`, `owner_confirmation_required=true`.
+The frozen `app/local_tool_registry.py` has ten named capabilities. The eight preexisting plan tools remain either `READ_ONLY`, `PUBLIC_READ` (separate owner-allowlisted repository grants), or `SELECTED_SNAPSHOT_READ` (only selected documents/CSV). These eight names are **the source of truth for the batch read-only allowlist**. The other two are the existing `local_markdown_report_export` and new `local_csv_profile_json_export`, both with effect class `LOCAL_CREATE_ONLY`, `batch_allowed=false`, `model_plannable=false`, `owner_confirmation_required=true`. The existing Markdown export keeps its separate native owner confirmation and established report-validation contract; the JSON action adds preview digest and one-use ticket. Both routes now require their exact effect-registry permission.
 
 `GET /api/local-agent-capabilities` now includes `tool_registry`: one stable list with names, effect class, whether enabled by startup flags, batch permissions, owner-confirmation requirement, model-plannability and descriptive scope. This is metadata, **not** dynamic plugin loading, arbitrary adapter discovery, shell exposure or external provider auth.
 
