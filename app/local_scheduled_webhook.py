@@ -359,6 +359,16 @@ class ScheduledWebhookAutopilot:
     def _run_policy(self, record):
         sid = record["schedule_id"]
         now = _iso(self._now())
+        # Any unresolved delivery freezes the entire policy, not only that
+        # slot. A temporary SQLite finalize failure must not permit a second
+        # outbound request on the next tick.
+        with self.lock:
+            unsettled = self.db.execute("""SELECT 1 FROM scheduled_webhook_attempts
+                WHERE schedule_id=? AND status IN ('IN_FLIGHT','OUTCOME_UNCERTAIN')
+                LIMIT 1""", (sid,)).fetchone()
+        if unsettled is not None:
+            self._halt(sid,"PAUSED_UNCERTAIN")
+            return 0
         if record["expires_utc"] <= now:
             self._halt(sid,"EXPIRED")
             return 0
@@ -427,7 +437,16 @@ class ScheduledWebhookAutopilot:
                     ORDER BY created_utc LIMIT ?""", (MAX_DISPATCH_PER_TICK,)).fetchall()
             count = 0
             for row in rows:
-                count += self._run_policy(self._row(row))
+                try:
+                    count += self._run_policy(self._row(row))
+                except (AutopilotError, sqlite3.Error):
+                    # The scheduler itself must remain alive. No blind retry:
+                    # the persisted IN_FLIGHT gate or source checks will
+                    # stop further writes if the database recovers.
+                    try:
+                        self._halt(row[0],"PAUSED_UNCERTAIN")
+                    except sqlite3.Error:
+                        pass
             return count
         finally:
             self.dispatch_lock.release()
