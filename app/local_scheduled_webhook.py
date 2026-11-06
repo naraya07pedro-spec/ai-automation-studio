@@ -441,8 +441,9 @@ class ScheduledWebhookAutopilot:
                     break
                 try:
                     count += self._run_policy(self._row(row))
-                except (AutopilotError, sqlite3.Error):
-                    # The scheduler itself must remain alive. No blind retry:
+                except Exception:
+                    # The scheduler itself must remain alive. A malformed
+                    # receipt or storage fault quarantines only this policy. No blind retry:
                     # the persisted IN_FLIGHT gate or source checks will
                     # stop further writes if the database recovers.
                     try:
