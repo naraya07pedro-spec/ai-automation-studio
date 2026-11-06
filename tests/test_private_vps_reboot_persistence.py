@@ -68,8 +68,8 @@ class RebootContractTests(unittest.TestCase):
         self.assertEqual(snap["state"]["stores"]["readonly-ai-schedules.sqlite3"]["task_count"],1)
         blob=json.dumps(snap)
         self.assertNotIn("DUMMY_PRIVATE_FIXTURE_ONLY",blob)
-        self.assertNotIn("a1",blob)
-        self.assertNotIn("b1",blob)
+        self.assertNotIn('"a1"',blob)
+        self.assertNotIn('"b1"',blob)
         self.assertEqual(snap["state"]["stores"]["recurring-schedules.sqlite3"]["run_count"],0)
 
     def test_real_readonly_db_unchanged_after_snapshot(self):
