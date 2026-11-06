@@ -18,6 +18,7 @@ import threading
 from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError
+from local_connector_manager import LocalConnectorManager, ManagedConnectorError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
@@ -96,7 +97,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    plan_action_gate=None, hn_policy=None,
                    hn_job_discovery=None, greenhouse_evidence=None,
                    local_scheduler=None, outbound_webhook=None,
-                   scheduled_autopilot=None):
+                   scheduled_autopilot=None, managed_connectors=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -544,6 +545,28 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, source_policy.snapshot())
                 return
+            if route.path in ("/api/managed-connectors", "/api/managed-connector-history"):
+                if managed_connectors is None:
+                    self._send(200 if route.path=="/api/managed-connectors" else 403,
+                               {"enabled":False,"connectors":[]}
+                               if route.path=="/api/managed-connectors" else
+                               {"error":"managed_connectors_disabled"})
+                    return
+                try:
+                    if route.path == "/api/managed-connectors" and not route.query:
+                        self._send(200, {"enabled":True,**managed_connectors.list()})
+                        return
+                    if route.path == "/api/managed-connector-history":
+                        params=parse_qs(route.query,keep_blank_values=True)
+                        if set(params)=={"connector_id"} and len(params["connector_id"])==1:
+                            self._send(200,managed_connectors.history(params["connector_id"][0]))
+                            return
+                    self._send(422,{"error":"invalid_managed_connector_query"})
+                except (ManagedConnectorError, OutboundError) as exc:
+                    self._send(exc.status,{"error":str(exc)})
+                except (sqlite3.Error,OSError):
+                    self._send(503,{"error":"managed_connector_storage_unavailable"})
+                return
             if route.path == "/api/autopilot-status" and not route.query:
                 if scheduled_autopilot is None:
                     self._send(200, {"enabled": False, "policies": [], "attempts": [],
@@ -653,7 +676,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/outbound-webhook-commit",
                                  "/api/autopilot-preview",
                                  "/api/autopilot-arm",
-                                 "/api/autopilot-stop"):
+                                 "/api/autopilot-stop",
+                                 "/api/managed-connector-add",
+                                 "/api/managed-connector-revoke",
+                                 "/api/managed-webhook-preview",
+                                 "/api/managed-webhook-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1563,6 +1590,69 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 code, result = method(data)
                 self._send(code, result)
                 return
+            if self.path in ("/api/managed-connector-add",
+                             "/api/managed-connector-revoke",
+                             "/api/managed-webhook-preview",
+                             "/api/managed-webhook-commit"):
+                if managed_connectors is None:
+                    self._send(403, {"error":"managed_connectors_disabled"})
+                    return
+                kind=self.path
+                action=("MANAGED_WEBHOOK_DELIVERY" if "webhook" in kind
+                        else "CONNECTOR_MANAGEMENT")
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if kind in ("/api/managed-connector-add",
+                                "/api/managed-connector-revoke",
+                                "/api/managed-webhook-commit"):
+                        if (type(data) is not dict or
+                                type(data.get("current_password")) is not str):
+                            raise ManagedConnectorError("owner_password_required",422)
+                        if operator_auth is None:
+                            raise ManagedConnectorError("real_owner_required",403)
+                        verified=operator_auth.confirm_current_password(
+                            data["current_password"])
+                        if verified != 200:
+                            self._audit_event(action,"DENIED")
+                            self._send(verified,{"error":(
+                                "operator_restart_required" if verified==503
+                                else "operator_login_locked" if verified==429
+                                else "invalid_operator_credentials")})
+                            return
+                    if type(data) is not dict:
+                        raise ManagedConnectorError("invalid_managed_connector_fields")
+                    values={k:v for k,v in data.items() if k!="current_password"}
+                    if kind == "/api/managed-connector-add":
+                        result=managed_connectors.add(values)
+                        code=201
+                    elif kind == "/api/managed-connector-revoke":
+                        if set(values)!={"connector_id"}:
+                            raise ManagedConnectorError("invalid_connector_revoke_fields")
+                        result=managed_connectors.revoke(values["connector_id"])
+                        code=200
+                    elif kind == "/api/managed-webhook-preview":
+                        result=managed_connectors.preview(values)
+                        code=200
+                    else:
+                        result=managed_connectors.commit(values)
+                        code=200
+                except (ManagedConnectorError, OutboundError) as exc:
+                    self._audit_event(action,"DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"managed_connector_outcome_uncertain_check_history"})
+                    return
+                outcome=("UNCERTAIN" if kind=="/api/managed-webhook-commit"
+                         and result["status"]!="REMOTE_ACCEPTED" else "SUCCESS")
+                if not self._audit_event(action,outcome):
+                    self._send(503,{"error":"managed_connector_audit_uncertain_check_history"})
+                else:
+                    self._send(code,result)
+                return
             if self.path in ("/api/autopilot-preview",
                              "/api/autopilot-arm",
                              "/api/autopilot-stop"):
@@ -1792,7 +1882,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_hn_story_read=False,
                        enable_hn_job_discovery=False,
                        enable_greenhouse_evidence=False,
-                       enable_outbound_webhook=False):
+                       enable_outbound_webhook=False,
+                       enable_managed_webhooks=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1854,7 +1945,10 @@ def start_local_server(port=8765, enable_local_agent=False,
     scheduler = None
     outbound = None
     autopilot = None
+    managed = None
     try:
+        if enable_managed_webhooks:
+            managed = LocalConnectorManager(core, home / "managed-webhooks.json")
         if enable_outbound_webhook:
             destination = os.environ.get("AAS_WEBHOOK_URL", "")
             if not destination:
@@ -1899,6 +1993,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_scheduler=scheduler,
                            outbound_webhook=outbound,
                            scheduled_autopilot=autopilot,
+                           managed_connectors=managed,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
@@ -1929,6 +2024,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             autopilot.close()
         if outbound is not None:
             outbound.close()
+        if managed is not None:
+            managed.close()
         if memory_store is not None:
             memory_store.close()
         if model_safety is not None:
@@ -1991,6 +2088,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-managed-webhooks", action="store_true",
+                        help="Enable owner-managed multi-webhook registry, manually confirmed sends only; secrets stored in OS-private files, NOT encrypted.")
     parser.add_argument("--enable-outbound-webhook", action="store_true",
                         help="Explicitly enable one owner-approved HTTPS webhook destination from AAS_WEBHOOK_URL environment. Never automatically send or retry.")
     parser.add_argument("--enable-agent-github-read", action="store_true",
@@ -2097,8 +2196,9 @@ def main(argv=None):
                            enable_hn_story_read=args.enable_hn_story_read,
                            enable_hn_job_discovery=args.enable_hn_job_discovery,
                            enable_greenhouse_evidence=args.enable_greenhouse_evidence,
-                           enable_outbound_webhook=args.enable_outbound_webhook)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError) as exc:
+                           enable_outbound_webhook=args.enable_outbound_webhook,
+                           enable_managed_webhooks=args.enable_managed_webhooks)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 

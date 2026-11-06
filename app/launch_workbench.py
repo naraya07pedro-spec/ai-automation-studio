@@ -98,6 +98,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--enable-managed-webhooks", action="store_true",
+                        help="Owner-managed multiple n8n/webhook connections; private OS-protected credentials, no automated sends.")
     parser.add_argument("--enable-webhook", action="store_true",
                         help="Explicitly permit owner-confirmed n8n HTTPS webhook, requires AAS_WEBHOOK_URL environment.")
     parser.add_argument("--enable-history", action="store_true",
@@ -113,6 +115,8 @@ def main(argv=None):
         flags = feature_flags(args.mode, history=args.enable_history)
         if args.enable_webhook:
             flags += ("--enable-outbound-webhook",)
+        if args.enable_managed_webhooks:
+            flags += ("--enable-managed-webhooks",)
     except ValueError as exc:
         print("Launch blocked: " + str(exc))
         return 2
@@ -146,6 +150,8 @@ def main(argv=None):
         print("WARNING: local chat history is saved as plaintext.")
     if args.mode == "full":
         print("Public provider reads still require explicit actions/permissions in the UI.")
+    if args.enable_managed_webhooks:
+        print("Managed webhook connections: manual, owner-approved only; secrets OS-permission protected, NOT encrypted.")
 
     stop = threading.Event()
     if not args.no_browser:
