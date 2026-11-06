@@ -16,7 +16,8 @@ from local_agent_task_plans import LocalAgentPlanStore, PlanError, validate_step
 from local_operator_auth import LocalOperatorAuth
 from local_security_audit import LocalSecurityAudit, SecurityAuditError
 from local_tool_registry import (
-    ACTION_TOOL, BATCH_READ_TOOLS, registered_tools, require_owner_action,
+    ACTION_TOOL, MARKDOWN_ACTION_TOOL, BATCH_READ_TOOLS,
+    registered_tools, require_owner_action,
     ToolPermissionError)
 from local_tool_action_gate import (
     LocalCSVProfileActionGate, ToolActionError, AUDIT_ACTION)
@@ -53,7 +54,18 @@ class ActionGateTests(unittest.TestCase):
         return self.store.get(self.pid)
 
     def test_registry_is_fixed_and_does_not_allow_action_in_model_or_batch(self):
-        names = registered_tools(planning=True, csv=True, action=True)
+        names = registered_tools(
+            planning=True, csv=True, artifact=True, action=True)
+        self.assertEqual(10, len(names))
+        markdown = next(t for t in names
+                        if t["name"] == MARKDOWN_ACTION_TOOL)
+        self.assertEqual("LOCAL_CREATE_ONLY", markdown["effect"])
+        self.assertTrue(markdown["enabled"])
+        self.assertFalse(markdown["model_plannable"])
+        self.assertFalse(markdown["batch_allowed"])
+        self.assertTrue(markdown["owner_confirmation_required"])
+        self.assertEqual(MARKDOWN_ACTION_TOOL,
+                         require_owner_action(MARKDOWN_ACTION_TOOL, enabled=True))
         match = [t for t in names if t["name"] == ACTION_TOOL]
         self.assertEqual(1, len(match))
         self.assertEqual("LOCAL_CREATE_ONLY", match[0]["effect"])
@@ -61,11 +73,17 @@ class ActionGateTests(unittest.TestCase):
         self.assertFalse(match[0]["model_plannable"])
         self.assertFalse(match[0]["batch_allowed"])
         self.assertNotIn(ACTION_TOOL, BATCH_READ_TOOLS)
+        self.assertNotIn(MARKDOWN_ACTION_TOOL, BATCH_READ_TOOLS)
         self.assertEqual(8, len(BATCH_READ_TOOLS))
         disabled = [t for t in registered_tools(planning=True, csv=True,
                                                 action=False)
                     if t["name"] == ACTION_TOOL][0]
         self.assertFalse(disabled["enabled"])
+        with self.assertRaisesRegex(ToolActionError,
+                                    "local_tool_permission_denied"):
+            self.gate.preview(MARKDOWN_ACTION_TOOL, self.pid)
+        with self.assertRaisesRegex(PlanError, "tool_not_allowed"):
+            validate_steps([{"tool": MARKDOWN_ACTION_TOOL, "args": {}}])
         with self.assertRaisesRegex(PlanError, "tool_not_allowed"):
             validate_steps([{"tool": ACTION_TOOL, "args": {}}])
         with self.assertRaisesRegex(ToolPermissionError,
