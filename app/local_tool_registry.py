@@ -15,12 +15,16 @@ _TOOL_ROWS = (
     ("local_document_question", "SELECTED_SNAPSHOT_READ", "document", True, "Question against selected document"),
     ("local_multi_document_question", "SELECTED_SNAPSHOT_READ", "documents", True, "Question against selected document set"),
     ("local_csv_profile", "SELECTED_SNAPSHOT_READ", "csv", True, "Deterministic profile of selected CSV"),
+    ("local_markdown_report_export", "LOCAL_CREATE_ONLY", "artifact", False,
+     "Separately confirmed existing Markdown report export from completed plan"),
     ("local_csv_profile_json_export", "LOCAL_CREATE_ONLY", "action", False,
      "Separately confirmed, create-only JSON aggregate export from completed plan"),
 )
 _TOOL_MAP = MappingProxyType({r[0]: r for r in _TOOL_ROWS})
 BATCH_READ_TOOLS = frozenset(r[0] for r in _TOOL_ROWS if r[3])
 ACTION_TOOL = "local_csv_profile_json_export"
+MARKDOWN_ACTION_TOOL = "local_markdown_report_export"
+OWNER_ACTION_TOOLS = frozenset((ACTION_TOOL, MARKDOWN_ACTION_TOOL))
 
 
 class ToolPermissionError(ValueError):
@@ -29,15 +33,15 @@ class ToolPermissionError(ValueError):
 
 def require_owner_action(name, *, enabled):
     """No model/tool-plan path can authorize a local write."""
-    if (type(name) is not str or name != ACTION_TOOL
-            or not enabled or ACTION_TOOL in BATCH_READ_TOOLS
-            or _TOOL_MAP[ACTION_TOOL][1] != "LOCAL_CREATE_ONLY"):
+    if (type(name) is not str or name not in OWNER_ACTION_TOOLS
+            or not enabled or name in BATCH_READ_TOOLS
+            or _TOOL_MAP[name][1] != "LOCAL_CREATE_ONLY"):
         raise ToolPermissionError("local_tool_permission_denied")
     return ACTION_TOOL
 
 
 def registered_tools(*, planning, github=False, document=False, documents=False,
-                     csv=False, action=False):
+                     csv=False, artifact=False, action=False):
     """One stable capability map with explicit effects and availability."""
     conditions = {
         "always": bool(planning),
@@ -45,14 +49,15 @@ def registered_tools(*, planning, github=False, document=False, documents=False,
         "document": bool(planning and document),
         "documents": bool(planning and documents),
         "csv": bool(planning and csv),
-        "action": bool(planning and csv and action),
+        "artifact": bool(planning and artifact),
+        "action": bool(planning and csv and artifact and action),
     }
     return [{
         "name": name,
         "effect": effect,
         "enabled": conditions[flag],
         "batch_allowed": batch,
-        "owner_confirmation_required": name == ACTION_TOOL,
-        "model_plannable": name != ACTION_TOOL,
+        "owner_confirmation_required": name in OWNER_ACTION_TOOLS,
+        "model_plannable": name not in OWNER_ACTION_TOOLS,
         "scope": description,
     } for name, effect, flag, batch, description in _TOOL_ROWS]
