@@ -19,7 +19,7 @@ import threading
 from local_recurring_scheduler import SCHEDULE_ID, _aware, _iso
 
 PREVIEW_SECONDS = 300
-MAX_AUTOPILOTS = 12
+MAX_AUTOPILOTS = 24
 MAX_SENDS_PER_GRANT = 30
 MAX_VALID_DAYS = 90
 MAX_DISPATCH_PER_TICK = 3
