@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 from local_workflow_core import LocalWorkflowCore
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError
 from local_connector_manager import LocalConnectorManager, ManagedConnectorError
+from local_connector_vault import VaultError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
@@ -1883,7 +1884,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_hn_job_discovery=False,
                        enable_greenhouse_evidence=False,
                        enable_outbound_webhook=False,
-                       enable_managed_webhooks=False):
+                       enable_managed_webhooks=False,
+                       enable_encrypted_managed_webhooks=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1894,6 +1896,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_managed_webhooks and enable_encrypted_managed_webhooks:
+        raise ValueError("select_only_one_managed_connector_storage_mode")
     if enable_agent_memory and not enable_local_agent:
         raise ValueError("agent_memory_requires_local_agent")
     if enable_local_documents and not enable_local_agent:
@@ -1947,7 +1951,15 @@ def start_local_server(port=8765, enable_local_agent=False,
     autopilot = None
     managed = None
     try:
-        if enable_managed_webhooks:
+        if enable_encrypted_managed_webhooks:
+            # Explicitly separate file from plaintext v1. Never auto-import
+            # plaintext or silently downgrade if the crypto/key is absent.
+            master_key = os.environ.get("AAS_VAULT_MASTER_KEY","")
+            if not master_key:
+                raise VaultError("AAS_VAULT_MASTER_KEY_required")
+            managed = LocalConnectorManager(
+                core, home / "managed-webhooks-vault.json", vault_key=master_key)
+        elif enable_managed_webhooks:
             managed = LocalConnectorManager(core, home / "managed-webhooks.json")
         if enable_outbound_webhook:
             destination = os.environ.get("AAS_WEBHOOK_URL", "")
@@ -2088,6 +2100,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
+                        help="Use an isolated AES-256-GCM encrypted connector registry with an external AAS_VAULT_MASTER_KEY, requires cryptography dependency. Never auto-import plaintext v1.")
     parser.add_argument("--enable-managed-webhooks", action="store_true",
                         help="Enable owner-managed multi-webhook registry, manually confirmed sends only; secrets stored in OS-private files, NOT encrypted.")
     parser.add_argument("--enable-outbound-webhook", action="store_true",
@@ -2095,6 +2109,8 @@ def main(argv=None):
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
+    if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
+        parser.error("choose encrypted or legacy plaintext managed-webhooks, not both")
     if args.enable_agent_memory and not args.enable_local_agent:
         parser.error("--enable-agent-memory requires --enable-local-agent")
     if args.enable_local_documents and not args.enable_local_agent:
@@ -2197,8 +2213,9 @@ def main(argv=None):
                            enable_hn_job_discovery=args.enable_hn_job_discovery,
                            enable_greenhouse_evidence=args.enable_greenhouse_evidence,
                            enable_outbound_webhook=args.enable_outbound_webhook,
-                           enable_managed_webhooks=args.enable_managed_webhooks)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError) as exc:
+                           enable_managed_webhooks=args.enable_managed_webhooks,
+                           enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
