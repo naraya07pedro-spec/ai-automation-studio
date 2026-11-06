@@ -308,8 +308,14 @@ class LocalOutboundWebhook:
                     raise OutboundError("webhook_preview_expired_or_changed", 409)
                 self.db.execute("""UPDATE webhook_deliveries
                     SET status='IN_FLIGHT',updated_utc=?
-                    WHERE workflow_id=? AND event_id=? AND status='PREVIEWED'""",
-                    (_iso(self.clock()), run["workflow_id"], run["event_id"]))
+                    WHERE workflow_id=? AND event_id=? AND status='PREVIEWED'
+                    AND token_sha256=? AND payload_sha256=? AND target_sha256=?""",
+                    (_iso(self.clock()), run["workflow_id"], run["event_id"],
+                     token_hash, digest, _sha(self.url.encode("utf-8"))))
+                # Cross-process compare-and-swap: another instance cannot
+                # also claim this write even if it observed the earlier preview.
+                if self.db.execute("SELECT changes()").fetchone()[0] != 1:
+                    raise OutboundError("webhook_delivery_already_claimed", 409)
             # Durable IN_FLIGHT claim precedes all external network activity.
             # Crash or timeout may have sent the POST: NEVER blind retry.
             try:
