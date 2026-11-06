@@ -1,0 +1,49 @@
+name: Real on-host local Ollama schedule acceptance contract
+
+on:
+  pull_request:
+    paths:
+      - 'tools/verify_live_ai_schedule.py'
+      - 'tests/test_live_ai_schedule_acceptance.py'
+      - 'docs/LIVE_LOCAL_AI_SCHEDULE_ACCEPTANCE_V1.md'
+      - '.github/workflows/live-local-ai-acceptance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/verify_live_ai_schedule.py'
+      - 'tests/test_live_ai_schedule_acceptance.py'
+      - 'docs/LIVE_LOCAL_AI_SCHEDULE_ACCEPTANCE_V1.md'
+      - '.github/workflows/live-local-ai-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-local-acceptance-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prove synthetic fixtures never become fake live-success evidence
+        run: python -m unittest discover -s tests -p 'test_live_ai_schedule_acceptance.py' -v
+      - name: Protect actual recurring AI state and model readiness semantics
+        run: |
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_local_ollama_readiness.py' -v
+      - name: Compile actual live-only CLI
+        run: python -m py_compile tools/verify_live_ai_schedule.py
+      - name: Verify CLI help and absence of mock execution switch
+        run: |
+          python tools/verify_live_ai_schedule.py --help
+          if python tools/verify_live_ai_schedule.py --fake-model; then
+            echo "A fake success option must never exist"
+            exit 1
+          fi
+      - name: Explicit evidence disclaimer
+        run: echo "CI contains injected local runner fixtures. REAL_OLLAMA acceptance MUST run on owner's Windows/Linux host and is not measured here."
