@@ -40,6 +40,10 @@ class LocalCSVProfileActionGate:
         self._tickets = {}
 
     def _require(self, action):
+        # This executor is bound to one exact side effect. The registry may
+        # describe other owner actions but never alias their permissions here.
+        if action != ACTION_TOOL:
+            raise ToolActionError("local_tool_permission_denied")
         try:
             require_owner_action(action, enabled=self.enabled)
         except ToolPermissionError:
