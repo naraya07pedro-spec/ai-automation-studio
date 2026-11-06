@@ -37,7 +37,8 @@ def _path(value):
 
 def render_unit(*, username, checkout, home, python, mode,
                 encrypted_webhooks=False, gmail_metadata=False,
-                outbound_webhook=False, signed_webhook=False):
+                outbound_webhook=False, signed_webhook=False,
+                managed_autopilot=False):
     """Render a fixed-name loopback service with no user-controlled directives."""
     if not _ALLOWED_USER.fullmatch(username) or username == "root":
         raise PrivateVPSDeploymentError("dedicated_nonroot_user_required")
@@ -47,10 +48,14 @@ def render_unit(*, username, checkout, home, python, mode,
         raise PrivateVPSDeploymentError("plaintext_history_not_enabled_in_vps")
     if signed_webhook and not outbound_webhook:
         raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
+    if managed_autopilot and not encrypted_webhooks:
+        raise PrivateVPSDeploymentError("managed_autopilot_requires_encrypted_webhooks")
     extra = ()
     credentials = ""
     if encrypted_webhooks:
         extra += ("--enable-encrypted-managed-webhooks",)
+    if managed_autopilot:
+        extra += ("--enable-managed-autopilot",)
     if gmail_metadata:
         extra += ("--enable-google-gmail-metadata",)
     if outbound_webhook:
@@ -201,6 +206,8 @@ def main(argv=None):
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--enable-managed-autopilot", action="store_true",
+                        help="Allow bounded owner-armed scheduling for encrypted managed webhook targets.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
                         help="Opt in to encrypted managed n8n webhook connections.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -219,7 +226,8 @@ def main(argv=None):
                            encrypted_webhooks=args.enable_encrypted_managed_webhooks,
                            gmail_metadata=args.enable_google_gmail_metadata,
                            outbound_webhook=args.enable_webhook,
-                           signed_webhook=args.enable_webhook_signing)
+                           signed_webhook=args.enable_webhook_signing,
+                           managed_autopilot=args.enable_managed_autopilot)
         if args.install:
             validate_secret_sources(
                 encrypted_webhooks=args.enable_encrypted_managed_webhooks,
