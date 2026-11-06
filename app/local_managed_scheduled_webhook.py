@@ -80,7 +80,11 @@ class ManagedScheduledWebhookAutopilot:
         self.manager = manager
         self.audit = audit
         self.root = Path(directory).expanduser()
+        if self.root.is_symlink() or (self.root.exists() and not self.root.is_dir()):
+            raise AutopilotError("managed_autopilot_unsafe_storage_path", 503)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.root.is_symlink():
+            raise AutopilotError("managed_autopilot_unsafe_storage_path", 503)
         self.clock = clock
         self.lock = threading.RLock()
         self._policies = {}
@@ -169,8 +173,14 @@ class ManagedScheduledWebhookAutopilot:
 
     def dispatch_due(self):
         count = 0
+        # Fail closed and keep the recurring worker alive if the manager registry
+        # becomes unavailable. A broken connector must never stop local rules.
+        try:
+            connections = self.manager.list()["connectors"]
+        except (ManagedConnectorError, OSError, sqlite3.Error, ValueError):
+            return 0
         # Only pre-existing policy files are scanned, never arbitrary paths.
-        for connection in self.manager.list()["connectors"]:
+        for connection in connections:
             cid = connection["connector_id"]
             if not self._path(cid).is_file():
                 continue
