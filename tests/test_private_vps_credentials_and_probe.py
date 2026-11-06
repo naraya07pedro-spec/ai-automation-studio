@@ -80,7 +80,9 @@ class RuntimeSecretTests(unittest.TestCase):
                 file.chmod(0o400)
                 with self.assertRaisesRegex(ServiceCredentialError,"invalid_text"):
                     read_runtime_secret("AAS_WEBHOOK_URL")
+                file.chmod(0o600)  # Test fixture restores write access before mutation.
                 file.write_bytes(b"x"*8193)
+                file.chmod(0o400)
                 with self.assertRaisesRegex(ServiceCredentialError,"unsafe_permissions"):
                     read_runtime_secret("AAS_WEBHOOK_URL")
 
