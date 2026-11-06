@@ -61,7 +61,7 @@ class _ScopedScheduledWebhook(ScheduledWebhookAutopilot):
 
     def __init__(self, connector_id, *args, **kwargs):
         self.connector_id = connector_id
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, dispatch_action="MANAGED_AUTOPILOT_DISPATCH", **kwargs)
 
     def _payload(self, schedule_id, receipt, workflow_id):
         payload = super()._payload(schedule_id, receipt, workflow_id)
