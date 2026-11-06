@@ -663,6 +663,68 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"output": "60"')
 
+    def test_owner_two_phase_csv_profile_json_action_never_model_plannable(self):
+        """Inspect effect registry; preview only, then one-use file create."""
+        self.page.locator("#local-agent-model").fill("fixture:model")
+        expect(self.page.locator("#agent-plan-actions-status")).to_contain_text(
+            "Local create-only CSV JSON action enabled")
+        self.page.locator("#agent-plan-goal").fill(
+            "CSV handoff: profile the synthetic selected revenue data")
+        self.page.locator("#agent-plan-csv-file").set_input_files({
+            "name": "synthetic-ledger.csv", "mimeType": "text/csv",
+            "buffer": (b"revenue,stage\n10,SYNTHETIC_PERSON_1\n"
+                       b"20,SYNTHETIC_PERSON_2\n,SYNTHETIC_PERSON_3\n")
+        })
+        self.page.locator("#agent-plan-csv-consent").check()
+        self.page.locator("#agent-plan-propose").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"column_sum"')
+        self.page.locator("#agent-plan-approve").click()
+        expect(self.page.locator("#agent-plan-action-preview")).to_be_disabled()
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "NEXT_READY"')
+        self.page.locator("#agent-plan-next").click()
+        expect(self.page.locator("#agent-plan-details")).to_contain_text(
+            '"status": "COMPLETED"')
+        expect(self.page.locator("#agent-plan-action-preview")).to_be_enabled()
+        expect(self.page.locator("#agent-plan-action-commit")).to_be_disabled()
+        with self.page.expect_response(
+                lambda res: res.url.endswith("/api/local-agent-action-preview")) as preview_response:
+            self.page.locator("#agent-plan-action-preview").click()
+        preview=preview_response.value.json()
+        self.assertEqual(200, preview_response.value.status)
+        self.assertEqual(0, preview["side_effects"]["external_write_count"])
+        self.assertFalse(preview["side_effects"]["existing_file_overwrite_allowed"])
+        self.assertNotIn("SYNTHETIC_PERSON_", json.dumps(preview))
+        expect(self.page.locator("#agent-plan-action-output")).to_contain_text(
+            "NO FILE WRITTEN")
+        expect(self.page.locator("#agent-plan-action-commit")).to_be_enabled()
+        # Denying the second confirmation is a genuinely no-write interaction.
+        self.page.once("dialog", lambda dialog: dialog.dismiss())
+        self.page.locator("#agent-plan-action-commit").click()
+        expect(self.page.locator("#agent-plan-action-output")).to_contain_text(
+            "NO FILE WRITTEN")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        with self.page.expect_response(
+                lambda res: res.url.endswith("/api/local-agent-action-commit")) as saved:
+            self.page.locator("#agent-plan-action-commit").click()
+        self.assertEqual(200, saved.value.status)
+        self.assertEqual("CREATED", saved.value.json()["status"])
+        self.assertEqual(preview["preview_sha256"], saved.value.json()["sha256"])
+        expect(self.page.locator("#agent-plan-action-output")).to_contain_text(
+            "CREATED")
+        expect(self.page.locator("#agent-plan-action-commit")).to_be_disabled()
+        self.page.locator("#agent-plan-action-preview").click()
+        expect(self.page.locator("#agent-plan-action-commit")).to_be_enabled()
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        with self.page.expect_response(
+                lambda res: res.url.endswith("/api/local-agent-action-commit")) as repeat:
+            self.page.locator("#agent-plan-action-commit").click()
+        self.assertEqual("EXISTS_IDENTICAL", repeat.value.json()["status"])
+        expect(self.page.locator("#agent-plan-action-output")).to_contain_text(
+            "EXISTS_IDENTICAL")
+
     def test_cross_step_numeric_handoff_requires_click_and_reloads_lineage(self):
         self.page.locator("#local-agent-model").fill("fixture:model")
         self.page.locator("#agent-plan-goal").fill(
