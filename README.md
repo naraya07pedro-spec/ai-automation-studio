@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Run the actual local app now (Windows)
+
+**Double-click `START_AI_STUDIO.cmd`** from a complete checkout with Python 3.11+. On first launch, create a private local owner password; the app opens at **http://127.0.0.1:8765**. Existing workflows and optional permissioned local-agent tools can then be used in the browser. No cloud account or Administrator permission is required to **start the local app**. For deterministic workflows without Ollama: `START_AI_STUDIO.cmd --mode offline`. An installed, independently running Ollama model is required for AI inference and has not yet been tested on the owner's PC. **This is not 24/7 public hosting** and does not yet send emails or write to live CRMs. See [Launch instructions, scope and deployment gate](docs/LAUNCH_NOW_V1.md).
+
 AI Automation Studio is a **local-first, open-source AI agent and automation workbench**, not a hosted SaaS. Its current capabilities include an opt-in **real local Ollama model inference and bounded read-only tool loop**, limited persistent conversations, **explicitly approved durable read-only task plans**, an optional permissioned public GitHub issue reader, a SQLite-backed deterministic workflow core, manual CSV ingestion, one permissioned public GitHub Issues read-only adapter, and five explicitly synthetic mock workflows. It is **not yet** a general autonomous agent, trusted production integration platform or publicly exposed server.
 
 
