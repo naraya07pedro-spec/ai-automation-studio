@@ -38,6 +38,16 @@ class RemoteJobEligibilityEvidenceTests(unittest.TestCase):
                          out["foreign_work_authorization_signal"])
         self.assertTrue(out["evidence"]["foreign_work_authorization"])
 
+    def test_explicit_us_or_indonesia_alternative_is_not_an_exclusion(self):
+        out = check("Applicants must be based in the United States or Indonesia.")
+        self.assertEqual("MANUAL_REVIEW_REQUIRED", out["indonesia_candidate_verdict"])
+        self.assertEqual([], out["evidence"]["location_restrictions"])
+
+    def test_explicit_remote_us_only_hyphen_is_a_location_conflict(self):
+        out = check("Remote US-only. We do not recruit from other locations.")
+        self.assertEqual("POSTING_LOCATION_CONFLICT_FOR_INDONESIA",
+                         out["indonesia_candidate_verdict"])
+
     def test_indonesia_mentioned_is_not_confirmed_eligible(self):
         out = check("We hire candidates based in Indonesia. Remote work is available.")
         self.assertEqual("INDONESIA_MENTIONED_IN_LOCATION_REQUIREMENT",
