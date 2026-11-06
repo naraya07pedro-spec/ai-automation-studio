@@ -41,12 +41,19 @@ def _digest(raw):
 
 class ScheduledWebhookAutopilot:
     def __init__(self, scheduler, outbound, audit=None, database=":memory:",
-                 clock=lambda: datetime.now(timezone.utc)):
+                 clock=lambda: datetime.now(timezone.utc),
+                 dispatch_action="WEBHOOK_AUTOPILOT_DISPATCH",
+                 max_dispatch_per_tick=MAX_DISPATCH_PER_TICK):
         if outbound is None or not outbound.host:
             raise AutopilotError("webhook_not_configured", 403)
         self.scheduler = scheduler
         self.outbound = outbound
         self.audit = audit
+        self.dispatch_action = dispatch_action
+        if (type(max_dispatch_per_tick) is not int or
+                not 1 <= max_dispatch_per_tick <= MAX_DISPATCH_PER_TICK):
+            raise AutopilotError("invalid_dispatch_per_tick_limit")
+        self.max_dispatch_per_tick = max_dispatch_per_tick
         self.clock = clock
         self.lock = threading.RLock()
         self.dispatch_lock = threading.Lock()
@@ -408,7 +415,7 @@ class ScheduledWebhookAutopilot:
         slot = receipt["scheduled_for_utc"]
         try:
             if self.audit is not None:
-                self.audit.record("WEBHOOK_AUTOPILOT_DISPATCH","ATTEMPT")
+                self.audit.record(self.dispatch_action,"ATTEMPT")
             http_status = self.outbound.sender(
                 self.outbound.url,payload,payload["delivery_id"],self.outbound.secret)
             accepted = type(http_status) is int and 200 <= http_status < 300
@@ -417,7 +424,7 @@ class ScheduledWebhookAutopilot:
         self._complete(sid,slot,http_status,accepted)
         try:
             if self.audit is not None:
-                self.audit.record("WEBHOOK_AUTOPILOT_DISPATCH",
+                self.audit.record(self.dispatch_action,
                                   "SUCCESS" if accepted else "UNCERTAIN")
         except Exception:
             # The external outcome remains in the immutable ledger; a broken
@@ -437,7 +444,7 @@ class ScheduledWebhookAutopilot:
                     ORDER BY created_utc""").fetchall()
             count = 0
             for row in rows:
-                if count >= MAX_DISPATCH_PER_TICK:
+                if count >= self.max_dispatch_per_tick:
                     break
                 try:
                     count += self._run_policy(self._row(row))

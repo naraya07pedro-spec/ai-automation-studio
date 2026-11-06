@@ -100,6 +100,8 @@ def main(argv=None):
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
                         help="Enable one owner-clicked Google OAuth Gmail metadata-only read; requires encrypted vault grant.")
+    parser.add_argument("--enable-managed-autopilot", action="store_true",
+                        help="Owner-armed automatic managed webhook delivery; requires encrypted managed webhooks.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
                         help="Use AES-256-GCM encrypted connector vault, requires pip install -r requirements-vault.txt and AAS_VAULT_MASTER_KEY.")
     parser.add_argument("--enable-managed-webhooks", action="store_true",
@@ -127,6 +129,10 @@ def main(argv=None):
             flags += ("--enable-managed-webhooks",)
         if args.enable_encrypted_managed_webhooks:
             flags += ("--enable-encrypted-managed-webhooks",)
+        if args.enable_managed_autopilot:
+            if not args.enable_encrypted_managed_webhooks:
+                raise ValueError("managed-autopilot requires encrypted managed webhooks")
+            flags += ("--enable-managed-autopilot",)
     except ValueError as exc:
         print("Launch blocked: " + str(exc))
         return 2
@@ -164,6 +170,8 @@ def main(argv=None):
         print("Gmail metadata-only API is opt-in; each read requires owner password. No automated inbox polling or sends.")
     if args.enable_managed_webhooks:
         print("LEGACY managed webhooks: private OS files but NOT ENCRYPTED; prefer the encrypted mode for new connections.")
+    if args.enable_managed_autopilot:
+        print("Managed scheduled webhook delivery: explicit per-connector owner grants, off until armed.")
     if args.enable_encrypted_managed_webhooks:
         print("Encrypted managed connections: AES-256-GCM; master key must be backed up separately from ciphertext.")
         print("Encrypted mode uses a SEPARATE registry and does not import existing plaintext credentials.")

@@ -23,6 +23,7 @@ from local_connector_vault import VaultError
 from local_service_credentials import read_runtime_secret, ServiceCredentialError
 from local_google_gmail import GoogleGmailMetadata, GmailConnectorError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
+from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
@@ -101,7 +102,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    hn_job_discovery=None, greenhouse_evidence=None,
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
-                   google_gmail=None):
+                   google_gmail=None, managed_autopilot=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -580,6 +581,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (sqlite3.Error,OSError):
                     self._send(503,{"error":"managed_connector_storage_unavailable"})
                 return
+            if route.path == "/api/managed-autopilot-status" and not route.query:
+                if managed_autopilot is None:
+                    self._send(200, {"enabled":False,"policies":[],"attempts":[]})
+                else:
+                    try:
+                        self._send(200, managed_autopilot.list())
+                    except (sqlite3.Error,OSError,ManagedConnectorError,AutopilotError):
+                        self._send(503, {"error":"managed_autopilot_storage_unavailable"})
+                return
             if route.path == "/api/autopilot-status" and not route.query:
                 if scheduled_autopilot is None:
                     self._send(200, {"enabled": False, "policies": [], "attempts": [],
@@ -687,6 +697,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-schedule-resume",
                                  "/api/outbound-webhook-preview",
                                  "/api/outbound-webhook-commit",
+                                 "/api/managed-autopilot-preview",
+                                 "/api/managed-autopilot-arm",
+                                 "/api/managed-autopilot-stop",
                                  "/api/autopilot-preview",
                                  "/api/autopilot-arm",
                                  "/api/autopilot-stop",
@@ -1703,6 +1716,55 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path in ("/api/managed-autopilot-preview",
+                             "/api/managed-autopilot-arm",
+                             "/api/managed-autopilot-stop"):
+                if managed_autopilot is None:
+                    self._send(403,{"error":"managed_autopilot_disabled"})
+                    return
+                action="MANAGED_AUTOPILOT_POLICY"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if self.path.endswith("-preview"):
+                        result=managed_autopilot.preview(data)
+                        code=200
+                    elif self.path.endswith("-arm"):
+                        expected={"connector_id","schedule_id","max_sends",
+                                  "expires_days","preview_token","current_password"}
+                        if (type(data) is not dict or set(data)!=expected or
+                                type(data["current_password"]) is not str):
+                            raise AutopilotError("invalid_managed_autopilot_arm_fields")
+                        if operator_auth is None:
+                            raise AutopilotError("real_owner_required",403)
+                        verified=operator_auth.confirm_current_password(data["current_password"])
+                        if verified!=200:
+                            self._audit_event(action,"DENIED")
+                            self._send(verified,{"error":(
+                                "operator_restart_required" if verified==503 else
+                                "operator_login_locked" if verified==429 else
+                                "invalid_operator_credentials")})
+                            return
+                        result=managed_autopilot.arm(
+                            {k:v for k,v in data.items() if k!="current_password"})
+                        code=201
+                    else:
+                        result=managed_autopilot.stop(data)
+                        code=200
+                except (AutopilotError, ManagedConnectorError) as exc:
+                    self._audit_event(action,"DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"managed_autopilot_result_uncertain_check_status"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"managed_autopilot_audit_uncertain_check_status"})
+                else:
+                    self._send(code,result)
+                return
             if self.path in ("/api/autopilot-preview",
                              "/api/autopilot-arm",
                              "/api/autopilot-stop"):
@@ -1935,7 +1997,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_outbound_webhook=False,
                        enable_managed_webhooks=False,
                        enable_encrypted_managed_webhooks=False,
-                       enable_google_gmail_metadata=False):
+                       enable_google_gmail_metadata=False,
+                       enable_managed_autopilot=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1946,6 +2009,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
+        raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
         raise ValueError("select_only_one_managed_connector_storage_mode")
     if enable_agent_memory and not enable_local_agent:
@@ -1999,6 +2064,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     scheduler = None
     outbound = None
     autopilot = None
+    managed_autopilot = None
     managed = None
     gmail = None
     try:
@@ -2029,6 +2095,10 @@ def start_local_server(port=8765, enable_local_agent=False,
                 url=destination,
                 secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
+        if enable_managed_autopilot:
+            managed_autopilot = ManagedScheduledWebhookAutopilot(
+                scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
+            scheduler.managed_autopilot = managed_autopilot
         if outbound is not None:
             autopilot = ScheduledWebhookAutopilot(
                 scheduler,outbound,audit,home / "scheduled-webhook-autopilot.sqlite3")
@@ -2065,6 +2135,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            outbound_webhook=outbound,
                            scheduled_autopilot=autopilot,
                            managed_connectors=managed,
+                           managed_autopilot=managed_autopilot,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
@@ -2094,6 +2165,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             scheduler.close()
         if autopilot is not None:
             autopilot.close()
+        if managed_autopilot is not None:
+            managed_autopilot.close()
         if outbound is not None:
             outbound.close()
         if managed is not None:
@@ -2160,6 +2233,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-managed-autopilot", action="store_true",
+                        help="Explicitly enable bounded owner-approved schedules for encrypted managed HTTPS connectors; requires --enable-encrypted-managed-webhooks.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
                         help="Opt in to owner-password gated Gmail metadata reads from separately encrypted Google Desktop OAuth grant; requires AAS_VAULT_MASTER_KEY.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
@@ -2171,6 +2246,8 @@ def main(argv=None):
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
+    if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
+        parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
         parser.error("choose encrypted or legacy plaintext managed-webhooks, not both")
     if args.enable_agent_memory and not args.enable_local_agent:
@@ -2277,7 +2354,8 @@ def main(argv=None):
                            enable_outbound_webhook=args.enable_outbound_webhook,
                            enable_managed_webhooks=args.enable_managed_webhooks,
                            enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks,
-                           enable_google_gmail_metadata=args.enable_google_gmail_metadata)
+                           enable_google_gmail_metadata=args.enable_google_gmail_metadata,
+                           enable_managed_autopilot=args.enable_managed_autopilot)
     except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")

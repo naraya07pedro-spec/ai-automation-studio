@@ -251,7 +251,7 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 <section class="panel" id="managed-connectors-panel" aria-label="Manage multiple private webhook connectors" style="margin-top:20px">
  <div class="split"><h2>08 · Managed connections</h2><span class="pill" id="managed-badge">Checking permissions</span></div>
  <p class="sub">Register up to four independent n8n/custom HTTPS webhook destinations. Each connection has its own identity and durable single-send ledger. Register or revoke using your current owner password, without changing source code or restarting the app.</p>
- <div class="notice" id="managed-storage-notice" style="margin:18px 0">Storage status is reported by the server after sign-in. Legacy mode is not encrypted. Encrypted mode uses AES-256-GCM and an external master key; neither protects a compromised server account. No AI or scheduler can use these connections automatically.</div>
+ <div class="notice" id="managed-storage-notice" style="margin:18px 0">Storage status is reported by the server after sign-in. Legacy mode is not encrypted. Encrypted mode uses AES-256-GCM and an external master key; neither protects a compromised server account. No model can use them; scheduling requires an explicit encrypted-only owner grant in section 10.</div>
  <div class="grid">
   <div>
    <h2 style="font-size:17px">Register a new webhook</h2>
@@ -296,6 +296,37 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
  <p class="status" id="gmail-status" role="status" aria-live="polite">No Google account queried.</p>
  <div class="output" id="gmail-output">Gmail content stays private until you authorize one explicit read.</div>
+</section>
+
+<section class="panel" id="managed-auto-panel" style="margin-top:20px" aria-label="Automatic scheduled sends to one encrypted managed webhook connector">
+  <div class="split"><h2>10 · Managed Connector Autopilot</h2><span class="pill" id="managed-auto-badge">Checking</span></div>
+  <p class="sub">Authorize a specific recurring rule schedule to send its completed receipts to one selected, AES-256-GCM encrypted n8n/HTTPS connection. Each connection uses its own persistent no-retry ledger. The AI cannot arm it and revoked connections cannot send.</p>
+  <div class="grid">
+   <div>
+    <label for="managed-auto-connector">Encrypted connection</label><select id="managed-auto-connector"></select>
+    <label for="managed-auto-schedule">Active recurring schedule</label><select id="managed-auto-schedule"></select>
+    <label for="managed-auto-max">Hard POST attempt limit (1–30)</label>
+    <input id="managed-auto-max" type="number" min="1" max="30" step="1" value="3">
+    <label for="managed-auto-days">Permission expires after days (1–90)</label>
+    <input id="managed-auto-days" type="number" min="1" max="90" step="1" value="7">
+    <div class="btnrow"><button class="btn" id="managed-auto-preview-btn" type="button">Review connection-specific grant</button></div>
+    <div class="output" id="managed-auto-preview-output">No external request or authorization prepared.</div>
+    <label for="managed-auto-password">Current Studio owner password</label>
+    <input id="managed-auto-password" type="password" autocomplete="off" placeholder="Required to authorize">
+    <label style="display:flex;gap:10px;align-items:flex-start">
+     <input id="managed-auto-consent" type="checkbox" style="width:auto;margin-top:4px">
+     <span>Approve automatic HTTPS POSTs within these exact limits, without a prompt for each due run.</span>
+    </label>
+    <div class="btnrow"><button class="btn primary" type="button" id="managed-auto-arm-btn" disabled>Arm selected connection and schedule</button></div>
+    <p class="status" id="managed-auto-status" role="status" aria-live="polite">No automatic managed-connector grant created.</p>
+   </div>
+   <div>
+    <div class="split"><strong>Connection-scoped permission history</strong><button class="btn" type="button" id="managed-auto-refresh">Refresh</button></div>
+    <div id="managed-auto-policies" class="note">No managed autopilot policies loaded.</div>
+    <h2 style="font-size:17px;margin-top:22px">Durable delivery attempts</h2>
+    <div class="output" id="managed-auto-history">No scheduled remote attempts recorded.</div>
+   </div>
+  </div>
 </section>
 
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
@@ -346,12 +377,13 @@ function lock(message){
  autopilotEnabled=false;autopilotPreview=null;$("autopilot-pass").value="";$("autopilot-consent").checked=false;$("autopilot-grants").textContent="Session locked.";$("autopilot-receipts").textContent="Session locked.";autopilotControls();
  managedEnabled=false;managedPreview=null;managedItems=[];$("managed-url").value="";$("managed-secret").value="";$("managed-owner").value="";$("managed-send-pass").value="";$("managed-list").textContent="Session locked.";$("managed-history").textContent="Session locked.";$("managed-preview-output").textContent="Session locked.";managedControls();
  googleGmailClear();
+ managedAutoClear();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh()]);
- stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();}},10000);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots()]);
+ stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();loadManagedAutopilots();}},10000);
 }
 async function loadCapabilities(){
  try{
@@ -527,6 +559,7 @@ async function refreshSchedules(){
   recurringSchedules=Array.isArray(data.schedules)?data.schedules:[];
   $("schedule-worker").textContent=data.worker_running?"Worker running · SQLite":"Worker not running";
   autopilotScheduleChoices();
+  managedAutoChoices();
   const wrap=$("schedule-list");wrap.replaceChildren();
   if(!recurringSchedules.length){wrap.textContent="No scheduled tasks yet.";return;}
   for(const row of recurringSchedules){
@@ -894,6 +927,164 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
+let managedAutoEnabled=false,managedAutoPreview=null,managedAutoBusy=false;
+function managedAutoControls(){
+ const active=!!csrf&&!busy&&!managedAutoBusy&&managedAutoEnabled;
+ const cid=$("managed-auto-connector").value, sid=$("managed-auto-schedule").value;
+ $("managed-auto-preview-btn").disabled=!active||!cid||!sid;
+ $("managed-auto-arm-btn").disabled=!active||!managedAutoPreview||
+  !$("managed-auto-consent").checked||!$("managed-auto-password").value||
+  managedAutoPreview.connector_id!==cid||managedAutoPreview.schedule_id!==sid||
+  managedAutoPreview.max_external_posts!==Number($("managed-auto-max").value)||
+  managedAutoPreview.valid_for_days!==Number($("managed-auto-days").value);
+ $("managed-auto-refresh").disabled=!csrf||busy||managedAutoBusy;
+}
+function managedAutoReset(){
+ managedAutoPreview=null;
+ $("managed-auto-password").value="";
+ $("managed-auto-consent").checked=false;
+ $("managed-auto-preview-output").textContent="No valid authorization preview. Review again.";
+ managedAutoControls();
+}
+function managedAutoClear(){
+ managedAutoEnabled=false;managedAutoPreview=null;
+ $("managed-auto-password").value="";$("managed-auto-consent").checked=false;
+ $("managed-auto-badge").textContent="Locked";
+ $("managed-auto-policies").textContent="Session locked.";
+ $("managed-auto-history").textContent="Session locked.";
+ $("managed-auto-preview-output").textContent="Session locked.";
+ managedAutoControls();
+}
+function managedAutoChoices(){
+ const cid=$("managed-auto-connector"),old=cid.value;
+ cid.replaceChildren();
+ for(const row of managedItems.filter(x=>x.status==="ACTIVE"&&x.supports_scheduled_send)){
+  const o=document.createElement("option");o.value=row.connector_id;
+  o.textContent=row.label+" · "+row.destination_hostname;
+  cid.append(o);
+ }
+ if(managedItems.some(x=>x.connector_id===old&&x.status==="ACTIVE"&&x.supports_scheduled_send))cid.value=old;
+ const sid=$("managed-auto-schedule"),previous=sid.value;
+ sid.replaceChildren();
+ for(const item of recurringSchedules.filter(x=>x.status==="ACTIVE")){
+  const o=document.createElement("option");o.value=item.schedule_id;
+  o.textContent=item.workflow_id+" · "+item.config.cadence+" · "+item.schedule_id.slice(0,8);
+  sid.append(o);
+ }
+ if(recurringSchedules.some(x=>x.status==="ACTIVE"&&x.schedule_id===previous))sid.value=previous;
+ if(managedAutoPreview&&(managedAutoPreview.connector_id!==cid.value||
+    managedAutoPreview.schedule_id!==sid.value))managedAutoReset();
+ managedAutoControls();
+}
+async function loadManagedAutopilots(){
+ if(!csrf||managedAutoBusy)return;
+ try{
+  const data=await request("/api/managed-autopilot-status");
+  if(!csrf)return;
+  managedAutoEnabled=!!data.enabled;
+  $("managed-auto-badge").textContent=managedAutoEnabled?
+   "Available · explicit owner grant required":"Disabled · encrypted manager + autopilot flags required";
+  const policies=Array.isArray(data.policies)?data.policies:[];
+  const wrap=$("managed-auto-policies");wrap.replaceChildren();
+  if(!policies.length)wrap.textContent="No connector-specific schedule permissions.";
+  for(const p of policies){
+   const el=document.createElement("div");el.className="step";
+   const head=document.createElement("strong");head.textContent=p.connector_id+" · "+p.status;
+   const detail=document.createElement("span");
+   detail.textContent="Schedule "+p.schedule_id+"\nWorkflow "+p.workflow_id+
+    "\nAttempts "+p.attempted_posts+" / "+p.max_external_posts+
+    "\nExpires "+p.expires_utc+
+    "\nDestination valid "+(p.destination_matches_configuration?"YES":"NO");
+   el.append(head,detail);
+   if(p.status==="ACTIVE"){
+    const stop=document.createElement("button");stop.type="button";stop.className="btn warn";
+    stop.textContent="STOP this connection schedule";
+    stop.addEventListener("click",async()=>{
+     if(!window.confirm("Stop new automatic sends for "+p.connector_id+" / "+p.schedule_id+"?"))return;
+     managedAutoBusy=true;managedAutoControls();
+     try{
+      await request("/api/managed-autopilot-stop",{
+       connector_id:p.connector_id,schedule_id:p.schedule_id,
+       expected_epoch:p.control_epoch});
+      status("managed-auto-status","Stopped future claims for "+p.connector_id);
+     }catch(e){status("managed-auto-status","Stop not confirmed: "+e.message,true);}
+     finally{managedAutoBusy=false;managedAutoControls();if(csrf)loadManagedAutopilots();}
+    });
+    el.append(stop);
+   }
+   wrap.append(el);
+  }
+  const attempts=Array.isArray(data.attempts)?data.attempts:[];
+  $("managed-auto-history").textContent=attempts.length?attempts.map(a=>
+   a.claimed_utc+" · "+a.connector_id+" · "+a.status+
+   "\nSchedule "+a.schedule_id+" · "+a.scheduled_for_utc+
+   "\nHTTP "+(a.http_status??"unknown")+" · delivery "+a.delivery_id
+  ).join("\n\n"):"No automatic managed webhook attempts claimed.";
+  managedAutoControls();
+ }catch(e){if(csrf)status("managed-auto-status","Cannot load managed autopilot: "+e.message,true);}
+}
+for(const id of ["managed-auto-connector","managed-auto-schedule","managed-auto-max","managed-auto-days"]){
+ $(id).addEventListener("change",managedAutoReset);
+ $(id).addEventListener("input",managedAutoReset);
+}
+$("managed-auto-password").addEventListener("input",managedAutoControls);
+$("managed-auto-consent").addEventListener("change",managedAutoControls);
+$("managed-auto-refresh").addEventListener("click",loadManagedAutopilots);
+$("managed-auto-preview-btn").addEventListener("click",async()=>{
+ if(!csrf||managedAutoBusy||!managedAutoEnabled)return;
+ const connector_id=$("managed-auto-connector").value;
+ const schedule_id=$("managed-auto-schedule").value;
+ const max_sends=Number($("managed-auto-max").value);
+ const expires_days=Number($("managed-auto-days").value);
+ managedAutoReset();managedAutoBusy=true;managedAutoControls();
+ try{
+  const p=await request("/api/managed-autopilot-preview",{
+   connector_id,schedule_id,max_sends,expires_days});
+  if(!csrf||p.status!=="PREVIEW_ONLY"||p.external_write_count!==0)
+   throw Error("invalid_managed_autopilot_preview");
+  if(connector_id!==$("managed-auto-connector").value||
+     schedule_id!==$("managed-auto-schedule").value||
+     max_sends!==Number($("managed-auto-max").value)||
+     expires_days!==Number($("managed-auto-days").value))return;
+  managedAutoPreview=p;
+  $("managed-auto-preview-output").textContent=
+   "ZERO EXTERNAL SENDS YET\nConnector: "+p.connector_id+
+   "\nHTTPS host: "+p.destination_hostname+
+   "\nSchedule: "+p.schedule_id+
+   "\nSource version: "+p.source_workflow_version+
+   "\nFirst eligible UTC: "+p.first_eligible_utc+
+   "\nMax POST attempts: "+p.max_external_posts+
+   "\nExpires in "+p.valid_for_days+" days"+
+   "\n\nExact recurring configuration:\n"+JSON.stringify(p.schedule_config,null,2);
+  status("managed-auto-status","Review exact connector and schedule, then consent and re-enter owner password.");
+ }catch(e){if(csrf)status("managed-auto-status","Preview failed: "+e.message,true);}
+ finally{managedAutoBusy=false;managedAutoControls();}
+});
+$("managed-auto-arm-btn").addEventListener("click",async()=>{
+ const p=managedAutoPreview;
+ if(!p||!csrf||managedAutoBusy||!managedAutoEnabled||
+    !$("managed-auto-consent").checked)return;
+ if(!window.confirm("ALLOW AUTOMATIC REAL HTTPS POSTS to "+p.destination_hostname+
+    " via connector "+p.connector_id+"?\nSchedule: "+p.schedule_id+
+    "\nLimit: "+p.max_external_posts+" attempts, "+p.valid_for_days+
+    " days. Unknown results never retry. No additional prompts per send."))return;
+ const current_password=$("managed-auto-password").value;
+ if(!current_password)return;
+ managedAutoPreview=null;$("managed-auto-password").value="";
+ $("managed-auto-consent").checked=false;
+ managedAutoBusy=true;managedAutoControls();
+ try{
+  const result=await request("/api/managed-autopilot-arm",{
+   connector_id:p.connector_id,schedule_id:p.schedule_id,
+   max_sends:p.max_external_posts,expires_days:p.valid_for_days,
+   preview_token:p.preview_token,current_password});
+  status("managed-auto-status","Owner-authorized limited autopilot ACTIVE: "+
+    result.connector_id+" / "+result.schedule_id);
+  $("managed-auto-preview-output").textContent=JSON.stringify(result,null,2);
+ }catch(e){if(csrf)status("managed-auto-status","Activation not confirmed: "+e.message,true);}
+ finally{managedAutoBusy=false;managedAutoControls();if(csrf)loadManagedAutopilots();}
+});
+
  let managedEnabled=false,managedItems=[],managedPreview=null,managedBusy=false;
 function managedResetPreview(){
  managedPreview=null;
@@ -928,9 +1119,10 @@ async function managedRefresh(){
   managedEnabled=!!data.enabled;
   const encrypted=data.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
   $("managed-storage-notice").textContent=encrypted?
-   "ENCRYPTED STORAGE: AES-256-GCM protects this registry at rest using a 32-byte master key supplied separately at startup. Keep that key backed up separately. This does not protect a compromised OS/process or backups of old plaintext registries. Neither AI models nor schedules receive this permission.":
+   "ENCRYPTED STORAGE: AES-256-GCM protects this registry at rest using a 32-byte master key supplied separately at startup. Keep that key backed up separately. This does not protect a compromised OS/process or backups of old plaintext registries. AI models receive no permission. Schedules only gain narrowly bounded permission after an explicit owner authorization in section 10.":
    "LEGACY PLAINTEXT STORAGE: the registry is protected only by OS file permissions, NOT encrypted. Do not use high-value real credentials without verifying device access controls. Start --enable-encrypted-managed-webhooks for a separate encrypted registry.";
   managedItems=Array.isArray(data.connectors)?data.connectors:[];
+  managedAutoChoices();
   $("managed-badge").textContent=managedEnabled?
    "Opt-in active · manual owner approval":"Disabled · --enable-managed-webhooks required";
   const selector=$("managed-choice"),previous=selector.value;selector.replaceChildren();
