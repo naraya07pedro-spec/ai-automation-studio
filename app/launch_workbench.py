@@ -98,6 +98,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
+                        help="Use AES-256-GCM encrypted connector vault, requires pip install -r requirements-vault.txt and AAS_VAULT_MASTER_KEY.")
     parser.add_argument("--enable-managed-webhooks", action="store_true",
                         help="Owner-managed multiple n8n/webhook connections; private OS-protected credentials, no automated sends.")
     parser.add_argument("--enable-webhook", action="store_true",
@@ -115,8 +117,12 @@ def main(argv=None):
         flags = feature_flags(args.mode, history=args.enable_history)
         if args.enable_webhook:
             flags += ("--enable-outbound-webhook",)
+        if args.enable_managed_webhooks and args.enable_encrypted_managed_webhooks:
+            raise ValueError("choose legacy plaintext or encrypted managed-webhooks, not both")
         if args.enable_managed_webhooks:
             flags += ("--enable-managed-webhooks",)
+        if args.enable_encrypted_managed_webhooks:
+            flags += ("--enable-encrypted-managed-webhooks",)
     except ValueError as exc:
         print("Launch blocked: " + str(exc))
         return 2
@@ -151,7 +157,10 @@ def main(argv=None):
     if args.mode == "full":
         print("Public provider reads still require explicit actions/permissions in the UI.")
     if args.enable_managed_webhooks:
-        print("Managed webhook connections: manual, owner-approved only; secrets OS-permission protected, NOT encrypted.")
+        print("LEGACY managed webhooks: private OS files but NOT ENCRYPTED; prefer the encrypted mode for new connections.")
+    if args.enable_encrypted_managed_webhooks:
+        print("Encrypted managed connections: AES-256-GCM; master key must be backed up separately from ciphertext.")
+        print("Encrypted mode uses a SEPARATE registry and does not import existing plaintext credentials.")
 
     stop = threading.Event()
     if not args.no_browser:

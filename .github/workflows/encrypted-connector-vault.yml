@@ -1,0 +1,39 @@
+name: Encrypted connector vault acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_connector_vault.py'
+      - 'app/local_connector_manager.py'
+      - 'app/local_server.py'
+      - 'tests/test_encrypted_connector_vault.py'
+      - 'requirements-vault.txt'
+      - '.github/workflows/encrypted-connector-vault.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_connector_vault.py'
+      - 'app/local_connector_manager.py'
+      - 'app/local_server.py'
+      - 'tests/test_encrypted_connector_vault.py'
+      - 'requirements-vault.txt'
+      - '.github/workflows/encrypted-connector-vault.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-aes-gcm-test:
+    name: AES-256-GCM vault crypto and API isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install reviewed encryption dependency
+        run: python -m pip install -r requirements-vault.txt
+      - name: Verify actual AES-GCM storage, tampering, key isolation and no-replay
+        run: python -m unittest discover -s tests -p 'test_encrypted_connector_vault.py' -v
