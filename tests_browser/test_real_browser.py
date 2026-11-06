@@ -399,6 +399,14 @@ class RealBrowserWorkflowTests(unittest.TestCase):
             '"status": "COMPLETED"')
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             "SYNTHETIC_HN_JOB_77712301")
+        # The browser fixture is process-shared across methods. Release this
+        # exact new grant, not just its UI selection; the next test must not
+        # inherit a privileged allowed item.
+        self.page.locator("#hn-story-password").fill(
+            "ci_only_fixture_password_1234")
+        self.page.locator("#hn-story-revoke").click()
+        expect(self.page.locator("#hn-story-allowed")).to_contain_text(
+            "No approved story IDs")
 
     def test_hn_owner_grant_read_and_revoke_blocks_existing_approval(self):
         """Real Chromium: per-item HN grant, planner, execution, revocation."""
@@ -427,13 +435,19 @@ class RealBrowserWorkflowTests(unittest.TestCase):
         self.page.locator("#agent-plan-approve").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "APPROVED"')
+        expected_epoch=json.loads(
+            self.page.locator("#agent-plan-details").inner_text()
+        )["hn_approval_epoch"]
+        self.assertIsInstance(expected_epoch,int)
+        self.assertGreater(expected_epoch,0)
         self.page.locator("#agent-plan-next").click()
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             '"status": "COMPLETED"')
         expect(self.page.locator("#agent-plan-details")).to_contain_text(
             "Fixture public HN discussion")
-        expect(self.page.locator("#agent-plan-details")).to_contain_text(
-            '"hn_approval_epoch": 1')
+        self.assertEqual(expected_epoch,json.loads(
+            self.page.locator("#agent-plan-details").inner_text()
+        )["hn_approval_epoch"])
         self.page.locator("#agent-plan-goal").fill(
             "Read owner-granted Hacker News story 8863 again")
         self.page.locator("#agent-plan-propose").click()
