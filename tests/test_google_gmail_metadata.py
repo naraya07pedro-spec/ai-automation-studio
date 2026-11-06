@@ -1,5 +1,8 @@
 """No real Google login/email traffic: deterministic OAuth, vault and Gmail tests."""
 import base64
+import http.cookiejar
+from http.server import ThreadingHTTPServer
+import threading
 import hashlib
 import importlib.util
 import json
@@ -8,6 +11,8 @@ import sys
 import tempfile
 import unittest
 from urllib.parse import parse_qs, urlsplit
+from urllib.error import HTTPError
+from urllib.request import Request, ProxyHandler, HTTPCookieProcessor, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
@@ -167,3 +172,81 @@ class NativeGmailConnectorTests(unittest.TestCase):
                     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"):
             with self.assertRaises(GmailConnectorError):
                 _official_json(url, bearer=ACCESS)
+
+
+@unittest.skipUnless(HAS_CRYPTO, "Dedicated Gmail crypto CI installs optional dependency")
+class NativeGmailHttpAuthTests(unittest.TestCase):
+    def test_actual_owner_session_csrf_password_and_redacted_audit(self):
+        from local_operator_auth import LocalOperatorAuth
+        from local_security_audit import LocalSecurityAudit
+        from local_server import create_handler
+        from local_workflow_core import LocalWorkflowCore
+
+        with tempfile.TemporaryDirectory(prefix="gmail-http-") as root:
+            folder = Path(root)
+            password = "DisposableStudioGoogleOwner2026!"
+            operator = LocalOperatorAuth.provision(folder / "operator.json", password)
+            # provision() may return None; load an actual authenticated verifier.
+            if operator is None:
+                operator = LocalOperatorAuth.load(folder / "operator.json")
+            audit = LocalSecurityAudit(folder / "security-audit.sqlite3")
+            core = LocalWorkflowCore(folder / "workflow.sqlite3")
+            key = generate_master_key()
+            grant = GoogleGmailMetadata(
+                folder / "google-vault.json", key,
+                transport=lambda url, form, bearer: (
+                    {"access_token": ACCESS, "scope": GMAIL_SCOPE}
+                    if url == TOKEN_ENDPOINT else
+                    {"emailAddress": "owner@example.org",
+                     "messagesTotal": 5, "threadsTotal": 4}))
+            grant.save_grant(CLIENT, "", REFRESH)
+            server = ThreadingHTTPServer(("127.0.0.1", 0),
+                create_handler(local_core=core, operator_auth=operator,
+                               security_audit=audit, google_gmail=grant))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            opener = build_opener(
+                ProxyHandler({}), HTTPCookieProcessor(http.cookiejar.CookieJar()))
+            base = "http://127.0.0.1:" + str(server.server_port)
+
+            def post(path, body, csrf=None):
+                headers = {"Content-Type": "application/json"}
+                if csrf is not None:
+                    headers["X-AAS-CSRF"] = csrf
+                req = Request(base + path, json.dumps(body).encode(),
+                              headers=headers, method="POST")
+                with opener.open(req, timeout=4) as response:
+                    return json.load(response)
+
+            try:
+                with self.assertRaises(HTTPError) as unauth:
+                    opener.open(base + "/api/google-gmail-status", timeout=4)
+                self.assertEqual(unauth.exception.code, 401)
+
+                signed_in = post("/api/operator-login", {"password": password})
+                csrf = signed_in["csrf_token"]
+                with opener.open(base + "/api/google-gmail-status", timeout=4) as response:
+                    self.assertTrue(json.load(response)["connected"])
+                with self.assertRaises(HTTPError) as no_csrf:
+                    post("/api/google-gmail-profile", {"current_password": password})
+                self.assertEqual(no_csrf.exception.code, 403)
+
+                with self.assertRaises(HTTPError) as bad_password:
+                    post("/api/google-gmail-profile", {"current_password": "wrong"}, csrf)
+                self.assertEqual(bad_password.exception.code, 401)
+
+                result = post("/api/google-gmail-profile",
+                              {"current_password": password}, csrf)
+                self.assertEqual(result["email"], "owner@example.org")
+                self.assertEqual(result["messages_total"], 5)
+                events = audit.recent()
+                self.assertTrue(any(e["action"] == "GOOGLE_GMAIL_READ" and
+                                    e["outcome"] == "SUCCESS" for e in events))
+                self.assertNotIn("owner@example.org", json.dumps(events))
+                self.assertNotIn(REFRESH, json.dumps(events))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                audit.close()
+                core.close()
