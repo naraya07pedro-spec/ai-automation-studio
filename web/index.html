@@ -320,6 +320,7 @@ aas:timeline:urgent
 <p class="muted">Discover a few recent public HN job-title previews with one explicit click. Discovery does NOT grant any story ID, validate eligibility, or run a model. Choose an ID, copy it into the separate password-confirmed grant form, review the exact plan, then execute a read-only step.</p>
 <div class="core-actions"><button id="hn-job-discover" type="button" class="secondary" disabled>Preview latest 5 HN job titles (read-only)</button></div>
 <div id="hn-job-discovery-status" class="setup-msg" role="status" aria-live="polite">Discovery disabled. Requires --enable-hn-story-read and --enable-hn-job-discovery.</div>
+<div id="hn-job-discovery-links" class="core-list" aria-label="Public HN job source links"></div>
 <pre id="hn-job-discovery-output" class="trace">No discovery request made. Public job posts are unverified; no grants were made.</pre>
 <div class="field"><label for="hn-job-preview-choice">Choose a previewed job ID (no permission granted)</label>
 <select id="hn-job-preview-choice" disabled></select></div>
@@ -831,6 +832,7 @@ let hnJobPreviewRevision=0;
 const clearHNJobPreview=(message="No discovery preview in this session.")=>{
  hnJobPreviewRevision++;
  hnJobPreview=null;
+ $("hn-job-discovery-links").replaceChildren();
  $("hn-job-preview-choice").replaceChildren();
  $("hn-job-preview-choice").disabled=true;
  $("hn-job-use-id").disabled=true;
@@ -862,6 +864,8 @@ $("hn-job-discover").addEventListener("click",async()=>{
      !/^[0-9a-f]{64}$/.test(out.source_sha256))
    throw Error("invalid_hn_discovery_preview");
   hnJobPreview=out;
+  const links=$("hn-job-discovery-links");
+  links.replaceChildren();
   const select=$("hn-job-preview-choice");
   select.replaceChildren();
   for(const job of out.jobs){
@@ -872,6 +876,14 @@ $("hn-job-discover").addEventListener("click",async()=>{
    option.value=String(job.story_id);
    option.textContent="#"+job.story_id+" · "+job.title;
    select.appendChild(option);
+   const link=document.createElement("a");
+   link.href="https://news.ycombinator.com/item?id="+job.story_id;
+   link.target="_blank";link.rel="noopener noreferrer";
+   link.textContent="HN #"+job.story_id+" · "+job.title+
+    " (source only; no eligibility verification)";
+   const wrapper=document.createElement("div");
+   wrapper.className="core-workflow";
+   wrapper.appendChild(link);links.appendChild(wrapper);
   }
   select.disabled=!select.options.length;
   $("hn-job-use-id").disabled=!select.options.length;
@@ -890,6 +902,7 @@ $("hn-job-discover").addEventListener("click",async()=>{
  }catch(error){
   if(revision===hnJobPreviewRevision&&operatorCsrf){
    hnJobPreview=null;
+   $("hn-job-discovery-links").replaceChildren();
    $("hn-job-preview-choice").replaceChildren();
    $("hn-job-preview-choice").disabled=true;
    $("hn-job-use-id").disabled=true;
