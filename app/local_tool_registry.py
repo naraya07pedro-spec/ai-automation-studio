@@ -37,7 +37,7 @@ def require_owner_action(name, *, enabled):
             or not enabled or name in BATCH_READ_TOOLS
             or _TOOL_MAP[name][1] != "LOCAL_CREATE_ONLY"):
         raise ToolPermissionError("local_tool_permission_denied")
-    return ACTION_TOOL
+    return name
 
 
 def registered_tools(*, planning, github=False, document=False, documents=False,
