@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Connector Hub: one real, owner-approved HTTPS external write
+
+**New:** Mission Control section **06 · Connector Hub** can send one previously saved, pseudonymous local workflow decision to an **owner-configured n8n / custom public HTTPS webhook**. The exact payload is reviewed, a single-use 5-minute preview token is issued, the current owner password is revalidated and a separate click authorizes one POST. All attempts have a persistent ledger and a stable delivery ID; ambiguous outcomes **never retry automatically**. The URL and signing secret are configured as **private server environment variables**, not in the browser. External sending remains **disabled by default**. Launch explicitly with `START_AI_STUDIO.cmd --mode offline --enable-webhook` after setting `AAS_WEBHOOK_URL`. A response **2xx is endpoint acceptance, not downstream success**. [Setup, n8n mapping, and limitations](docs/OUTBOUND_CONNECTOR_REAL_V1.md). This is **NOT** an all-plugins marketplace, generic model-selected external action, or verified live Tencent deployment.
+
 ## Real recurring schedules: 1 minute through monthly
 
 **New:** Mission Control now includes a **server-executed scheduler** for ACTUAL persisted local deterministic rule workflows: every N minutes/hours, daily, weekly or monthly in WIB/UTC. The application worker starts with the Python server, saves schedule definitions and run receipts in SQLite, persists through restart, handles one safe catch-up after downtime, and supports pause/resume and owner-visible history. To use it, first create + activate a local workflow in section 04, then set a recurring trigger in section 05. **No Ollama model is required for deterministic scheduled evaluations.** The browser can close; the Python process must stay online. **No external writes, unrestricted agents, universal plugin connections, or public VPS hosting are implied.** [Start guide and recovery behavior](docs/SCHEDULER_REAL_V1.md).
