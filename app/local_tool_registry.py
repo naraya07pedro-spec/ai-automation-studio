@@ -14,6 +14,8 @@ _TOOL_ROWS = (
     ("github_issue_analysis", "PUBLIC_READ", "github", True, "Unverified model analysis of allowed issue metadata"),
     ("local_document_question", "SELECTED_SNAPSHOT_READ", "document", True, "Question against selected document"),
     ("local_multi_document_question", "SELECTED_SNAPSHOT_READ", "documents", True, "Question against selected document set"),
+    ("hn_public_story", "PUBLIC_READ", "hn", True,
+     "Grant-bound public Hacker News story/job and two direct comments"),
     ("local_csv_profile", "SELECTED_SNAPSHOT_READ", "csv", True, "Deterministic profile of selected CSV"),
     ("local_markdown_report_export", "LOCAL_CREATE_ONLY", "artifact", False,
      "Separately confirmed existing Markdown report export from completed plan"),
@@ -41,7 +43,7 @@ def require_owner_action(name, *, enabled):
 
 
 def registered_tools(*, planning, github=False, document=False, documents=False,
-                     csv=False, artifact=False, action=False):
+                     csv=False, hn=False, artifact=False, action=False):
     """One stable capability map with explicit effects and availability."""
     conditions = {
         "always": bool(planning),
@@ -49,6 +51,7 @@ def registered_tools(*, planning, github=False, document=False, documents=False,
         "document": bool(planning and document),
         "documents": bool(planning and documents),
         "csv": bool(planning and csv),
+        "hn": bool(planning and hn),
         "artifact": bool(planning and artifact),
         "action": bool(planning and csv and artifact and action),
     }
