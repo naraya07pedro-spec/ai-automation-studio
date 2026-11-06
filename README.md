@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## On-host real Ollama scheduled AI acceptance (no simulated live evidence)
+
+**New:** Run `python tools/verify_live_ai_schedule.py --model EXACT_INSTALLED_MODEL --save-redacted-evidence` on the owner's actual Windows/Linux machine after stopping Studio port 8765. It verifies an actually installed localhost Ollama model, runs one real due-slot through the production local AI worker, checks durable SQLite results across reopen and rejects duplicate inference; prompts/results are disposable and only a redacted digest report can be stored privately. CI tests use an explicitly **SYNTHETIC** fixture that can never count as a live model pass. **Tencent identity, VPS uptime, production Studio task execution and reboot recovery remain unverified** until the owner runs separate live checks. [Exact safe operator procedure](docs/LIVE_LOCAL_AI_SCHEDULE_ACCEPTANCE_V1.md).
+
 ## Real recurring LOCAL AI inference (read-only, owner-armed)
 
 Mission Control section **12 · Scheduled Local AI** now has independently scheduled **real local Ollama model calls**, not merely rule evaluations. Minutes/hours/daily/weekly/monthly, fixed owner-selected prompt/model, 1–30 total attempts, 1–90-day expiry, persisted plaintext SQLite answers, real pause/resume and crash/uncertain timeout quarantine. A separate worker shares the existing model-safety gate with interactive chat, and its tool capabilities are restricted to calculator and UTC time: no Gmail, n8n, MCP, shell, arbitrary websites or external writes. Opt in with `START_AI_STUDIO.cmd --mode local-ai --enable-scheduled-local-ai`; Ollama and a compatible installed model are required separately. **No real Ollama model, Tencent VPS or business connector was live-tested in CI.** [Runbook and boundaries](docs/READONLY_AI_RECURRING_SCHEDULE_V1.md).
