@@ -2098,7 +2098,7 @@ def main(argv=None):
                            enable_hn_job_discovery=args.enable_hn_job_discovery,
                            enable_greenhouse_evidence=args.enable_greenhouse_evidence,
                            enable_outbound_webhook=args.enable_outbound_webhook)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError) as exc:
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
