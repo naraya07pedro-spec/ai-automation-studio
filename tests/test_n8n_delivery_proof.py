@@ -7,6 +7,11 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import http.cookiejar
+from http.server import ThreadingHTTPServer
+import threading
+from urllib.error import HTTPError
+from urllib.request import Request, ProxyHandler, HTTPCookieProcessor, build_opener
 from pathlib import Path
 import sys
 import tempfile
@@ -21,6 +26,9 @@ from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
 from local_n8n_delivery_proof import (
     SignedN8NDeliveryProof, N8NProofError, PROOF_DOMAIN, signing_message)
 from local_workflow_core import LocalWorkflowCore
+from local_operator_auth import LocalOperatorAuth
+from local_security_audit import LocalSecurityAudit
+from local_server import create_handler
 
 HAS_CRYPTO=importlib.util.find_spec("cryptography") is not None
 SECRET="n8n-fixture-unique-strong-signing-secret-2026!"
@@ -193,7 +201,7 @@ class N8NSignedDeliveryProofTests(unittest.TestCase):
                 FROM scheduled_webhook_attempts""").fetchone()[0]
         result=self.proofs.reconcile(self.sign(did))
         self.assertEqual(result["local_dispatch_status_unchanged"],"OUTCOME_UNCERTAIN")
-        self.assertEqual(self.autopilot.get if False else policy.get(
+        self.assertEqual(policy.get(
             self.schedule["schedule_id"])["status"],"PAUSED_UNCERTAIN")
         self.assertEqual(self.autopilot.dispatch_due(),0)
 
@@ -250,3 +258,143 @@ class N8NSignedDeliveryProofTests(unittest.TestCase):
             with self.assertRaises(N8NProofError):
                 self.proofs.reconcile(bad)
         self.assertEqual(self.proofs.list()["records"],[])
+
+
+@unittest.skipUnless(HAS_CRYPTO,"Dedicated receipt CI installs actual cryptography")
+class SignedN8NProofHTTPTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        base=Path(self.tmp.name)
+        self.password="DisposableProofHTTP2026!Strong"
+        LocalOperatorAuth.provision(base/"operator.json",self.password)
+        self.owner=LocalOperatorAuth.load(base/"operator.json")
+        self.audit=LocalSecurityAudit(base/"audit.sqlite3")
+        self.core=LocalWorkflowCore(base/"flow.sqlite3")
+        self.core.create({"workflow_id":"proof_http","display_name":"Proof HTTP",
+            "service_filter":"automation","min_budget_tier":2,
+            "followup_policy":"review_required"})
+        self.core.activate({"workflow_id":"proof_http","expected_version":1})
+        self.clock=Clock()
+        self.scheduler=LocalRecurringScheduler(
+            self.core,base/"schedules.sqlite3",clock=self.clock)
+        self.schedule=self.scheduler.create({
+            "workflow_id":"proof_http","cadence":"minutes",
+            "timezone":"Asia/Jakarta","service_code":"automation",
+            "budget_tier":2,"timeline":"soon","every":1})
+        self.sent=[]
+        def sender(url,payload,did,secret):
+            self.sent.append(payload)
+            return 202
+        self.manager=LocalConnectorManager(
+            self.core,base/"managed-vault.json",
+            sender=sender,clock=self.clock,vault_key=generate_master_key())
+        self.manager.add({"connector_id":"http_n8n","label":"HTTP n8n",
+            "url":"https://example.org/webhook/private",
+            "signing_secret":SECRET})
+        self.autopilot=ManagedScheduledWebhookAutopilot(
+            self.scheduler,self.manager,self.audit,base/"policy",clock=self.clock)
+        self.proofs=SignedN8NDeliveryProof(self.autopilot)
+        req={"connector_id":"http_n8n","schedule_id":self.schedule["schedule_id"],
+             "max_sends":1,"expires_days":7}
+        p=self.autopilot.preview(req)
+        self.autopilot.arm({**req,"preview_token":p["preview_token"]})
+        self.clock.advance(minutes=1)
+        self.scheduler.run_due()
+        self.autopilot.dispatch_due()
+        self.did=self.sent[0]["delivery_id"]
+        message=signing_message("http_n8n",self.schedule["schedule_id"],
+                                 self.did,"COMPLETED","run_127")
+        self.signature=hmac.new(SECRET.encode(),message.encode(),
+                                hashlib.sha256).hexdigest()
+        self.server=ThreadingHTTPServer(
+            ("127.0.0.1",0),
+            create_handler(local_core=self.core,operator_auth=self.owner,
+                           security_audit=self.audit,managed_connectors=self.manager,
+                           local_scheduler=self.scheduler,
+                           managed_autopilot=self.autopilot,n8n_proofs=self.proofs))
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
+        self.thread.start()
+        self.url="http://127.0.0.1:"+str(self.server.server_port)
+        self.opener=build_opener(ProxyHandler({}),
+               HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.csrf=None
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(5)
+        self.autopilot.close()
+        self.manager.close()
+        self.scheduler.close()
+        self.core.close()
+        self.audit.close()
+        self.tmp.cleanup()
+
+    def post(self,path,body,csrf=True):
+        headers={"Content-Type":"application/json"}
+        if csrf and self.csrf:
+            headers["X-AAS-CSRF"]=self.csrf
+        req=Request(self.url+path,json.dumps(body).encode(),
+                    headers=headers,method="POST")
+        with self.opener.open(req,timeout=4) as reply:
+            return json.load(reply)
+
+    def get(self,path):
+        with self.opener.open(self.url+path,timeout=4) as reply:
+            return json.load(reply)
+
+    def login(self):
+        result=self.post("/api/operator-login",{"password":self.password})
+        self.csrf=result["csrf_token"]
+
+    def claim(self):
+        return {"connector_id":"http_n8n",
+                "schedule_id":self.schedule["schedule_id"],
+                "delivery_id":self.did,
+                "outcome":"COMPLETED",
+                "execution_id":"run_127",
+                "proof_hmac_sha256":self.signature,
+                "current_password":self.password}
+
+    def test_session_csrf_owner_password_and_private_import(self):
+        with self.assertRaises(HTTPError) as unauth:
+            self.get("/api/n8n-delivery-proofs")
+        self.assertEqual(unauth.exception.code,401)
+        self.login()
+        self.assertEqual(self.get("/api/n8n-delivery-proofs")["records"],[])
+        with self.assertRaises(HTTPError) as invalid_csrf:
+            self.post("/api/n8n-delivery-proof-import",self.claim(),csrf=False)
+        self.assertEqual(invalid_csrf.exception.code,403)
+        data=self.claim()
+        data["current_password"]="bad-password"
+        with self.assertRaises(HTTPError) as wrong_owner:
+            self.post("/api/n8n-delivery-proof-import",data)
+        self.assertEqual(wrong_owner.exception.code,401)
+        good=self.post("/api/n8n-delivery-proof-import",self.claim())
+        self.assertEqual(good["result"],"RECORDED")
+        self.assertEqual(len(self.sent),1)
+        recent=self.get("/api/n8n-delivery-proofs")
+        self.assertEqual(len(recent["records"]),1)
+        self.assertNotIn(SECRET,json.dumps(recent))
+        self.assertNotIn(self.signature,json.dumps(recent))
+        events=self.audit.recent()
+        self.assertTrue(any(e["action"]=="N8N_DELIVERY_PROOF_IMPORT" and
+                            e["outcome"]=="SUCCESS" for e in events))
+        self.assertNotIn(self.signature,json.dumps(events))
+
+    def test_invalid_hmac_is_denied_without_new_delivery(self):
+        self.login()
+        data=self.claim()
+        data["proof_hmac_sha256"]="0"*64
+        with self.assertRaises(HTTPError) as wrong:
+            self.post("/api/n8n-delivery-proof-import",data)
+        self.assertEqual(wrong.exception.code,403)
+        self.assertEqual(self.get("/api/n8n-delivery-proofs")["records"],[])
+        self.assertEqual(len(self.sent),1)
+
+    def test_owner_import_does_not_create_permission_or_auto_retry(self):
+        self.login()
+        response=self.post("/api/n8n-delivery-proof-import",self.claim())
+        self.assertEqual(response["external_write_count"],0)
+        self.assertEqual(len(self.sent),1)
+        self.assertEqual(self.autopilot.dispatch_due(),0)
