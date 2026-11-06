@@ -38,7 +38,7 @@ def _path(value):
 def render_unit(*, username, checkout, home, python, mode,
                 encrypted_webhooks=False, gmail_metadata=False,
                 outbound_webhook=False, signed_webhook=False,
-                managed_autopilot=False):
+                managed_autopilot=False, scheduled_local_ai=False):
     """Render a fixed-name loopback service with no user-controlled directives."""
     if not _ALLOWED_USER.fullmatch(username) or username == "root":
         raise PrivateVPSDeploymentError("dedicated_nonroot_user_required")
@@ -50,8 +50,12 @@ def render_unit(*, username, checkout, home, python, mode,
         raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
     if managed_autopilot and not encrypted_webhooks:
         raise PrivateVPSDeploymentError("managed_autopilot_requires_encrypted_webhooks")
+    if scheduled_local_ai and mode == "offline":
+        raise PrivateVPSDeploymentError("scheduled_local_ai_requires_local_ai_mode")
     extra = ()
     credentials = ""
+    if scheduled_local_ai:
+        extra += ("--enable-scheduled-local-ai",)
     if encrypted_webhooks:
         extra += ("--enable-encrypted-managed-webhooks",)
     if managed_autopilot:
@@ -206,6 +210,8 @@ def main(argv=None):
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--enable-scheduled-local-ai", action="store_true",
+                        help="Opt in to bounded read-only Ollama schedules in local-ai or full mode.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
                         help="Allow bounded owner-armed scheduling for encrypted managed webhook targets.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
@@ -227,7 +233,8 @@ def main(argv=None):
                            gmail_metadata=args.enable_google_gmail_metadata,
                            outbound_webhook=args.enable_webhook,
                            signed_webhook=args.enable_webhook_signing,
-                           managed_autopilot=args.enable_managed_autopilot)
+                           managed_autopilot=args.enable_managed_autopilot,
+                           scheduled_local_ai=args.enable_scheduled_local_ai)
         if args.install:
             validate_secret_sources(
                 encrypted_webhooks=args.enable_encrypted_managed_webhooks,
