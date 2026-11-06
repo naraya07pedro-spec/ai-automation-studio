@@ -247,6 +247,42 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+
+<section class="panel" id="managed-connectors-panel" aria-label="Manage multiple private webhook connectors" style="margin-top:20px">
+ <div class="split"><h2>08 · Managed connections</h2><span class="pill" id="managed-badge">Checking permissions</span></div>
+ <p class="sub">Register up to four independent n8n/custom HTTPS webhook destinations. Each connection has its own identity and durable single-send ledger. Register or revoke using your current owner password, without changing source code or restarting the app.</p>
+ <div class="notice" style="margin:18px 0">Credentials are stored **on this computer/server in an OS-permission-restricted file, NOT encrypted at rest**. This is not a full credential vault. Use only a trusted owner account, keep backups private, and check Windows file ACLs before using sensitive connections. No AI model or recurring schedule can use these managed connections automatically.</div>
+ <div class="grid">
+  <div>
+   <h2 style="font-size:17px">Register a new webhook</h2>
+   <form id="managed-add-form">
+    <label for="managed-id">Unique connection ID</label><input id="managed-id" required pattern="[a-z][a-z0-9_-]{2,31}" maxlength="32" placeholder="my_n8n">
+    <label for="managed-label">Display name</label><input id="managed-label" required maxlength="60" placeholder="n8n personal workspace">
+    <label for="managed-url">Private HTTPS production webhook URL</label><input id="managed-url" required type="password" autocomplete="off" maxlength="420" placeholder="https://host.example.org/webhook/secret-path">
+    <label for="managed-secret">Optional HMAC signing secret</label><input id="managed-secret" type="password" autocomplete="off" maxlength="128" placeholder="Optional; never shown again">
+    <label for="managed-owner">Current owner password, to register/revoke</label><input id="managed-owner" type="password" autocomplete="off" placeholder="Required">
+    <div class="btnrow"><button class="btn primary" id="managed-add-btn" type="submit">Register this connection</button></div>
+   </form>
+   <p class="status" role="status" aria-live="polite" id="managed-status">No connection changes made.</p>
+   <h2 style="font-size:17px;margin-top:28px">Stored connections</h2>
+   <div id="managed-list" class="note">Sign in to view connections.</div>
+  </div>
+  <div>
+   <h2 style="font-size:17px">Send one reviewed event</h2>
+   <p class="sub">Select a registered destination and an already saved local workflow event. No arbitrary body, model response or script can be sent.</p>
+   <label for="managed-choice">Destination</label><select id="managed-choice"></select>
+   <label for="managed-workflow">Local workflow</label><select id="managed-workflow"></select>
+   <label for="managed-event">Already saved event ID</label><input id="managed-event" maxlength="60" placeholder="event_001">
+   <div class="btnrow"><button class="btn" id="managed-preview-btn" type="button">Preview exact JSON before sending</button></div>
+   <div id="managed-preview-output" class="output">No remote request prepared.</div>
+   <label for="managed-send-pass">Current owner password, for this one POST</label><input id="managed-send-pass" type="password" autocomplete="off" placeholder="Required to send">
+   <div class="btnrow"><button class="btn primary" id="managed-send-btn" type="button" disabled>Confirm one real HTTPS POST</button></div>
+   <div class="split" style="margin-top:22px"><strong>Destination delivery history</strong><button class="btn" type="button" id="managed-history-btn">Refresh</button></div>
+   <div id="managed-history" class="output">Choose a connection to view its saved receipts.</div>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -293,11 +329,12 @@ function lock(message){
  recurringSchedules=[];stopSchedulerPoll();$("schedule-list").textContent="Session locked.";$("schedule-history").textContent="Session locked.";$("schedule-worker").textContent="Locked";refreshScheduleFlowChoices();
  webhookEnabled=false;webhookPreview=null;$("webhook-password").value="";$("webhook-history").textContent="Session locked.";$("webhook-preview-output").textContent="Session locked.";refreshWebhookButtons();
  autopilotEnabled=false;autopilotPreview=null;$("autopilot-pass").value="";$("autopilot-consent").checked=false;$("autopilot-grants").textContent="Session locked.";$("autopilot-receipts").textContent="Session locked.";autopilotControls();
+ managedEnabled=false;managedPreview=null;managedItems=[];$("managed-url").value="";$("managed-secret").value="";$("managed-owner").value="";$("managed-send-pass").value="";$("managed-list").textContent="Session locked.";$("managed-history").textContent="Session locked.";$("managed-preview-output").textContent="Session locked.";managedControls();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh()]);
  stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();}},10000);
 }
 async function loadCapabilities(){
@@ -796,6 +833,170 @@ $("autopilot-arm-btn").addEventListener("click",async()=>{
  finally{autopilotBusy=false;autopilotControls();if(csrf)loadAutopilots();}
 });
 
+
+let managedEnabled=false,managedItems=[],managedPreview=null,managedBusy=false;
+function managedResetPreview(){
+ managedPreview=null;
+ $("managed-preview-output").textContent="No valid send preview. Prepare the exact event again.";
+ $("managed-send-pass").value="";
+ managedControls();
+}
+function managedControls(){
+ const active=!!csrf&&!busy&&!managedBusy&&managedEnabled;
+ $("managed-add-btn").disabled=!active;
+ $("managed-preview-btn").disabled=!active||!$("managed-choice").value||!$("managed-workflow").value;
+ $("managed-send-btn").disabled=!active||!managedPreview||!$("managed-send-pass").value||
+  managedPreview.connector_id!==$("managed-choice").value||
+  managedPreview.workflow_id!==$("managed-workflow").value||
+  managedPreview.event_id!==$("managed-event").value.trim();
+ $("managed-history-btn").disabled=!active||!$("managed-choice").value;
+}
+function managedFlowChoices(){
+ const el=$("managed-workflow"),prior=el.value;el.replaceChildren();
+ for(const f of flows){
+  const o=document.createElement("option");o.value=f.workflow_id;
+  o.textContent=f.display_name+" · "+f.workflow_id;el.append(o);
+ }
+ if(flows.some(x=>x.workflow_id===prior))el.value=prior;
+ managedControls();
+}
+async function managedRefresh(){
+ if(!csrf||managedBusy)return;
+ try{
+  const data=await request("/api/managed-connectors");
+  if(!csrf)return;
+  managedEnabled=!!data.enabled;
+  managedItems=Array.isArray(data.connectors)?data.connectors:[];
+  $("managed-badge").textContent=managedEnabled?
+   "Opt-in active · manual owner approval":"Disabled · --enable-managed-webhooks required";
+  const selector=$("managed-choice"),previous=selector.value;selector.replaceChildren();
+  for(const c of managedItems.filter(x=>x.status==="ACTIVE")){
+   const o=document.createElement("option");o.value=c.connector_id;
+   o.textContent=c.label+" · "+c.destination_hostname;selector.append(o);
+  }
+  if(managedItems.some(x=>x.connector_id===previous&&x.status==="ACTIVE"))selector.value=previous;
+  const wrap=$("managed-list");wrap.replaceChildren();
+  if(!managedItems.length)wrap.textContent="No registered connections yet.";
+  for(const c of managedItems){
+   const box=document.createElement("div");box.className="step";
+   const title=document.createElement("strong");
+   title.textContent=c.label+" · "+c.status;
+   const meta=document.createElement("span");
+   meta.textContent="ID: "+c.connector_id+"\nDestination hostname: "+(c.destination_hostname||"Revoked")+
+    "\nManual sends: "+(c.supports_manual_send?"enabled after owner confirmation":"disabled")+
+    "\nScheduled sends: disabled";
+   box.append(title,meta);
+   if(c.status==="ACTIVE"){
+    const btn=document.createElement("button");btn.type="button";btn.className="btn warn";
+    btn.textContent="Revoke and erase stored connection secret";
+    btn.addEventListener("click",()=>managedRevoke(c));
+    box.append(btn);
+   }
+   wrap.append(box);
+  }
+  if(managedPreview&&managedPreview.connector_id!==selector.value)managedResetPreview();
+  managedControls();
+ }catch(error){if(csrf)status("managed-status","Connection registry not available: "+error.message,true);}
+}
+async function managedRevoke(c){
+ if(!csrf||managedBusy||!managedEnabled)return;
+ const password=$("managed-owner").value;
+ if(!password){status("managed-status","Enter owner password under Register before revoking.",true);return;}
+ if(!window.confirm("Revoke connection "+c.connector_id+"? Its URL and signing secret are erased from the registry and the ID remains reserved. Past delivery ledgers remain."))return;
+ managedBusy=true;managedControls();
+ try{
+  const result=await request("/api/managed-connector-revoke",{
+   connector_id:c.connector_id,current_password:password});
+  status("managed-status","Connection revoked: "+result.connector_id+". Stored URL/secret erased from registry.");
+  managedResetPreview();
+ }catch(error){if(csrf)status("managed-status","Revocation not confirmed: "+error.message,true);}
+ finally{$("managed-owner").value="";managedBusy=false;managedControls();if(csrf)managedRefresh();}
+}
+$("managed-add-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!csrf||managedBusy||!managedEnabled)return;
+ const payload={
+  connector_id:$("managed-id").value,label:$("managed-label").value,
+  url:$("managed-url").value,signing_secret:$("managed-secret").value,
+  current_password:$("managed-owner").value
+ };
+ managedBusy=true;managedControls();
+ try{
+  const result=await request("/api/managed-connector-add",payload);
+  status("managed-status","Saved connection "+result.connector_id+" securely as an OS-restricted file. At-rest encryption is NOT implemented.");
+  $("managed-id").value="";$("managed-label").value="";
+ }catch(error){if(csrf)status("managed-status","Registration blocked: "+error.message,true);}
+ finally{
+  $("managed-url").value="";$("managed-secret").value="";$("managed-owner").value="";
+  managedBusy=false;managedControls();if(csrf)managedRefresh();
+ }
+});
+$("managed-choice").addEventListener("change",()=>{managedResetPreview();managedHistory();});
+$("managed-workflow").addEventListener("change",managedResetPreview);
+$("managed-event").addEventListener("input",managedResetPreview);
+$("managed-send-pass").addEventListener("input",managedControls);
+$("managed-history-btn").addEventListener("click",managedHistory);
+async function managedHistory(){
+ if(!csrf||managedBusy||!managedEnabled||!$("managed-choice").value)return;
+ try{
+  const data=await request("/api/managed-connector-history?connector_id="+
+   encodeURIComponent($("managed-choice").value));
+  if(!csrf)return;
+  $("managed-history").textContent=data.deliveries?.length?
+   data.deliveries.map(x=>x.updated_utc+" · "+x.status+
+    "\n"+x.workflow_id+"/"+x.event_id+"\nHTTP "+(x.http_status??"unknown")+
+    "\nDelivery "+x.delivery_id+"\n").join("\n"):
+   "No remote deliveries claimed for this connection.";
+ }catch(error){if(csrf)$("managed-history").textContent="History unavailable: "+error.message;}
+}
+$("managed-preview-btn").addEventListener("click",async()=>{
+ if(!csrf||managedBusy||!managedEnabled)return;
+ const connector_id=$("managed-choice").value;
+ const workflow_id=$("managed-workflow").value;
+ const event_id=$("managed-event").value.trim();
+ managedResetPreview();managedBusy=true;managedControls();
+ try{
+  const p=await request("/api/managed-webhook-preview",{
+   connector_id,workflow_id,event_id});
+  if(!csrf||p.status!=="PREVIEW_ONLY"||p.external_write_count!==0)
+   throw Error("invalid_preview");
+  if(connector_id!==$("managed-choice").value||workflow_id!==$("managed-workflow").value||
+   event_id!==$("managed-event").value.trim())return;
+  managedPreview=p;
+  $("managed-preview-output").textContent=
+   "NO HTTPS POST SENT YET\nConnection: "+p.connector_label+
+   "\nDestination host: "+p.destination_hostname+
+   "\nJSON SHA-256: "+p.payload_sha256+
+   "\nPreview expires: "+p.expires_in_seconds+" seconds"+
+   "\n\nExact JSON:\n"+JSON.stringify(p.payload,null,2);
+  status("managed-status","Review payload and destination hostname, then re-enter owner password to send once.");
+ }catch(error){if(csrf)status("managed-status","Preview failed: "+error.message,true);}
+ finally{managedBusy=false;managedControls();}
+});
+$("managed-send-btn").addEventListener("click",async()=>{
+ const p=managedPreview;if(!p||!csrf||managedBusy||!managedEnabled)return;
+ if(!window.confirm("AUTHORIZE ONE REAL HTTPS WEBHOOK POST?\n\n"+
+  p.connector_label+" · "+p.destination_hostname+
+  "\n"+p.workflow_id+"/"+p.event_id+
+  "\nSHA-256: "+p.payload_sha256+
+  "\n\nThe remote provider may act on this event. No retry if outcome uncertain."))return;
+ const current_password=$("managed-send-pass").value;
+ managedPreview=null;$("managed-send-pass").value="";
+ managedBusy=true;managedControls();
+ try{
+  const result=await request("/api/managed-webhook-commit",{
+   connector_id:p.connector_id,workflow_id:p.workflow_id,event_id:p.event_id,
+   preview_token:p.preview_token,payload_sha256:p.payload_sha256,
+   current_password});
+  $("managed-preview-output").textContent=JSON.stringify(result,null,2);
+  status("managed-status",result.status==="REMOTE_ACCEPTED"?
+   "Endpoint accepted one POST (HTTP "+result.http_status+"). Downstream execution unverified.":
+   "Delivery outcome uncertain. Inspect n8n logs and do NOT retry blindly.",
+   result.status!=="REMOTE_ACCEPTED");
+ }catch(error){if(csrf)status("managed-status","No verified successful delivery: "+error.message+
+  ". Review destination history before any further action.",true);}
+ finally{managedBusy=false;managedControls();if(csrf)managedHistory();}
+});
+
 let flows=[];
 function chosenFlow(){return flows.find(x=>x.workflow_id===$("flow-choice").value);}
 function flowButtons(){
@@ -813,7 +1014,7 @@ async function refreshFlows(preferred){
   const select=$("flow-choice"),chosen=preferred||select.value;select.replaceChildren();
   for(const w of flows){const option=document.createElement("option");option.value=w.workflow_id;option.textContent=w.display_name+" · "+w.status+" · v"+w.version;select.append(option);}
   if(flows.some(w=>w.workflow_id===chosen))select.value=chosen;
-  flowButtons();refreshScheduleFlowChoices();refreshWebhookFlowList();autopilotScheduleChoices();status("flow-status",flows.length+" saved workflow(s).");
+  flowButtons();refreshScheduleFlowChoices();refreshWebhookFlowList();autopilotScheduleChoices();managedFlowChoices();status("flow-status",flows.length+" saved workflow(s).");
  }catch(error){if(csrf)status("flow-status","Cannot load workflows: "+error.message,true);}
 }
 $("flow-choice").addEventListener("change",flowButtons);
