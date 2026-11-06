@@ -40,13 +40,16 @@ def generate_master_key():
 
 
 class EncryptedConnectorVault:
-    def __init__(self, filename, master_key):
+    def __init__(self, filename, master_key, *, aad=AAD):
         # If the dependency or key is absent, fail explicitly before touching disk.
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
             from cryptography.exceptions import InvalidTag
         except ImportError:
             raise VaultError("vault_dependency_missing_install_requirements_vault") from None
+        if type(aad) is not bytes or not aad or len(aad) > 256:
+            raise VaultError("invalid_vault_domain")
+        self._aad = aad
         self._aead = AESGCM(decode_master_key(master_key))
         self._invalid_tag = InvalidTag
         self.path = Path(filename).expanduser()
@@ -72,7 +75,7 @@ class EncryptedConnectorVault:
         if len(raw) > MAX_PLAINTEXT_BYTES:
             raise VaultError("vault_payload_too_large")
         nonce = os.urandom(12)
-        ciphertext = self._aead.encrypt(nonce, raw, AAD)
+        ciphertext = self._aead.encrypt(nonce, raw, self._aad)
         return {"version":2,"algorithm":"AES-256-GCM",
                 "nonce":base64.b64encode(nonce).decode("ascii"),
                 "ciphertext":base64.b64encode(ciphertext).decode("ascii")}
@@ -92,7 +95,7 @@ class EncryptedConnectorVault:
             encrypted = base64.b64decode(envelope["ciphertext"], validate=True)
             if len(nonce) != 12 or not 16 <= len(encrypted) <= MAX_VAULT_FILE_BYTES:
                 raise ValueError("bad envelope")
-            raw = self._aead.decrypt(nonce, encrypted, AAD)
+            raw = self._aead.decrypt(nonce, encrypted, self._aad)
             if len(raw) > MAX_PLAINTEXT_BYTES:
                 raise ValueError("oversized decrypted body")
             return json.loads(raw)

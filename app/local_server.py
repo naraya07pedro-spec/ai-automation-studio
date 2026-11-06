@@ -20,6 +20,7 @@ from local_workflow_core import LocalWorkflowCore
 from local_outbound_webhook import LocalOutboundWebhook, OutboundError
 from local_connector_manager import LocalConnectorManager, ManagedConnectorError
 from local_connector_vault import VaultError
+from local_google_gmail import GoogleGmailMetadata, GmailConnectorError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
@@ -98,7 +99,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    plan_action_gate=None, hn_policy=None,
                    hn_job_discovery=None, greenhouse_evidence=None,
                    local_scheduler=None, outbound_webhook=None,
-                   scheduled_autopilot=None, managed_connectors=None):
+                   scheduled_autopilot=None, managed_connectors=None,
+                   google_gmail=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -546,6 +548,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, source_policy.snapshot())
                 return
+            if route.path == "/api/google-gmail-status" and not route.query:
+                if google_gmail is None:
+                    self._send(200, {"enabled":False,"connected":False})
+                else:
+                    try:
+                        self._send(200, google_gmail.status())
+                    except GmailConnectorError:
+                        self._send(503, {"error":"google_grant_invalid_or_locked"})
+                return
             if route.path in ("/api/managed-connectors", "/api/managed-connector-history"):
                 if managed_connectors is None:
                     self._send(200 if route.path=="/api/managed-connectors" else 403,
@@ -678,6 +689,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/autopilot-preview",
                                  "/api/autopilot-arm",
                                  "/api/autopilot-stop",
+                                 "/api/google-gmail-profile",
+                                 "/api/google-gmail-inbox",
                                  "/api/managed-connector-add",
                                  "/api/managed-connector-revoke",
                                  "/api/managed-webhook-preview",
@@ -1591,6 +1604,41 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 code, result = method(data)
                 self._send(code, result)
                 return
+            if self.path in ("/api/google-gmail-profile", "/api/google-gmail-inbox"):
+                if google_gmail is None:
+                    self._send(403, {"error":"google_gmail_disabled"})
+                    return
+                if not self._audit_event("GOOGLE_GMAIL_READ", "ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                if type(data) is not dict or set(data) != {"current_password"} or not isinstance(data["current_password"], str):
+                    self._audit_event("GOOGLE_GMAIL_READ", "DENIED")
+                    self._send(422, {"error":"owner_password_required"})
+                    return
+                if operator_auth is None:
+                    self._audit_event("GOOGLE_GMAIL_READ", "DENIED")
+                    self._send(403, {"error":"real_owner_required"})
+                    return
+                verified = operator_auth.confirm_current_password(data["current_password"])
+                if verified != 200:
+                    self._audit_event("GOOGLE_GMAIL_READ", "DENIED")
+                    self._send(verified, {"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                try:
+                    result = (google_gmail.profile() if self.path.endswith("-profile")
+                              else google_gmail.inbox())
+                except GmailConnectorError as exc:
+                    self._audit_event("GOOGLE_GMAIL_READ", "FAILED")
+                    self._send(exc.status, {"error":str(exc)})
+                    return
+                if not self._audit_event("GOOGLE_GMAIL_READ", "SUCCESS"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                else:
+                    self._send(200, result)
+                return
             if self.path in ("/api/managed-connector-add",
                              "/api/managed-connector-revoke",
                              "/api/managed-webhook-preview",
@@ -1885,7 +1933,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_greenhouse_evidence=False,
                        enable_outbound_webhook=False,
                        enable_managed_webhooks=False,
-                       enable_encrypted_managed_webhooks=False):
+                       enable_encrypted_managed_webhooks=False,
+                       enable_google_gmail_metadata=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -1950,6 +1999,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     outbound = None
     autopilot = None
     managed = None
+    gmail = None
     try:
         if enable_encrypted_managed_webhooks:
             # Explicitly separate file from plaintext v1. Never auto-import
@@ -1961,6 +2011,14 @@ def start_local_server(port=8765, enable_local_agent=False,
                 core, home / "managed-webhooks-vault.json", vault_key=master_key)
         elif enable_managed_webhooks:
             managed = LocalConnectorManager(core, home / "managed-webhooks.json")
+        if enable_google_gmail_metadata:
+            # Read-only and off by default. Consent is enrolled separately via
+            # tools/connect_google_gmail.py on the owner's PC.
+            master_key = os.environ.get("AAS_VAULT_MASTER_KEY", "")
+            if not master_key:
+                raise VaultError("AAS_VAULT_MASTER_KEY_required")
+            gmail = GoogleGmailMetadata(
+                home / "google-gmail-vault.json", master_key)
         if enable_outbound_webhook:
             destination = os.environ.get("AAS_WEBHOOK_URL", "")
             if not destination:
@@ -2006,6 +2064,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            outbound_webhook=outbound,
                            scheduled_autopilot=autopilot,
                            managed_connectors=managed,
+                           google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
                            local_multi_document_analyzer=(
@@ -2100,6 +2159,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-google-gmail-metadata", action="store_true",
+                        help="Opt in to owner-password gated Gmail metadata reads from separately encrypted Google Desktop OAuth grant; requires AAS_VAULT_MASTER_KEY.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",
                         help="Use an isolated AES-256-GCM encrypted connector registry with an external AAS_VAULT_MASTER_KEY, requires cryptography dependency. Never auto-import plaintext v1.")
     parser.add_argument("--enable-managed-webhooks", action="store_true",
@@ -2214,8 +2275,9 @@ def main(argv=None):
                            enable_greenhouse_evidence=args.enable_greenhouse_evidence,
                            enable_outbound_webhook=args.enable_outbound_webhook,
                            enable_managed_webhooks=args.enable_managed_webhooks,
-                           enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError) as exc:
+                           enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks,
+                           enable_google_gmail_metadata=args.enable_google_gmail_metadata)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
