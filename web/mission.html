@@ -352,6 +352,37 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
   </div>
 </section>
 
+<section class="panel" id="readonly-ai-schedule-panel" aria-label="Scheduled local read-only AI tasks" style="margin-top:20px">
+  <div class="split"><h2>12 · Scheduled Local AI</h2><span class="pill" id="ai-recurring-badge">Checking</span></div>
+  <p class="sub">Run a real local Ollama model automatically at bounded intervals (minutes, hours, daily, weekly, monthly). No Gmail, n8n, shell, files, MCP or remote writes. Only calculator and UTC clock tools. Prompt and answers persist in local PLAINTEXT SQLite until separately deleted by the owner.</p>
+  <div class="grid">
+    <div>
+      <label for="ai-recurring-model">Installed Ollama model name</label>
+      <input id="ai-recurring-model" maxlength="80" placeholder="For example: llama3.2:3b" autocomplete="off">
+      <label for="ai-recurring-prompt">Repeatable task prompt (max 3000 characters)</label>
+      <textarea id="ai-recurring-prompt" rows="5" maxlength="3000" placeholder="Summarize a bounded recurring topic using only your local knowledge and clock. Be explicit that you have no current web access."></textarea>
+      <label for="ai-recurring-cadence">Schedule cadence</label>
+      <select id="ai-recurring-cadence"><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+      <div id="ai-recurring-interval-wrap"><label for="ai-recurring-every">Every N</label><input id="ai-recurring-every" type="number" min="1" max="1440" step="1" value="60"></div>
+      <div id="ai-recurring-time-wrap" hidden><label for="ai-recurring-at">Local time</label><input id="ai-recurring-at" type="time" value="08:30"></div>
+      <div id="ai-recurring-weekday-wrap" hidden><label for="ai-recurring-weekday">Weekday</label><select id="ai-recurring-weekday"><option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option><option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option></select></div>
+      <div id="ai-recurring-monthday-wrap" hidden><label for="ai-recurring-monthday">Day of month</label><input id="ai-recurring-monthday" type="number" min="1" max="31" value="1"></div>
+      <label for="ai-recurring-zone">Timezone</label><select id="ai-recurring-zone"><option value="Asia/Jakarta">Asia/Jakarta (WIB)</option><option value="UTC">UTC</option></select>
+      <label for="ai-recurring-limit">Maximum total inference attempts (1–30)</label><input id="ai-recurring-limit" type="number" min="1" max="30" value="3">
+      <label for="ai-recurring-days">Task expires after N days (1–90)</label><input id="ai-recurring-days" type="number" min="1" max="90" value="7">
+      <label for="ai-recurring-owner">Current owner password, required to create or change schedules</label><input id="ai-recurring-owner" type="password" autocomplete="off" placeholder="Owner password">
+      <div class="btnrow"><button id="ai-recurring-create" class="btn primary" type="button" disabled>Create bounded read-only AI task</button></div>
+      <p class="status" id="ai-recurring-status" role="status">No AI task scheduled.</p>
+    </div>
+    <div>
+      <div class="split"><strong>AI tasks and safe controls</strong><button class="btn" type="button" id="ai-recurring-refresh">Refresh</button></div>
+      <div id="ai-recurring-list" class="note">Sign in to load local AI schedules.</div>
+      <label for="ai-recurring-history">Saved real model responses (last 30)</label>
+      <div class="output" id="ai-recurring-history">Choose a task to view its results.</div>
+    </div>
+  </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -402,12 +433,13 @@ function lock(message){
  googleGmailClear();
  managedAutoClear();
  n8nProofClear();
+ aiRecurringClear();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs()]);
- stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();loadManagedAutopilots();loadN8NProofs();}},10000);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs(),loadAIRecurring()]);
+ stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();loadManagedAutopilots();loadN8NProofs();loadAIRecurring();}},10000);
 }
 async function loadCapabilities(){
  try{
@@ -950,6 +982,129 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  }
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
+
+let aiRecurringEnabled=false,aiRecurringBusy=false;
+function aiRecurringClear(){
+ aiRecurringEnabled=false;
+ $("ai-recurring-badge").textContent="Locked";
+ $("ai-recurring-owner").value="";
+ $("ai-recurring-list").textContent="Session locked.";
+ $("ai-recurring-history").textContent="Session locked.";
+ aiRecurringControls();
+}
+function aiRecurringControls(){
+ $("ai-recurring-create").disabled=!csrf||busy||aiRecurringBusy||!aiRecurringEnabled||
+   !$("ai-recurring-owner").value||!$("ai-recurring-prompt").value.trim()||
+   !$("ai-recurring-model").value.trim();
+ $("ai-recurring-refresh").disabled=!csrf||busy||aiRecurringBusy;
+}
+function aiCadenceRender(){
+ const kind=$("ai-recurring-cadence").value,interval=["minutes","hours"].includes(kind);
+ $("ai-recurring-interval-wrap").hidden=!interval;
+ $("ai-recurring-time-wrap").hidden=interval;
+ $("ai-recurring-weekday-wrap").hidden=kind!=="weekly";
+ $("ai-recurring-monthday-wrap").hidden=kind!=="monthly";
+ $("ai-recurring-every").max=kind==="hours"?"168":"1440";
+}
+function aiCadencePayload(){
+ const cadence=$("ai-recurring-cadence").value,timezone=$("ai-recurring-zone").value;
+ const out={cadence,timezone};
+ if(["minutes","hours"].includes(cadence))out.every=Number($("ai-recurring-every").value);
+ else {
+   out.at=$("ai-recurring-at").value;
+   if(cadence==="weekly")out.weekday=Number($("ai-recurring-weekday").value);
+   if(cadence==="monthly")out.monthday=Number($("ai-recurring-monthday").value);
+ }
+ return out;
+}
+async function loadAIRecurring(){
+ if(!csrf||aiRecurringBusy)return;
+ try{
+  const data=await request("/api/read-only-ai-schedules");
+  if(!csrf)return;
+  aiRecurringEnabled=!!data.enabled;
+  $("ai-recurring-badge").textContent=aiRecurringEnabled?
+    (data.worker_running?"Local AI worker running":"Enabled · worker not running"):
+    "Disabled by default · enable local AI and scheduling";
+  const list=$("ai-recurring-list");list.replaceChildren();
+  const tasks=Array.isArray(data.tasks)?data.tasks:[];
+  if(!tasks.length)list.textContent="No bounded AI schedules configured.";
+  for(const task of tasks){
+   const entry=document.createElement("div");entry.className="step";
+   const title=document.createElement("strong");
+   title.textContent=task.model+" · "+task.status;
+   const description=document.createElement("span");
+   description.textContent=task.prompt.slice(0,130)+
+     "\nAttempts "+task.attempted_runs+"/"+task.max_runs+
+     "\nNext due "+(task.next_due_utc||"none")+
+     "\nExpires "+task.expires_utc+
+     "\nNo external writes";
+   entry.append(title,description);
+   const view=document.createElement("button");view.className="btn";view.type="button";
+   view.textContent="View saved model results";
+   view.addEventListener("click",async()=>{
+    try{
+     const history=await request("/api/read-only-ai-history?task_id="+encodeURIComponent(task.task_id));
+     $("ai-recurring-history").textContent=(history.runs||[]).length?
+       history.runs.map(r=>r.scheduled_for_utc+" · "+r.status+
+         "\n"+(r.answer||("Error: "+(r.error||"none")))+
+         "\nTools: "+(r.tools_used||[]).join(", ")).join("\n\n"):
+       "No model runs completed.";
+    }catch(e){status("ai-recurring-status","Cannot view AI results: "+e.message,true);}
+   });
+   entry.append(view);
+   if(["ACTIVE","PAUSED","PAUSED_ERROR","PAUSED_UNCERTAIN"].includes(task.status)){
+    const pause=task.status==="ACTIVE";
+    const control=document.createElement("button");control.className="btn";
+    control.type="button";control.textContent=pause?"Pause task":"Resume task";
+    control.addEventListener("click",async()=>{
+     const password=$("ai-recurring-owner").value;
+     if(!password){status("ai-recurring-status","Enter current owner password to change a task.",true);return;}
+     if(!window.confirm((pause?"Pause":"Resume")+" this local AI schedule? In-flight inference cannot be cancelled."))return;
+     $("ai-recurring-owner").value="";
+     aiRecurringBusy=true;aiRecurringControls();
+     try{
+      await request(pause?"/api/read-only-ai-schedule-pause":
+       "/api/read-only-ai-schedule-resume",{
+       task_id:task.task_id,expected_epoch:task.control_epoch,
+       current_password:password});
+      status("ai-recurring-status","Task control saved; no external actions triggered.");
+     }catch(e){status("ai-recurring-status","Task change not confirmed: "+e.message,true);}
+     finally{aiRecurringBusy=false;aiRecurringControls();if(csrf)loadAIRecurring();}
+    });
+    entry.append(control);
+   }
+   list.append(entry);
+  }
+  aiRecurringControls();
+ }catch(e){if(csrf)status("ai-recurring-status","Unable to load AI schedules: "+e.message,true);}
+}
+$("ai-recurring-cadence").addEventListener("change",aiCadenceRender);
+for(const id of ["ai-recurring-prompt","ai-recurring-model","ai-recurring-owner"]){
+ $(id).addEventListener("input",aiRecurringControls);
+}
+$("ai-recurring-refresh").addEventListener("click",loadAIRecurring);
+$("ai-recurring-create").addEventListener("click",async()=>{
+ if(!csrf||aiRecurringBusy||!aiRecurringEnabled)return;
+ const current_password=$("ai-recurring-owner").value;
+ if(!current_password)return;
+ const body={prompt:$("ai-recurring-prompt").value.trim(),
+  model:$("ai-recurring-model").value.trim(),cadence:aiCadencePayload(),
+  max_runs:Number($("ai-recurring-limit").value),
+  expires_days:Number($("ai-recurring-days").value),current_password};
+ if(!window.confirm("Authorize REAL recurring local Ollama inference, up to "+
+   body.max_runs+" attempts for "+body.expires_days+
+   " days? Answers and prompts persist in plaintext local SQLite; no outbound tools."))return;
+ $("ai-recurring-owner").value="";
+ aiRecurringBusy=true;aiRecurringControls();
+ try{
+  const task=await request("/api/read-only-ai-schedule-create",body);
+  status("ai-recurring-status","Owner-authorized local AI task created: "+task.task_id);
+  $("ai-recurring-history").textContent="Inference will begin at its first due time. It is not a live model result yet.";
+ }catch(e){status("ai-recurring-status","AI schedule not confirmed: "+e.message,true);}
+ finally{aiRecurringBusy=false;aiRecurringControls();if(csrf)loadAIRecurring();}
+});
+aiCadenceRender();
 
 let n8nProofEnabled=false,n8nProofBusy=false;
 function n8nProofClear(){

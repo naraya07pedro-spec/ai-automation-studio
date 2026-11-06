@@ -1,0 +1,89 @@
+name: Durable local read-only AI scheduled inference acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_readonly_agent_scheduler.py'
+      - 'tests/test_readonly_agent_scheduler_http.py'
+      - '.github/workflows/readonly-ai-scheduler.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_readonly_agent_scheduler.py'
+      - 'tests/test_readonly_agent_scheduler_http.py'
+      - '.github/workflows/readonly-ai-scheduler.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scheduled-ai-readonly-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test real SQLite worker with deterministic fake Ollama transport
+        run: |
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler_http.py' -v
+      - name: Protect legacy deterministic scheduler and local Ollama semantics
+        run: |
+          python -m unittest discover -s tests -p 'test_recurring_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_local_ollama_agent.py' -v
+          python -m unittest discover -s tests -p 'test_local_model_safety.py' -v
+      - name: Compile changed Python and browser JS syntax
+        run: |
+          python -m py_compile app/local_readonly_agent_scheduler.py app/local_server.py app/local_security_audit.py app/launch_workbench.py deploy/private_vps_service.py
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(!scripts.length)throw Error('No Mission Control script');
+          scripts.forEach(x=>new vm.Script(x[1]));
+          console.log('All local AI schedule browser JS parsed');
+          NODE
+      - name: Verify generated local-ai systemd unit with scheduler flag
+        run: |
+          python - <<'PY'
+          import pathlib,subprocess,sys,tempfile
+          sys.path.insert(0,'deploy')
+          from private_vps_service import render_unit,PrivateVPSDeploymentError
+          with tempfile.TemporaryDirectory() as tmp:
+              p=pathlib.Path(tmp)/'ai-automation-studio.service'
+              unit=render_unit(username='runner',home='/home/runner',
+                  checkout='/home/runner/ai-automation-studio',
+                  python='/usr/bin/python3',mode='local-ai',scheduled_local_ai=True)
+              assert '--enable-local-agent' in unit
+              assert '--enable-scheduled-local-ai' in unit
+              assert '--enable-outbound-webhook' not in unit
+              p.write_text(unit)
+              subprocess.run(['systemd-analyze','verify',str(p)],check=True)
+              try:
+                  render_unit(username='runner',home='/home/runner',
+                      checkout='/home/runner/ai-automation-studio',
+                      python='/usr/bin/python3',mode='offline',scheduled_local_ai=True)
+              except PrivateVPSDeploymentError:
+                  pass
+              else:
+                  raise AssertionError('Offline mode should reject scheduled model calls')
+          PY
+      - name: Evidence boundary
+        run: echo "No Ollama installed/model inference, Tencent VM, n8n provider, Gmail account or business action exercised by this CI."

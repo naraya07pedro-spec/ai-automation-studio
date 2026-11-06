@@ -26,6 +26,7 @@ from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
 from local_n8n_delivery_proof import SignedN8NDeliveryProof, N8NProofError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
+from local_readonly_agent_scheduler import LocalReadOnlyAgentSchedules, AgentScheduleError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
@@ -103,7 +104,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    hn_job_discovery=None, greenhouse_evidence=None,
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
-                   google_gmail=None, managed_autopilot=None, n8n_proofs=None):
+                   google_gmail=None, managed_autopilot=None, n8n_proofs=None,
+                   scheduled_ai=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -124,6 +126,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
     agent_state_lock = threading.Lock()
+    if scheduled_ai is not None:
+        scheduled_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
                     if local_agent_plan_store is not None else None)
@@ -582,6 +586,29 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (sqlite3.Error,OSError):
                     self._send(503,{"error":"managed_connector_storage_unavailable"})
                 return
+            if route.path in ("/api/read-only-ai-schedules",
+                              "/api/read-only-ai-history"):
+                if scheduled_ai is None:
+                    self._send(200 if route.path.endswith("schedules") else 403,
+                               {"enabled":False,"tasks":[]} if route.path.endswith("schedules")
+                               else {"error":"scheduled_local_ai_disabled"})
+                    return
+                try:
+                    if route.path.endswith("schedules") and not route.query:
+                        self._send(200,scheduled_ai.list())
+                    elif route.path == "/api/read-only-ai-history":
+                        qs=parse_qs(route.query,keep_blank_values=True)
+                        if set(qs) != {"task_id"} or len(qs["task_id"]) != 1:
+                            self._send(422,{"error":"invalid_ai_schedule_query"})
+                        else:
+                            self._send(200,scheduled_ai.history(qs["task_id"][0]))
+                    else:
+                        self._send(422,{"error":"invalid_ai_schedule_query"})
+                except AgentScheduleError as exc:
+                    self._send(exc.status,{"error":str(exc)})
+                except (OSError,sqlite3.Error):
+                    self._send(503,{"error":"ai_schedule_storage_unavailable"})
+                return
             if route.path == "/api/n8n-delivery-proofs" and not route.query:
                 if n8n_proofs is None:
                     self._send(200, {"enabled":False,"records":[]})
@@ -702,6 +729,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-export",
                                  "/api/local-agent-action-preview",
                                  "/api/local-agent-action-commit",
+                                 "/api/read-only-ai-schedule-create",
+                                 "/api/read-only-ai-schedule-pause",
+                                 "/api/read-only-ai-schedule-resume",
                                  "/api/local-schedule-create",
                                  "/api/local-schedule-pause",
                                  "/api/local-schedule-resume",
@@ -750,6 +780,54 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/read-only-ai-schedule-create",
+                             "/api/read-only-ai-schedule-pause",
+                             "/api/read-only-ai-schedule-resume"):
+                if scheduled_ai is None:
+                    self._send(403,{"error":"scheduled_local_ai_disabled"})
+                    return
+                action="SCHEDULED_AI_OWNER_CHANGE"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                if type(data) is not dict or type(data.get("current_password")) is not str:
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"owner_password_required"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                values={k:v for k,v in data.items() if k!="current_password"}
+                try:
+                    if self.path.endswith("-create"):
+                        result=scheduled_ai.create(values)
+                        code=201
+                    else:
+                        result=scheduled_ai.change(
+                            values,pause=self.path.endswith("-pause"))
+                        code=200
+                except AgentScheduleError as exc:
+                    self._audit_event(action,"DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (OSError,sqlite3.Error):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"ai_schedule_result_uncertain_check_history"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"ai_schedule_audit_uncertain_check_history"})
+                else:
+                    self._send(code,result)
                 return
             if self.path in ("/api/local-agent-memory-save",
                              "/api/local-agent-memory-delete"):
@@ -2053,7 +2131,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_managed_webhooks=False,
                        enable_encrypted_managed_webhooks=False,
                        enable_google_gmail_metadata=False,
-                       enable_managed_autopilot=False):
+                       enable_managed_autopilot=False,
+                       enable_scheduled_local_ai=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -2064,6 +2143,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     except BaseException:
         audit.close()
         raise
+    if enable_scheduled_local_ai and not enable_local_agent:
+        raise ValueError("scheduled_local_ai_requires_local_agent")
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
@@ -2117,6 +2198,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
                     if enable_local_agent else None)
     scheduler = None
+    scheduled_ai = None
     outbound = None
     autopilot = None
     managed_autopilot = None
@@ -2151,6 +2233,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                 url=destination,
                 secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
+        if enable_scheduled_local_ai:
+            scheduled_ai = LocalReadOnlyAgentSchedules(
+                home / "readonly-ai-schedules.sqlite3")
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -2189,6 +2274,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_scheduler=scheduler,
+                           scheduled_ai=scheduled_ai,
                            outbound_webhook=outbound,
                            scheduled_autopilot=autopilot,
                            managed_connectors=managed,
@@ -2214,11 +2300,15 @@ def start_local_server(port=8765, enable_local_agent=False,
                                if enable_plan_actions else None)))
         print(f"Local AI Automation Studio: http://127.0.0.1:{server.server_port}")
         scheduler.start()
+        if scheduled_ai is not None:
+            scheduled_ai.start()
         try:
             server.serve_forever()
         finally:
             server.server_close()
     finally:
+        if scheduled_ai is not None:
+            scheduled_ai.close()
         if scheduler is not None:
             scheduler.close()
         if autopilot is not None:
@@ -2267,6 +2357,8 @@ def main(argv=None):
                        help="Create/rotate a high-entropy offline recovery code.")
     group.add_argument("--recover-owner", action="store_true",
                        help="Use a one-time code to reset lost owner password offline.")
+    parser.add_argument("--enable-scheduled-local-ai", action="store_true",
+                        help="Opt in to owner-armed recurring local Ollama read-only inference; requires local agent.")
     parser.add_argument("--enable-local-agent", action="store_true",
                         help="Explicitly enable authenticated Ollama calls in browser.")
     parser.add_argument("--enable-agent-memory", action="store_true",
@@ -2304,6 +2396,8 @@ def main(argv=None):
     parser.add_argument("--enable-agent-github-read", action="store_true",
                         help="Separately opt in to operator-allowlisted public GitHub issue reads in plans.")
     args = parser.parse_args(argv)
+    if args.enable_scheduled_local_ai and not args.enable_local_agent:
+        parser.error("--enable-scheduled-local-ai requires --enable-local-agent")
     if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
@@ -2413,8 +2507,9 @@ def main(argv=None):
                            enable_managed_webhooks=args.enable_managed_webhooks,
                            enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks,
                            enable_google_gmail_metadata=args.enable_google_gmail_metadata,
-                           enable_managed_autopilot=args.enable_managed_autopilot)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError) as exc:
+                           enable_managed_autopilot=args.enable_managed_autopilot,
+                           enable_scheduled_local_ai=args.enable_scheduled_local_ai)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
