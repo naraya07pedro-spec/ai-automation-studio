@@ -124,6 +124,26 @@ class ManagedAutopilotTests(unittest.TestCase):
                          {"target_a","target_b"})
         self.assertEqual(len(self.autopilot.list()["policies"]),2)
 
+    def test_four_connections_share_bounded_fair_tick_budget(self):
+        for cid in ("target_c","target_d"):
+            self.manager.add({"connector_id":cid,"label":cid,
+                "url":"https://n8n.example.org/webhook/"+cid,
+                "signing_secret":""})
+        for cid in ("target_a","target_b","target_c","target_d"):
+            self.arm(cid,limit=1)
+        self.clock.advance(minutes=1)
+        self.scheduler.run_due()
+        self.assertEqual(self.autopilot.dispatch_due(),3,
+                         "At most three total HTTP requests per worker scan")
+        self.assertEqual(len(self.events),3)
+        self.assertEqual(self.autopilot.dispatch_due(),1,
+                         "Fourth authorized connector must not starve")
+        self.assertEqual(len(self.events),4)
+        self.assertEqual(self.autopilot.dispatch_due(),0)
+        self.assertEqual({e[1]["connector_id"] for e in self.events},
+                         {"target_a","target_b","target_c","target_d"})
+        self.assertEqual(len({e[2] for e in self.events}),4)
+
     def test_unapproved_connector_never_receives_a_send(self):
         self.arm("target_a")
         self.tick(minutes=1)
