@@ -192,8 +192,10 @@ class OwnerLiveCLIIntegration(unittest.TestCase):
             cli.OwnerLiveClient(port=0)
         with self.assertRaises(cli.OwnerLiveAcceptanceError):
             cli.OwnerLiveClient(port="https://evil.example")
-        self.assertIsNone(cli.NoRedirect().redirect_request(
-            None,None,0,None,None,None) if False else None)
+        with self.assertRaisesRegex(cli.OwnerLiveAcceptanceError,
+                                    "unexpected_local_redirect"):
+            cli.NoRedirect().redirect_request(
+                None,None,302,"Found",{},"https://not-local.example")
 
     def test_cli_main_fails_safe_on_nonmatching_pin_without_disclosure(self):
         args=["inspect","--plan-id",fixtures.PLAN,
