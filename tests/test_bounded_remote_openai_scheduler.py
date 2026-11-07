@@ -213,6 +213,7 @@ class ScheduledRemoteTests(unittest.TestCase):
     def create(self,**updates):
         data={"prompt":"Draft one brief idea without accessing external tools.",
               "model":"gpt-6-luna","provider":"openai_responses",
+              "paid_api_consent":True,
               "cadence":{"cadence":"minutes","timezone":"Asia/Jakarta","every":1},
               "max_runs":2,"expires_days":3}
         data.update(updates)
