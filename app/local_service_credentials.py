@@ -12,6 +12,7 @@ CREDENTIAL_NAMES = {
     "AAS_VAULT_MASTER_KEY": "aas-vault-key",
     "AAS_WEBHOOK_URL": "aas-webhook-url",
     "AAS_WEBHOOK_SIGNING_SECRET": "aas-webhook-signing-secret",
+    "AAS_OPENAI_API_KEY": "aas-openai-api-key",
 }
 MAX_SECRET_BYTES = 8192
 

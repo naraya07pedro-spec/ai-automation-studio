@@ -98,6 +98,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
                         help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--enable-scheduled-openai", action="store_true",
+                        help="Explicitly opt in to paid OpenAI Responses API scheduled inference; requires --enable-scheduled-local-ai and a separate API key.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
                         help="Owner-armed recurring local AI inference, requires local-ai or full profile.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -125,6 +127,10 @@ def main(argv=None):
             if args.mode == "offline":
                 raise ValueError("scheduled local AI requires local-ai or full mode")
             flags += ("--enable-scheduled-local-ai",)
+        if args.enable_scheduled_openai:
+            if not args.enable_scheduled_local_ai:
+                raise ValueError("scheduled OpenAI requires --enable-scheduled-local-ai")
+            flags += ("--enable-scheduled-openai",)
         if args.enable_webhook:
             flags += ("--enable-outbound-webhook",)
         if args.enable_managed_webhooks and args.enable_encrypted_managed_webhooks:
@@ -176,6 +182,8 @@ def main(argv=None):
         print("Gmail metadata-only API is opt-in; each read requires owner password. No automated inbox polling or sends.")
     if args.enable_managed_webhooks:
         print("LEGACY managed webhooks: private OS files but NOT ENCRYPTED; prefer the encrypted mode for new connections.")
+    if args.enable_scheduled_openai:
+        print("WARNING: OpenAI Responses scheduled tasks can incur separate API charges, sending prompts to OpenAI; up to 3 requests/7 days per task, manual owner arm required.")
     if args.enable_scheduled_local_ai:
         print("Read-only AI scheduler active: owner-scoped local Ollama tasks, plain SQLite prompts and results.")
     if args.enable_managed_autopilot:
