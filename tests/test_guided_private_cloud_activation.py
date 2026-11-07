@@ -125,6 +125,14 @@ class GuidedCloudActivation(unittest.TestCase):
         self.assertEqual(activation._safe_public_report(report)["status"],
                          "READY_TO_APPLY_WITH_OWNER_CONSENT")
 
+    def test_sudo_python_rejects_user_owned_interpreter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            user_python = Path(tmp) / "python3"
+            user_python.write_text("fixture")
+            user_python.chmod(0o755)
+            with patch.object(activation.sys, "executable", str(user_python)):
+                self.assertFalse(activation._trusted_python_for_sudo())
+
     def test_absent_owner_store_is_initializable_but_insecure_store_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
