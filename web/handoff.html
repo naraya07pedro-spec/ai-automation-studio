@@ -85,6 +85,7 @@ button:disabled{opacity:.4;cursor:not-allowed}.row{display:flex;gap:12px;flex-wr
 <div class="grid">
 <div>
 <div class="notice">Requires separately enabled `--enable-n8n-execution-verify`, encrypted managed connector, owner configuration of n8n API origin/workflow/input node and a read-only API key. Max 8 remote reads per UTC day and one lookup per signed plan. No redirects, no arbitrary URLs, no auto-retry. If n8n's execution data was not retained, this feature fails closed.</div>
+<div class="output" id="verify-target">No n8n API instance provisioned in this server session.</div>
 <label for="verify-password">Current owner password (required for this single n8n GET)</label>
 <input id="verify-password" type="password" autocomplete="off">
 <div class="row">
@@ -165,6 +166,15 @@ async function refresh(){
   enabled=!!caps.agent_connector_handoff&&connectors.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
   signedEnabled=!!caps.signed_handoff_outcome_import;
   verifierEnabled=!!caps.n8n_execution_readonly_verify;
+  verifierConfig=verifierEnabled?{host:caps.n8n_execution_hostname,
+   workflow_id:caps.n8n_pinned_workflow_id,
+   node:caps.n8n_pinned_webhook_node}:null;
+  el("verify-target").textContent=verifierConfig?
+   "PINNED HTTPS HOST: "+verifierConfig.host+"\n"+
+   "PINNED n8n WORKFLOW: "+verifierConfig.workflow_id+"\n"+
+   "PINNED INBOUND NODE: "+verifierConfig.node+"\n"+
+   "API key: NEVER displayed or transmitted to browser.":
+   "Provider verification disabled. No n8n credential has been loaded.";
   signedControls();verifierControls();
   const completed=(plans.plans||[]).filter(x=>x.status==="COMPLETED");
   const active=(connectors.connectors||[]).filter(x=>x.status==="ACTIVE");
@@ -301,7 +311,7 @@ el("signed-import").addEventListener("click",async()=>{
 });
 
 // Stage 117: explicit one-shot owner n8n GET; absolutely no browser API key.
-let verifierEnabled=false,verifierBusy=false;
+let verifierEnabled=false,verifierBusy=false,verifierConfig=null;
 function verifierControls(){
  const active=!!csrf&&enabled&&verifierEnabled&&!working&&!signedBusy&&!verifierBusy;
  el("verify-run").disabled=!active||!/^[0-9a-f]{24}$/.test(el("plan").value)||
@@ -330,7 +340,10 @@ el("verify-run").addEventListener("click",async()=>{
  if(!csrf||working||verifierBusy||!verifierEnabled||!el("plan").value)return;
  const plan_id=el("plan").value;
  if(!window.confirm("AUTHORIZE ONE REAL READ-ONLY n8n API GET?\n\n"+
-  "Signed local plan: "+plan_id+
+  "Signed local plan: "+plan_id+"\n"+
+  "Pinned n8n host: "+(verifierConfig?.host||"unavailable")+"\n"+
+  "Pinned n8n workflow: "+(verifierConfig?.workflow_id||"unavailable")+"\n"+
+  "Pinned n8n input node: "+(verifierConfig?.node||"unavailable")+"\n"+
   "\nThe n8n API key stays inside the local server. No webhook will be sent or retried. "+
   "If the API cannot prove the exact incoming delivery, the outcome is NOT VERIFIED. "+
   "Only one request can be attempted for this plan."))return;
