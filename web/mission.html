@@ -410,6 +410,27 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+<section class="panel" id="cloud-plan-panel" aria-label="Cloud generated approved local tool plans" style="margin-top:20px">
+ <div class="split"><h2>14 · Cloud AI → Reviewed Local Plan</h2><span class="pill" id="cloud-plan-badge">Checking</span></div>
+ <p class="sub">Ask OpenAI for up to 3 read-only calculation/UTC clock steps. The model NEVER executes a tool. Review its validated proposal in section 02, then separately approve and run the steps. No shell, Gmail, n8n, GitHub edits, external writes or unsupervised actions.</p>
+ <div class="grid">
+  <div>
+   <label for="cloud-plan-model">OpenAI API model ID</label><input id="cloud-plan-model" maxlength="80" autocomplete="off" placeholder="Exact model enabled in your API account">
+   <label for="cloud-plan-goal">Goal (up to 1,200 characters)</label><textarea id="cloud-plan-goal" maxlength="1200" rows="4" placeholder="Calculate 18 × 7 then show current UTC time."></textarea>
+   <label><input id="cloud-plan-consent" type="checkbox"> I authorize exactly ONE potentially billable OpenAI API proposal. My goal leaves this device, with billing separate from ChatGPT.</label>
+   <label for="cloud-plan-owner">Current owner password, required for every proposal/recovery</label><input id="cloud-plan-owner" type="password" autocomplete="off">
+   <div class="btnrow"><button id="cloud-plan-propose" type="button" class="btn primary" disabled>Create one reviewed plan proposal</button></div>
+   <p class="status" id="cloud-plan-status" role="status">No cloud proposal submitted.</p>
+  </div>
+  <div>
+   <label for="cloud-plan-request-id">Existing request ID (32 lowercase hex) for zero-charge recovery</label><input id="cloud-plan-request-id" maxlength="32" autocomplete="off" placeholder="From the saved receipt in section 13">
+   <div class="btnrow"><button id="cloud-plan-recover" type="button" class="btn" disabled>Recover proposal, NO AI call</button></div>
+   <div class="output" id="cloud-plan-result">No validated plan. A model's proposed steps remain untrusted until reviewed.</div>
+   <p class="note">If a response is interrupted, enter exactly the original goal, model and request ID. Recovery verifies the saved prompt hash and never resends a paid request. Review the plan and choose Approve then Execute in section 02.</p>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -426,7 +447,7 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false;
+let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false,cloudPlanningEnabled=false;
 const readTools=new Set(["calculate","utc_now","github_public_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
 function status(id,message,error=false){$(id).textContent=message;$(id).classList.toggle("error",error);}
 function stopPolling(){if(poller!==null){clearInterval(poller);poller=null;}}
@@ -462,6 +483,7 @@ function lock(message){
  n8nProofClear();
  aiRecurringClear();
  cloudAskClear();
+ cloudPlanClear();
  setBusy(false);
 }
 async function unlock(){
@@ -474,6 +496,7 @@ async function loadCapabilities(){
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
   cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
+  cloudPlanningEnabled=!!info.cloud_plan_review;cloudPlanControls();
   if(cloudAskEnabled)loadCloudAskReceipts();
   chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":
@@ -1061,7 +1084,7 @@ async function loadCloudAskReceipts(){
   if(!items.length){box.textContent="No direct OpenAI attempts recorded.";return;}
   for(const item of items){
    const btn=document.createElement("button");btn.type="button";btn.className="record";
-   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc;
+   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc+" · ID "+item.request_id;
    btn.addEventListener("click",()=>cloudAskLookup(item.request_id));
    box.append(btn);
   }
