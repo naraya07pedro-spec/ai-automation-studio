@@ -182,7 +182,7 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
     def test_reject_absolute_traversal_and_nonportable_paths(self):
         for name in ("../operator.json", "/tmp/private", "a//b",
                      "a/../../b", "x\\y", "C:secret", "a/CON",
-                     "a/invalid."):
+                     "a/invalid.", "a/<bad>.json", "a/a?.json", "a/file|name", "a/name*"):
             with self.subTest(name=name):
                 self.assertFalse(backup._valid_rel(name))
         self.assertTrue(backup._valid_rel("managed-webhook-ledgers/key_1.sqlite3"))
