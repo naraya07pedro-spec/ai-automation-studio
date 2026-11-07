@@ -38,7 +38,7 @@ This returns JSON: `READY_TO_APPLY_WITH_OWNER_CONSENT` or `BLOCKED` with
 individual checks. It makes **no system changes**, does not read the API key,
 and never logs in to Tencent or OpenAI. Main preflight checks include Linux
 systemd, actual nonroot UID/home, Python, clean main checkout that includes
-PR #109, existing owner-storage permission safety, no installed Studio unit,
+PR #109, existing owner-storage permission safety, a root-owned/non-group-writable Python interpreter for sudo (a user-owned virtualenv is refused), no installed Studio unit,
 port 8765 currently free, and installed sudo.
 
 ### Step B: guided first-time activation
