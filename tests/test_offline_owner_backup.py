@@ -118,10 +118,16 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as second:
             foreign = Path(second) / "secret"
             foreign.write_text("unexpected")
-            (self.owner / "untrusted.txt").symlink_to(foreign)
-            with self.assertRaisesRegex(backup.BackupError, "symlink"):
-                self._create()
-            (self.owner / "untrusted.txt").unlink()
+            link = self.owner / "untrusted.txt"
+            try:
+                link.symlink_to(foreign)
+            except OSError:
+                # Some Windows CI identities lack symlink creation permission.
+                pass
+            else:
+                with self.assertRaisesRegex(backup.BackupError, "symlink"):
+                    self._create()
+                link.unlink()
         Path(str(self.database) + "-wal").write_bytes(b"uncertain-wal")
         with self.assertRaisesRegex(backup.BackupError, "sidecar"):
             self._create()
