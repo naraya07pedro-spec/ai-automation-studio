@@ -40,12 +40,12 @@ EXTERNAL_READ_FLAGS = (
 
 def feature_flags(mode, history=False):
     """Never enable history or remote reads without the corresponding choice."""
-    if mode not in ("offline", "local-ai", "full"):
+    if mode not in ("offline", "local-ai", "full", "cloud-only"):
         raise ValueError("invalid_quickstart_mode")
-    if mode == "offline" and history:
+    if mode in ("offline", "cloud-only") and history:
         raise ValueError("history_requires_local_ai")
     flags = ()
-    if mode != "offline":
+    if mode in ("local-ai", "full"):
         flags += LOCAL_AGENT_FLAGS
     if mode == "full":
         flags += EXTERNAL_READ_FLAGS
@@ -96,8 +96,8 @@ def _serve(flags):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
-    parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="full",
-                        help="offline=rules only; local-ai=no public-source tools; full=all available opt-in read tools")
+    parser.add_argument("--mode", choices=("offline", "local-ai", "full", "cloud-only"), default="full",
+                        help="offline=rules only; local-ai=Ollama; full=Ollama + opt-in source reads; cloud-only=OpenAI recurring text AI without Ollama")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
                         help="Explicitly opt in to paid OpenAI Responses API scheduled inference; requires --enable-scheduled-local-ai and a separate API key.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
@@ -123,13 +123,16 @@ def main(argv=None):
         return 2
     try:
         flags = feature_flags(args.mode, history=args.enable_history)
+        if args.mode == "cloud-only":
+            if not args.enable_scheduled_openai or args.enable_scheduled_local_ai:
+                raise ValueError("cloud-only requires --enable-scheduled-openai and forbids --enable-scheduled-local-ai")
         if args.enable_scheduled_local_ai:
-            if args.mode == "offline":
+            if args.mode in ("offline", "cloud-only"):
                 raise ValueError("scheduled local AI requires local-ai or full mode")
             flags += ("--enable-scheduled-local-ai",)
         if args.enable_scheduled_openai:
-            if not args.enable_scheduled_local_ai:
-                raise ValueError("scheduled OpenAI requires --enable-scheduled-local-ai")
+            if args.mode != "cloud-only" and not args.enable_scheduled_local_ai:
+                raise ValueError("scheduled OpenAI in local-ai/full requires --enable-scheduled-local-ai")
             flags += ("--enable-scheduled-openai",)
         if args.enable_webhook:
             flags += ("--enable-outbound-webhook",)
@@ -171,9 +174,11 @@ def main(argv=None):
     print("Profile: " + args.mode + " | HTTP: loopback only | webhook: " +
           ("OWNER-APPROVAL REQUIRED" if args.enable_webhook else "disabled"))
     print("This server stays on only while this console stays open. Use Ctrl+C to stop.")
-    if args.mode != "offline":
+    if args.mode in ("local-ai", "full"):
         print("Local AI needs independently installed Ollama and an installed model.")
         print("No automatic model download, compatibility test, or inference is started.")
+    if args.mode == "cloud-only":
+        print("Cloud-only mode: no local Ollama model or interactive Ollama chat required. OpenAI API is owner-approved and separately billed.")
     if args.enable_history:
         print("WARNING: local chat history is saved as plaintext.")
     if args.mode == "full":
