@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 import re
 import sqlite3
 import threading
@@ -59,10 +60,7 @@ class LocalWorkflowCore:
     """Operator-controlled, single-machine SQLite rules and evidence ledger."""
 
     def __init__(self, database=":memory:"):
-        if str(database) != ":memory:":
-            path = Path(database).expanduser()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            database = str(path)
+        database = prepare_private_sqlite(database)
         self._lock = threading.RLock()
         self.db = sqlite3.connect(str(database), check_same_thread=False)
         self.db.execute("PRAGMA busy_timeout=5000")
