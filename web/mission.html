@@ -608,7 +608,7 @@ function refreshActions(){
   "next":idle&&!activeBatch&&["APPROVED","NEXT_READY"].includes(s),
   "run-remaining":idle&&!activeBatch&&["APPROVED","NEXT_READY"].includes(s)&&supported,
   "stop":idle&&run==="RUNNING",
-  "report":idle&&s==="COMPLETED"&&!p.report,
+  "report":idle&&s==="COMPLETED"&&!p.report&&planningEnabled,
   "cancel":idle&&!activeBatch&&["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(s),
   "resume":idle&&s==="INTERRUPTED",
  })){
@@ -1039,6 +1039,76 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
+
+
+let cloudPlanBusy=false;
+function cloudPlanControls(){
+ $("cloud-plan-badge").textContent=cloudPlanningEnabled?"Cloud planning enabled":"Disabled";
+ const enabled=!!csrf&&!busy&&!cloudPlanBusy&&cloudPlanningEnabled&&
+  !!$("cloud-plan-goal").value.trim()&&!!$("cloud-plan-model").value.trim()&&
+  !!$("cloud-plan-owner").value;
+ $("cloud-plan-propose").disabled=!enabled||!$("cloud-plan-consent").checked;
+ $("cloud-plan-recover").disabled=!enabled||!/^[0-9a-f]{32}$/.test(
+  $("cloud-plan-request-id").value.trim());
+}
+function cloudPlanClear(){
+ cloudPlanningEnabled=false;cloudPlanBusy=false;
+ $("cloud-plan-owner").value="";$("cloud-plan-consent").checked=false;
+ $("cloud-plan-goal").value="";$("cloud-plan-request-id").value="";
+ $("cloud-plan-result").textContent="Session locked.";
+ $("cloud-plan-status").textContent="No cloud plan submitted in this session.";
+ cloudPlanControls();
+}
+async function cloudPlanRequest(recover){
+ if(!csrf||busy||cloudPlanBusy||!cloudPlanningEnabled)return;
+ if(!recover&&!$("cloud-plan-consent").checked)return;
+ const goal=$("cloud-plan-goal").value.trim(),model=$("cloud-plan-model").value.trim();
+ const current_password=$("cloud-plan-owner").value;
+ if(!goal||!model||!current_password)return;
+ if(!recover&&!confirm("Authorize ONE potentially billable OpenAI API planning request? The model can only PROPOSE calculation/time steps. No tools will run before your separate approval."))return;
+ if(!recover&&(!window.crypto||!window.crypto.getRandomValues)){
+  status("cloud-plan-status","Secure request ID generation unavailable.",true);return;
+ }
+ let request_id=$("cloud-plan-request-id").value.trim();
+ if(recover){
+  if(!/^[0-9a-f]{32}$/.test(request_id))return;
+ }else{
+  const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
+  request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+  $("cloud-plan-request-id").value=request_id;
+ }
+ const body={request_id,model,goal,current_password};
+ if(!recover)body.paid_api_consent=true;
+ $("cloud-plan-owner").value="";$("cloud-plan-consent").checked=false;
+ cloudPlanBusy=true;cloudPlanControls();
+ status("cloud-plan-status",recover?"Reading prior receipt without a model call…":
+  "One paid proposal attempted. If interrupted, use Recover, NOT Propose again.");
+ try{
+  const result=await request(recover?"/api/cloud-ai-plan-recover":
+   "/api/cloud-ai-plan-create",body);
+  if(!csrf)return;
+  $("cloud-plan-result").textContent="Request ID "+result.request_id+
+   "\nPlan: "+result.plan.plan_id+" · "+result.plan.status+
+   "\n\n"+result.plan.steps.map((x,i)=>(i+1)+". "+x.tool+" "+JSON.stringify(x.args)).join("\n")+
+   "\n\nTools executed: ZERO. Owner review is required in section 02.";
+  renderPlan(result.plan);
+  status("cloud-plan-status","Proposal saved. Scroll up to section 02, review each step, then click Approve and Execute separately.");
+  $("plan-detail").scrollIntoView({behavior:"smooth",block:"start"});
+ }catch(error){
+  if(csrf)status("cloud-plan-status","Plan not confirmed: "+error.message+
+   ". Request ID "+request_id+
+   ". Check existing receipt/real provider usage; recovery makes NO new AI call.",true);
+ }finally{
+  cloudPlanBusy=false;cloudPlanControls();
+  if(csrf)loadList();
+ }
+}
+for(const id of ["cloud-plan-goal","cloud-plan-model","cloud-plan-owner","cloud-plan-request-id"]){
+ $(id).addEventListener("input",cloudPlanControls);
+}
+$("cloud-plan-consent").addEventListener("change",cloudPlanControls);
+$("cloud-plan-propose").addEventListener("click",()=>cloudPlanRequest(false));
+$("cloud-plan-recover").addEventListener("click",()=>cloudPlanRequest(true));
 
 let cloudAskEnabled=false,cloudAskBusy=false,cloudAskLastId=null;
 function cloudAskControls(){
