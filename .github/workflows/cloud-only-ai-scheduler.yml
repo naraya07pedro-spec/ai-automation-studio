@@ -1,0 +1,83 @@
+name: True cloud-only owner AI scheduler startup acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_server.py'
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_cloud_only_scheduler.py'
+      - 'docs/CLOUD_ONLY_PRIVATE_AI_V1.md'
+      - '.github/workflows/cloud-only-ai-scheduler.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_server.py'
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'web/mission.html'
+      - 'tests/test_cloud_only_scheduler.py'
+      - 'docs/CLOUD_ONLY_PRIVATE_AI_V1.md'
+      - '.github/workflows/cloud-only-ai-scheduler.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud-only-startup-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prove real private server can boot with no Ollama, but without paid HTTP
+        run: python -m unittest discover -s tests -p 'test_cloud_only_scheduler.py' -v
+      - name: Regress explicit-billing remote API, old schedules, HTTP owner auth, local safety, Windows launcher and VPS
+        run: |
+          python -m unittest discover -s tests -p 'test_bounded_remote_openai_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler_http.py' -v
+          python -m unittest discover -s tests -p 'test_local_model_safety.py' -v
+          python -m unittest discover -s tests -p 'test_launch_workbench.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_release.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
+      - name: Compile all modified Python and parse Mission Control JS
+        run: |
+          python -m py_compile app/local_server.py app/local_readonly_agent_scheduler.py app/launch_workbench.py deploy/private_vps_service.py
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(!scripts.length)throw Error('Mission Control JS not found');
+          scripts.forEach(s=>new vm.Script(s[1]));
+          console.log('Mission Control JS parsed without runtime error');
+          NODE
+      - name: Ensure owner chooses remote-only and service remains private
+        run: |
+          python app/launch_workbench.py --help
+          python deploy/private_vps_service.py --help
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,'deploy')
+          from private_vps_service import render_unit
+          opts=dict(username='studio',checkout='/home/studio/studio',
+                    home='/home/studio',python='/usr/bin/python3',
+                    mode='cloud-only')
+          unit=render_unit(**opts,scheduled_openai=True)
+          assert '--enable-scheduled-openai' in unit
+          assert 'LoadCredential=aas-openai-api-key:' in unit
+          assert '--enable-local-agent' not in unit
+          assert '--enable-scheduled-local-ai' not in unit
+          assert 'ReadWritePaths=/home/studio/.ai-automation-studio' in unit
+          assert 'NoNewPrivileges=true' in unit
+          PY
+      - name: Report evidence limitations
+        run: echo "This suite executes an actual Python Studio server startup with stubbed HTTP listener and simulated provider. No real OpenAI charge, installed Ollama, Tencent VM, cloud reboot or external provider action is tested."
