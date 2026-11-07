@@ -664,7 +664,12 @@ class LocalAgentPlanStore:
             raise PlanError("plan_storage_unavailable") from None
 
     def create(self, proposed, memory_refs=None, document_snapshot=None,
-               document_set_snapshot=None, csv_snapshot=None):
+               document_set_snapshot=None, csv_snapshot=None, *, plan_id=None):
+        # A trusted internal paid-request bridge may bind a plan to a stable
+        # id; HTTP/model input must never supply this parameter directly.
+        if plan_id is not None and (type(plan_id) is not str
+                                    or ID_PATTERN.fullmatch(plan_id) is None):
+            raise PlanError("invalid_plan_id")
         if type(proposed) is not dict or set(proposed) != {"model", "goal", "steps"}:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
@@ -713,7 +718,7 @@ class LocalAgentPlanStore:
                         self.github_reader.check(step["args"]["repo"])
                     except GitHubPlanReadError:
                         raise PlanError("public_source_not_allowed") from None
-        pid = secrets.token_hex(12)
+        pid = secrets.token_hex(12) if plan_id is None else plan_id
         created = datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
             with self.lock, self.db:
