@@ -275,10 +275,11 @@ def main(argv=None):
     except (OwnerLiveAcceptanceError,EOFError,KeyboardInterrupt):
         report=_safe_report("PREFLIGHT_BLOCKED")
     print(json.dumps(report,sort_keys=True))
+    # A confirmed FAILED provider execution is useful evidence, but must NOT
+    # accidentally look like a successful task to Windows/shell automation.
     return 0 if report["status"] in (
         "READY_FOR_ONE_OWNER_APPROVED_N8N_READ",
-        "N8N_EXECUTION_SUCCESS_CORRELATED",
-        "N8N_EXECUTION_FAILED_CORRELATED") else 2
+        "N8N_EXECUTION_SUCCESS_CORRELATED") else 2
 
 
 if __name__=="__main__":
