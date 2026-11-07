@@ -85,6 +85,9 @@ class SignedManualHandoffOutcome:
                       execution_id TEXT NOT NULL,
                       signed_message_sha256 TEXT NOT NULL,
                       recorded_utc TEXT NOT NULL,
+                      dispatch_status_at_import TEXT NOT NULL CHECK(
+                          dispatch_status_at_import IN
+                          ('REMOTE_ACCEPTED','OUTCOME_UNCERTAIN')),
                       UNIQUE(connector_id,delivery_id),
                       FOREIGN KEY(plan_id) REFERENCES agent_connector_handoffs(plan_id)
                     )""")
@@ -156,12 +159,13 @@ class SignedManualHandoffOutcome:
                 with handoff.db:
                     old = handoff.db.execute("""SELECT plan_id,connector_id,
                         delivery_id,workflow_id,event_id,claimed_outcome,
-                        execution_id,signed_message_sha256,recorded_utc
+                        execution_id,signed_message_sha256,recorded_utc,
+                        dispatch_status_at_import
                         FROM signed_manual_handoff_outcomes
                         WHERE plan_id=?""", (pid,)).fetchone()
                     identity = (pid,cid,did,wid,eid,outcome,execution,fingerprint)
                     if old is not None:
-                        if old[:8] != identity:
+                        if old[:8] != identity or old[9] != dispatch:
                             raise HandoffOutcomeProofError(
                                 "conflicting_handoff_outcome_proof", 409)
                         result = "ALREADY_RECORDED"
@@ -172,11 +176,13 @@ class SignedManualHandoffOutcome:
                             signed_manual_handoff_outcomes(
                             plan_id,connector_id,delivery_id,workflow_id,event_id,
                             claimed_outcome,execution_id,signed_message_sha256,
-                            recorded_utc) VALUES(?,?,?,?,?,?,?,?,?)""",
-                            identity + (timestamp,))
-                        recorded = identity + (timestamp,)
+                            recorded_utc,dispatch_status_at_import)
+                            VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                            identity + (timestamp, dispatch))
+                        recorded = identity + (timestamp, dispatch)
                         result = "RECORDED"
-                return {"result":result, **self._public(recorded, dispatch)}
+                return {"result":result, **self._public(recorded, dispatch),
+                        "handoff_record_status_unchanged":row[8]}
             except ManagedConnectorError as exc:
                 raise HandoffOutcomeProofError(str(exc), exc.status) from None
             except sqlite3.IntegrityError:
@@ -195,7 +201,7 @@ class SignedManualHandoffOutcome:
                 rows = self.handoff.db.execute("""SELECT p.plan_id,p.connector_id,
                     p.delivery_id,p.workflow_id,p.event_id,p.claimed_outcome,
                     p.execution_id,p.signed_message_sha256,p.recorded_utc,
-                    h.status
+                    p.dispatch_status_at_import,h.status
                     FROM signed_manual_handoff_outcomes AS p
                     JOIN agent_connector_handoffs AS h ON p.plan_id=h.plan_id
                     ORDER BY p.recorded_utc DESC,p.plan_id DESC LIMIT ?""",
@@ -203,7 +209,9 @@ class SignedManualHandoffOutcome:
             except sqlite3.Error:
                 raise HandoffOutcomeProofError(
                     "handoff_outcome_storage_unavailable", 503) from None
-        return {"records":[self._public(row[:9],row[9]) for row in rows],
+        return {"records":[{**self._public(row[:9],row[9]),
+                             "handoff_record_status_unchanged":row[10]}
+                            for row in rows],
                 "evidence_scope":"OWNER_IMPORTED_SHARED_SECRET_SIGNED_FINAL_STEP",
                 "independently_verified_remote":False,
                 "business_effect_verified":False,
