@@ -2207,6 +2207,50 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path == "/api/signed-handoff-outcome-import":
+                if handoff_outcomes is None:
+                    self._send(403,{"error":"handoff_outcome_import_disabled"})
+                    return
+                action="SIGNED_HANDOFF_OUTCOME_IMPORT"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                required={"plan_id","connector_id","workflow_id","event_id",
+                          "delivery_id","outcome","execution_id",
+                          "proof_hmac_sha256","current_password"}
+                if (type(data) is not dict or set(data)!=required or
+                        type(data.get("current_password")) is not str):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"invalid_signed_handoff_import_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified != 200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                try:
+                    proof=handoff_outcomes.import_receipt(
+                        {k:v for k,v in data.items() if k!="current_password"})
+                except HandoffOutcomeProofError as exc:
+                    self._audit_event(action,"DENIED" if exc.status!=503 else "UNCERTAIN")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"handoff_proof_result_uncertain_read_ledger"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"handoff_proof_audit_uncertain_read_ledger"})
+                else:
+                    self._send(200,proof)
+                return
             if self.path == "/api/n8n-delivery-proof-import":
                 if n8n_proofs is None:
                     self._send(403,{"error":"n8n_proof_import_disabled"})
