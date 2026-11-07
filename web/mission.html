@@ -376,6 +376,9 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
       <label for="ai-recurring-owner">Current owner password, required to create or change schedules</label><input id="ai-recurring-owner" type="password" autocomplete="off" placeholder="Owner password">
       <div class="btnrow"><button id="ai-recurring-create" class="btn primary" type="button" disabled>Create bounded read-only AI task</button></div>
       <p class="status" id="ai-recurring-status" role="status">No AI task scheduled.</p>
+      <p class="status" id="ai-recurring-safety-state" role="status">Model safety checkpoint not checked.</p>
+      <div class="btnrow"><button id="ai-recurring-safety-ack" class="btn warn" type="button" disabled>I've reviewed uncertain model/provider outcomes</button></div>
+      <p class="sub">After a timeout, inspect your OpenAI API usage and billing (and Ollama if also enabled) before acknowledging. Acknowledgment NEVER resumes a task or retries a paid request; resume requires another owner-approved action.</p>
     </div>
     <div>
       <div class="split"><strong>AI tasks and safe controls</strong><button class="btn" type="button" id="ai-recurring-refresh">Refresh</button></div>
@@ -989,9 +992,10 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
-let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false;
+let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false,aiRecurringSafetyUncertain=false;
 function aiRecurringClear(){
- aiRecurringEnabled=false;aiRemoteEnabled=false;aiRecurringLocalEnabled=false;
+ aiRecurringEnabled=false;aiRemoteEnabled=false;aiRecurringLocalEnabled=false;aiRecurringSafetyUncertain=false;
+ $("ai-recurring-safety-state").textContent="Session locked.";
  $("ai-recurring-provider").value="local_ollama";
  $("ai-recurring-provider-consent").checked=false;
  aiProviderRender();
@@ -1009,6 +1013,8 @@ function aiRecurringControls(){
    ($("ai-recurring-provider").value==="openai_responses"&&
     (!aiRemoteEnabled||!$("ai-recurring-provider-consent").checked));
  $("ai-recurring-refresh").disabled=!csrf||busy||aiRecurringBusy;
+ $("ai-recurring-safety-ack").disabled=!csrf||busy||aiRecurringBusy||
+   !aiRecurringEnabled||!aiRecurringSafetyUncertain||!$("ai-recurring-owner").value;
 }
 function aiProviderRender(){
  const remote=$("ai-recurring-provider").value==="openai_responses";
@@ -1042,6 +1048,21 @@ function aiCadencePayload(){
    if(cadence==="monthly")out.monthday=Number($("ai-recurring-monthday").value);
  }
  return out;
+}
+async function loadAISafety(){
+ if(!csrf||aiRecurringBusy)return;
+ try{
+  const data=await request("/api/read-only-ai-safety");
+  if(!csrf)return;
+  aiRecurringSafetyUncertain=data.checkpoint_state==="UNCERTAIN";
+  $("ai-recurring-safety-state").textContent=aiRecurringSafetyUncertain?
+   "MODEL OUTCOME UNCERTAIN. Inspect provider usage/billing and any local Ollama work before acknowledging. No automatic retries.":
+   "Model safety checkpoint: "+(data.checkpoint_state||"unknown")+".";
+ }catch(error){
+  aiRecurringSafetyUncertain=false;
+  if(csrf)$("ai-recurring-safety-state").textContent="Unable to verify model checkpoint: "+error.message;
+ }
+ aiRecurringControls();
 }
 async function loadAIRecurring(){
  if(!csrf||aiRecurringBusy)return;
@@ -1115,6 +1136,7 @@ async function loadAIRecurring(){
    list.append(entry);
   }
   aiRecurringControls();
+  await loadAISafety();
  }catch(e){if(csrf)status("ai-recurring-status","Unable to load AI schedules: "+e.message,true);}
 }
 $("ai-recurring-cadence").addEventListener("change",aiCadenceRender);
@@ -1149,6 +1171,28 @@ $("ai-recurring-create").addEventListener("click",async()=>{
   $("ai-recurring-history").textContent="Inference will begin at its first due time. It is not a live model result yet.";
  }catch(e){status("ai-recurring-status","AI schedule not confirmed: "+e.message,true);}
  finally{aiRecurringBusy=false;aiRecurringControls();if(csrf)loadAIRecurring();}
+});
+$("ai-recurring-safety-ack").addEventListener("click",async()=>{
+ if(!csrf||!aiRecurringSafetyUncertain||aiRecurringBusy)return;
+ const current_password=$("ai-recurring-owner").value;
+ if(!current_password){
+  status("ai-recurring-status","Enter the current owner password before acknowledging model uncertainty.",true);
+  return;
+ }
+ if(!window.confirm("I have independently reviewed possible OpenAI API charges/usage and any local Ollama work. This acknowledgement cannot prove the backend stopped and it will NOT automatically retry or resume any task. Continue?"))return;
+ $("ai-recurring-owner").value="";
+ aiRecurringBusy=true;aiRecurringControls();
+ try{
+  const result=await request("/api/read-only-ai-safety-acknowledge",{
+   acknowledge:"ALL_MODEL_OUTCOMES_REVIEWED",current_password});
+  status("ai-recurring-status",result.status+
+    ". Previously uncertain tasks remain paused. Resume separately only after reviewing task history.");
+ }catch(e){
+  status("ai-recurring-status","Safety acknowledgement not confirmed: "+e.message,true);
+ }finally{
+  aiRecurringBusy=false;aiRecurringControls();
+  if(csrf)loadAIRecurring();
+ }
 });
 aiCadenceRender();
 aiProviderRender();
