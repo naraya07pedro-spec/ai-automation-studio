@@ -165,8 +165,10 @@ class SignedManualOutcomeTests(unittest.TestCase):
 
     def test_nonexistent_delivery_and_wrong_event_fail(self):
         did=self.send()["delivery_id"]
+        # An altered delivery ID is rejected at the Stage 114 handoff ledger,
+        # before the sender ledger is even accessed (earliest fail-closed gate).
         with self.assertRaisesRegex(HandoffOutcomeProofError,
-                                    "handoff_delivery_attempt_not_found"):
+                                    "handoff_dispatch_not_claimed"):
             self.proofs.import_receipt(self.signed("f"*32))
         with self.assertRaisesRegex(HandoffOutcomeProofError,
                                     "handoff_dispatch_not_claimed"):
