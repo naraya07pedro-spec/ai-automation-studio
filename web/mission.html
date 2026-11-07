@@ -389,6 +389,27 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
   </div>
 </section>
 
+<section class="panel" id="on-demand-cloud-ai-panel" aria-label="On-demand OpenAI text inference" style="margin-top:20px">
+ <div class="split"><h2>13 · Ask Cloud AI Now · One request</h2><span class="pill" id="cloud-ask-badge">Checking</span></div>
+ <p class="sub">Ask one text question without Ollama. Every call requires owner approval, incurs possible separate API charges, and sends the prompt to the provider. Maximum 5 attempts per UTC day and 200 total attempts. No web, MCP, shell, email, n8n, or model tools. Prompt hash, reply and token usage persist in local plaintext SQLite.</p>
+ <div class="grid">
+  <div>
+   <label for="cloud-ask-model">Model ID enabled in your OpenAI API account</label><input id="cloud-ask-model" maxlength="80" autocomplete="off" placeholder="Exact OpenAI API model ID">
+   <label for="cloud-ask-prompt">One text question (max 3000 characters)</label><textarea id="cloud-ask-prompt" rows="5" maxlength="3000" placeholder="Ask a brief nonsensitive question."></textarea>
+   <label><input id="cloud-ask-consent" type="checkbox"> I authorize one potentially billable OpenAI API request. Billing is separate from ChatGPT and no USD cap is guaranteed.</label>
+   <label for="cloud-ask-owner">Current owner password</label><input id="cloud-ask-owner" type="password" autocomplete="off">
+   <div class="btnrow"><button id="cloud-ask-submit" type="button" class="btn primary" disabled>Send one paid text request</button><button id="cloud-ask-recover" type="button" class="btn" disabled>Check last receipt (no retry)</button></div>
+   <p class="status" id="cloud-ask-status" role="status">No request made.</p>
+  </div>
+  <div>
+   <div class="split"><strong>Answer and durable receipts</strong><button id="cloud-ask-refresh" type="button" class="btn" disabled>Refresh receipts</button></div>
+   <div class="output" id="cloud-ask-answer">Authenticated answers appear here. Verify model claims independently.</div>
+   <div class="note" id="cloud-ask-receipts">Sign in to view receipts.</div>
+   <p class="sub">If network response fails, DO NOT send again blindly. Check the original receipt and actual provider billing first. Uncertain outcomes require the owner safety review in section 12.</p>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -440,24 +461,26 @@ function lock(message){
  managedAutoClear();
  n8nProofClear();
  aiRecurringClear();
+ cloudAskClear();
  setBusy(false);
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs(),loadAIRecurring()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs(),loadAIRecurring(),loadCloudAskReceipts()]);
  stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();loadManagedAutopilots();loadN8NProofs();loadAIRecurring();}},10000);
 }
 async function loadCapabilities(){
  try{
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
+  cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
   chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":
-    (info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
+    (info.remote_on_demand_ai?"OpenAI instant + scheduled enabled":info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
   $("scope").textContent=enabled?
    "Live local AI is enabled. Plans use a strict tool allowlist and explicit review. Real email sending, arbitrary websites, CRM mutation and shell execution are not enabled.":
    (info.remote_scheduled_ai?
-    "Cloud-only scheduled OpenAI tasks are available in section 12 after owner approval. Interactive Ollama chat and local model listing are disabled; no Ollama installation is required.":
+    "Cloud-only scheduled AI is in section 12, and owner-approved instant OpenAI questions are in section 13. Ollama remains optional.":
     "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.");
   setBusy(false);
  }catch(error){status("chat-status","Cannot load agent capabilities: "+error.message,true);}
