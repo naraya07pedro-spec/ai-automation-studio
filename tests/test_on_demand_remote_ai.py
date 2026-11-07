@@ -144,6 +144,14 @@ class DirectModelStoreTests(unittest.TestCase):
             self.store.run(payload("f"*32))
         self.assertEqual(len(self.calls),MAX_DAILY_ATTEMPTS)
 
+    def test_impossible_reported_output_token_count_quarantines_call(self):
+        self.store.runner=lambda *_:{
+            **good_result(), "usage":{"input_tokens":5,"output_tokens":999}}
+        with self.assertRaisesRegex(OnDemandRemoteAIError,"check_usage"):
+            self.store.run(payload())
+        self.assertEqual(self.store.receipt("a"*32)["status"],"OUTCOME_UNCERTAIN")
+        self.assertEqual(self.safety.phase(),"UNCERTAIN")
+
     def test_busy_gate_blocks_before_claim(self):
         self.gate.acquire()
         try:
