@@ -65,6 +65,7 @@ from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
 from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
+from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -85,6 +86,7 @@ MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
 MISSION = ROOT / "web" / "mission.html"
 HANDOFF = ROOT / "web" / "handoff.html"
+JOBS = ROOT / "web" / "jobs.html"
 _CONFIGURATION = {
     "source": "mock_inbox", "destination": "mock_crm",
     "follow_up_policy": "approval_required", "ai_mode": "mock",
@@ -111,7 +113,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
                    scheduled_ai=None, on_demand_ai=None,
-                   agent_connector_handoff=None):
+                   agent_connector_handoff=None, durable_jobs=None,
+                   shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -125,13 +128,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     knowledge = MockKnowledgeRouting()
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
-    agent_gate = threading.BoundedSemaphore(1)
+    agent_gate = shared_agent_gate if shared_agent_gate is not None else threading.BoundedSemaphore(1)
     hn_discovery_gate = threading.Lock()
     greenhouse_check_gate = threading.Lock()
     # Production injects a durable local SQLite checkpoint. Tests default to
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
-    agent_state_lock = threading.Lock()
+    agent_state_lock = (shared_agent_state_lock if shared_agent_state_lock is not None
+                        else threading.Lock())
     if scheduled_ai is not None:
         scheduled_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     if on_demand_ai is not None:
@@ -335,6 +339,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "remote_on_demand_ai": on_demand_ai is not None,
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
+                                 "durable_job_queue": durable_jobs is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -763,6 +768,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                            "text/html; charset=utf-8")
             elif self.path == "/mission":
                 self._send(200, MISSION.read_text(encoding="utf-8"),
+                           "text/html; charset=utf-8")
+            elif self.path == "/jobs":
+                self._send(200, JOBS.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
             elif self.path == "/handoff":
                 self._send(200, HANDOFF.read_text(encoding="utf-8"),
@@ -2504,6 +2512,9 @@ def start_local_server(port=8765, enable_local_agent=False,
     managed_autopilot = None
     n8n_proofs = None
     agent_handoff = None
+    durable_queue = None
+    shared_gate = threading.BoundedSemaphore(1)
+    shared_gate_lock = threading.Lock()
     managed = None
     gmail = None
     try:
@@ -2560,6 +2571,10 @@ def start_local_server(port=8765, enable_local_agent=False,
         if plan_store is not None and managed is not None and managed._vault is not None:
             agent_handoff = AgentConnectorHandoff(
                 plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
+        if plan_store is not None and model_safety is not None:
+            durable_queue = LocalDurablePlanQueue(
+                plan_store, model_safety, shared_gate, shared_gate_lock,
+                home / "durable-plan-jobs.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -2597,6 +2612,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            managed_autopilot=managed_autopilot,
                            n8n_proofs=n8n_proofs,
                             agent_connector_handoff=agent_handoff,
+                            durable_jobs=durable_queue,
+                            shared_agent_gate=shared_gate,
+                            shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
@@ -2636,6 +2654,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot.close()
         if outbound is not None:
             outbound.close()
+        if durable_queue is not None:
+            durable_queue.close()
         if agent_handoff is not None:
             agent_handoff.close()
         if managed is not None:
