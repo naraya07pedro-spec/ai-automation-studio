@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'app/local_server.py'
+      - 'app/local_security_audit.py'
       - 'app/local_readonly_agent_scheduler.py'
       - 'app/launch_workbench.py'
       - 'deploy/private_vps_service.py'
@@ -15,6 +16,7 @@ on:
     branches: [main]
     paths:
       - 'app/local_server.py'
+      - 'app/local_security_audit.py'
       - 'app/local_readonly_agent_scheduler.py'
       - 'app/launch_workbench.py'
       - 'deploy/private_vps_service.py'
@@ -51,7 +53,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
       - name: Compile all modified Python and parse Mission Control JS
         run: |
-          python -m py_compile app/local_server.py app/local_readonly_agent_scheduler.py app/launch_workbench.py deploy/private_vps_service.py
+          python -m py_compile app/local_server.py app/local_readonly_agent_scheduler.py app/local_security_audit.py app/launch_workbench.py deploy/private_vps_service.py
           node - <<'NODE'
           const fs=require('fs'),vm=require('vm');
           const html=fs.readFileSync('web/mission.html','utf8');
