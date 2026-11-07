@@ -110,9 +110,11 @@ class GuidedCloudActivation(unittest.TestCase):
              patch.object(activation, "_run_interactive", return_value=True) as run, \
              patch.object(verify_private_vps_runtime, "probe", return_value={
                  "status": "NOT_VERIFIED",
-             }), patch.object(verify_private_cloud_ai_runtime, "_check_cloud_process", return_value={}):
+             }), patch.object(verify_private_cloud_ai_runtime, "_check_cloud_process", return_value={}), \
+             patch.object(activation.time, "sleep", return_value=None) as sleep:
             result = activation.apply(confirm=activation.CONFIRMATION)
         self.assertEqual(result["status"], "DEPLOYMENT_INCOMPLETE_REVIEW_SYSTEMD")
+        self.assertEqual(sleep.call_count, 11)
         commands = [c.args[0] for c in run.call_args_list]
         self.assertEqual(len(commands), 3)
         self.assertFalse(any("provision_private_vps_credential.py" in " ".join(cmd)
@@ -124,6 +126,31 @@ class GuidedCloudActivation(unittest.TestCase):
         self.assertNotIn("user", activation._safe_public_report(report))
         self.assertEqual(activation._safe_public_report(report)["status"],
                          "READY_TO_APPLY_WITH_OWNER_CONSENT")
+
+    def test_delayed_http_startup_recovers_without_restart_or_paid_call(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(activation, "inspect", return_value=preflight()), \
+             patch.object(activation, "_owner_status", return_value=(True, False)), \
+             patch.object(activation.pwd, "getpwnam", return_value=types.SimpleNamespace(pw_dir=tmp)), \
+             patch.object(activation, "UNIT_FILE", Path(tmp) / "absent-unit"), \
+             patch.object(activation, "_is_port_free", return_value=True), \
+             patch.object(activation, "_quiet", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+             patch.object(activation, "_run_interactive", return_value=True) as run, \
+             patch.object(verify_private_vps_runtime, "probe", side_effect=[
+                 {"status": "NOT_VERIFIED"},
+                 {"status": "LIVE_PRIVATE_VPS_SNAPSHOT_PASSED"},
+             ]) as probe, \
+             patch.object(verify_private_cloud_ai_runtime, "_check_cloud_process", return_value={
+                 "nonroot_service_identity": True,
+                 "live_cloud_only_server_process": True,
+                 "root_owned_credential_declared_in_unit": True,
+             }), patch.object(activation.time, "sleep") as sleep:
+            result = activation.apply(confirm=activation.CONFIRMATION)
+        self.assertEqual(result["status"],
+                         "PRIVATE_CLOUD_SERVER_BOOT_VERIFIED_NO_MODEL_REQUEST")
+        self.assertEqual(probe.call_count, 2)
+        sleep.assert_called_once_with(0.5)
+        self.assertEqual(run.call_count, 3)
 
     def test_sudo_python_rejects_user_owned_interpreter(self):
         with tempfile.TemporaryDirectory() as tmp:
