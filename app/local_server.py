@@ -2222,6 +2222,51 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path == "/api/n8n-execution-check":
+                if n8n_execution_verifier is None:
+                    self._send(403,{"error":"n8n_execution_verify_disabled"})
+                    return
+                action="N8N_EXECUTION_READONLY_VERIFY"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                if (type(data) is not dict or
+                        set(data)!={"plan_id","current_password"} or
+                        type(data.get("current_password")) is not str):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"invalid_execution_check_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503
+                        else "operator_login_locked" if verified==429
+                        else "invalid_operator_credentials")})
+                    return
+                try:
+                    result=n8n_execution_verifier.verify_one(
+                        {"plan_id":data["plan_id"]})
+                except ProviderExecutionError as exc:
+                    self._audit_event(action,"UNCERTAIN" if exc.status==503 else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"n8n_execution_check_uncertain_read_ledger"})
+                    return
+                audit_result=("UNCERTAIN" if result["status"] in
+                    ("LOOKUP_UNCERTAIN","LOOKUP_NETWORK_OR_RESPONSE_UNCERTAIN")
+                    else "SUCCESS")
+                if not self._audit_event(action,audit_result):
+                    self._send(503,{"error":"n8n_check_audit_uncertain_read_ledger"})
+                else:
+                    self._send(200,result)
+                return
             if self.path == "/api/signed-handoff-outcome-import":
                 if handoff_outcomes is None:
                     self._send(403,{"error":"handoff_outcome_import_disabled"})
