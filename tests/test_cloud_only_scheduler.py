@@ -43,6 +43,7 @@ def remote_payload():
         "prompt": "Describe this fixed topic in one short sentence.",
         "model": "test-model-id",
         "provider": "openai_responses",
+        "paid_api_consent": True,
         "cadence": {"cadence": "minutes", "every": 1,
                     "timezone": "Asia/Jakarta"},
         "max_runs": 1, "expires_days": 1,
@@ -105,7 +106,7 @@ class CloudOnlyModes(unittest.TestCase):
         self.assertIn("--enable-scheduled-openai", unit)
         self.assertNotIn("--enable-local-agent", unit)
         self.assertNotIn("--enable-scheduled-local-ai", unit)
-        self.assertIn("127.0.0.1", "127.0.0.1")  # unchanged service bind contract
+        self.assertIn("ExecStart=/usr/bin/python3 /home/studio/studio/app/local_server.py", unit)
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertNotIn(KEY,unit)
         self.assertNotIn("EnvironmentFile=",unit)
