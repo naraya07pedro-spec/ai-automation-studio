@@ -319,6 +319,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     return
             if route.path == "/api/local-agent-capabilities" and not route.query:
                 self._send(200, {"enabled": local_agent_runner is not None,
+                                 "remote_scheduled_ai": bool(
+                                     scheduled_ai is not None
+                                     and scheduled_ai.remote_runner is not None),
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
