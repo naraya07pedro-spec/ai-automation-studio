@@ -23,12 +23,13 @@ Critical distinctions:
 | #111 | Encrypted offline local backup, verify, disposable-only restore | Merged; Linux/Windows synthetic CI | Backup/restore of actual owner state unverified |
 | #112 | Owner-confirmed immediate paid OpenAI text request, durable ID and receipts | Merged; 15/15 CI, 1,220 full suite tests per Python runtime | Real billable account/model response unverified |
 | **#113** | Cloud AI proposes a 1–3 step local read-only plan, owner separately approves and executes actual deterministic calculator/clock tools; safe no-charge receipt recovery | **PR #113 merged as `314c180ff2ad8ef077014daacedcde1035a5a67d`; 15/15 CI; 1,228 full-suite tests on Python 3.11/3.12/3.13 (74 optional skips each); 8 focused tests per version** | **Actual paid model answer and owner-PC execution unverified** |
+| **#114** | Owner-selected completed-plan evidence bound to an existing immutable local workflow receipt and encrypted managed HTTPS connector, separately approved single-send with durable no-retry/uncertain ledger, private `/handoff` UI | **[PR #114](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/114) merged as `636194df55f86e100d5551e4707821f91b686237`; exact tested head `622fd1a1511e7c2df21361175b9adc8cbb215558`; 17/17 CI success, 1,237 Python suite tests per 3 runtimes (83 skips each), Chromium 58/58** | Real owner PC, live n8n/HTTP downstream final outcome and provider usage unverified |
 
 The #113 improvement is **a complete engineering slice from a fake provider result to real local tools**, not live proof of the paid provider and not a general multi-tool autonomous agent. It does not obtain permission from model-supplied text, does not send email or mutate live CRM, and does not invoke tools without owner approval.
 
-### Stage #114 engineering advance (under CI review)
+### Stage #114 engineering advance (merged, CI verified)
 
-An owner-approved **plan-provenance → deterministic-workflow receipt → encrypted managed connector** handoff has been implemented in a review branch. It adds a durable local evidence binding, independently password-approved HTTPS one-shot send, no-retry uncertainty state, private UI, and new test coverage. It **does not** translate agent results into a business event or independently prove downstream effects. Main-branch and live claims depend on the stage PR merge and operator acceptance. Full scope: `docs/AGENT_CONNECTOR_HANDOFF_V1.md`.
+An owner-approved **plan-provenance → deterministic-workflow receipt → encrypted managed connector** handoff has been implemented and merged to `main`. It adds a durable local evidence binding, independently password-approved HTTPS one-shot send, no-retry uncertainty state, private UI, and new test coverage. It **does not** translate agent results into a business event or independently prove downstream effects. CI passed on the exact PR head, but real owner-PC/provider and downstream acceptance are still pending. Full scope: `docs/AGENT_CONNECTOR_HANDOFF_V1.md`.
 
 ## Next implementation work, in priority order
 
