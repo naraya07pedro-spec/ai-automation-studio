@@ -868,8 +868,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 try:
                     result = on_demand_ai.run(request)
                 except OnDemandRemoteAIError as exc:
-                    outcome = ("UNCERTAIN" if "uncertain" in str(exc)
-                               or "check_receipt" in str(exc)
+                    outcome = ("UNCERTAIN" if str(exc) in (
+                                   "remote_result_uncertain_check_usage_and_receipt",
+                                   "model_safety_storage_unavailable_check_receipt",
+                                   "remote_ask_ledger_uncertain")
                                else "DENIED" if exc.status in (403, 409, 422, 423, 429)
                                else "FAILED")
                     self._audit_event(action, outcome)
