@@ -147,7 +147,7 @@ class ProviderSafetyTests(unittest.TestCase):
         self.assertEqual(proxies,[])
         redirects=[h for h in opener.handlers if isinstance(h,NoRedirect)]
         self.assertEqual(len(redirects),1)
-        self.assertIsNone(redirects[0].redirect_request(None,None,302,"","https://evil.example"))
+        self.assertIsNone(redirects[0].redirect_request(None,None,302,"",None,"https://evil.example"))
 
     def test_fixed_credentials_allowlist_and_vps_unit_requires_opt_in(self):
         self.assertEqual(CREDENTIAL_NAMES["AAS_OPENAI_API_KEY"],"aas-openai-api-key")
