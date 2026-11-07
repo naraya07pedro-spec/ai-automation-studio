@@ -19,6 +19,7 @@ import socket
 import stat
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 UNIT = "ai-automation-studio.service"
@@ -223,10 +224,18 @@ def apply(*, confirm: str | None = None) -> dict:
     sys.path.insert(0, str(ROOT / "deploy"))
     from verify_private_vps_runtime import probe
     from verify_private_cloud_ai_runtime import _check_cloud_process
-    base = probe()
-    effective = _check_cloud_process()
-    passed = (base.get("status") == "LIVE_PRIVATE_VPS_SNAPSHOT_PASSED"
-              and all(effective.values()))
+    # systemctl is-active can precede the HTTP listener on a small VPS.
+    # Bounded observation only; never restarts or mutates a running service.
+    base, effective, passed = {}, {}, False
+    for attempt in range(12):
+        base = probe()
+        effective = _check_cloud_process()
+        passed = (base.get("status") == "LIVE_PRIVATE_VPS_SNAPSHOT_PASSED"
+                  and all(effective.values()))
+        if passed:
+            break
+        if attempt < 11:
+            time.sleep(0.5)
     return {
         "status": ("PRIVATE_CLOUD_SERVER_BOOT_VERIFIED_NO_MODEL_REQUEST"
                    if passed else "DEPLOYMENT_INCOMPLETE_REVIEW_SYSTEMD"),
