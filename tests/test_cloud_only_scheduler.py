@@ -262,7 +262,18 @@ class CloudOnlyHTTP(unittest.TestCase):
         with self.assertRaises(HTTPError) as rejected:
             self.post("/api/read-only-ai-schedule-create",wrong)
         self.assertEqual(rejected.exception.code,401)
+        for invalid_consent in (None, False, "true", 1):
+            no_consent=dict(body)
+            if invalid_consent is None:
+                no_consent.pop("paid_api_consent")
+            else:
+                no_consent["paid_api_consent"]=invalid_consent
+            with self.subTest(invalid_consent=invalid_consent):
+                with self.assertRaises(HTTPError) as blocked:
+                    self.post("/api/read-only-ai-schedule-create",no_consent)
+                self.assertEqual(blocked.exception.code,403)
         self.assertEqual(self.calls,[])
+        self.assertEqual(self.get("/api/read-only-ai-schedules")["tasks"],[])
         task=self.post("/api/read-only-ai-schedule-create",body)
         self.assertEqual(task["provider"],"openai_responses")
         self.assertEqual(self.calls,[],"API calls can only happen on due slot")
