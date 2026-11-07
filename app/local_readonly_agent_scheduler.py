@@ -22,6 +22,7 @@ from local_recurring_scheduler import (
     ALLOWED_ZONES, CADENCES, CLOCK_PATTERN, SCHEDULE_ID,
     _aware, _iso, next_occurrence, utcnow)
 from local_model_safety import ModelSafetyError
+from openai_readonly_responses import valid_remote_model_name
 
 MAX_TASKS = 12
 MAX_RUNS = 30
@@ -64,14 +65,27 @@ def validate_cadence(data):
     return dict(data)
 
 
-def _validate_create(request):
+def _validate_create(request, remote_enabled=False):
     fields = {"prompt", "model", "cadence", "max_runs", "expires_days"}
-    if type(request) is not dict or set(request) != fields:
+    if type(request) is not dict or not fields.issubset(request) or not set(request) <= fields | {"provider"}:
         raise AgentScheduleError("invalid_ai_task_fields")
     prompt, model = request["prompt"], request["model"]
     if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
         raise AgentScheduleError("invalid_ai_task_prompt")
-    if not valid_model_name(model):
+    provider = request.get("provider", "local_ollama")
+    if provider == "openai_responses":
+        if not remote_enabled:
+            raise AgentScheduleError("remote_model_not_enabled", 403)
+        if not valid_remote_model_name(model):
+            raise AgentScheduleError("invalid_remote_model_name")
+        if (type(request.get("max_runs")) is not int
+                or request["max_runs"] > 3
+                or type(request.get("expires_days")) is not int
+                or request["expires_days"] > 7):
+            raise AgentScheduleError("remote_task_request_cap_exceeded")
+    elif provider != "local_ollama":
+        raise AgentScheduleError("invalid_ai_task_provider")
+    elif not valid_model_name(model):
         raise AgentScheduleError("invalid_ai_task_model")
     if (type(request["max_runs"]) is not int or
             not 1 <= request["max_runs"] <= MAX_RUNS or
@@ -83,9 +97,11 @@ def _validate_create(request):
 
 class LocalReadOnlyAgentSchedules:
     def __init__(self, database, runner=run_agent, clock=utcnow,
-                 model_safety=None, agent_gate=None, agent_state_lock=None):
+                 model_safety=None, agent_gate=None, agent_state_lock=None,
+                 remote_runner=None):
         self.clock = clock
         self.runner = runner
+        self.remote_runner = remote_runner
         self.model_safety = model_safety
         self.agent_gate = agent_gate
         self.agent_state_lock = agent_state_lock or threading.RLock()
@@ -125,12 +141,23 @@ class LocalReadOnlyAgentSchedules:
                 expires_utc TEXT NOT NULL, max_runs INTEGER NOT NULL,
                 attempted_runs INTEGER NOT NULL DEFAULT 0,
                 control_epoch INTEGER NOT NULL DEFAULT 0,
-                created_utc TEXT NOT NULL, last_run_utc TEXT)""")
+                created_utc TEXT NOT NULL, last_run_utc TEXT,
+                provider TEXT NOT NULL DEFAULT 'local_ollama')""")
+            schedule_columns = {row[1] for row in self.db.execute(
+                "PRAGMA table_info(ai_schedules)").fetchall()}
+            if "provider" not in schedule_columns:
+                self.db.execute("ALTER TABLE ai_schedules ADD COLUMN provider "
+                                "TEXT NOT NULL DEFAULT 'local_ollama'")
             self.db.execute("""CREATE TABLE IF NOT EXISTS ai_schedule_runs(
                 task_id TEXT NOT NULL, slot_utc TEXT NOT NULL,
                 status TEXT NOT NULL, answer TEXT, tools_json TEXT,
                 error TEXT, claimed_utc TEXT NOT NULL, finished_utc TEXT,
-                PRIMARY KEY(task_id,slot_utc))""")
+                usage_json TEXT, PRIMARY KEY(task_id,slot_utc))""")
+            history_columns = {row[1] for row in self.db.execute(
+                "PRAGMA table_info(ai_schedule_runs)").fetchall()}
+            if "usage_json" not in history_columns:
+                self.db.execute("ALTER TABLE ai_schedule_runs "
+                                "ADD COLUMN usage_json TEXT")
             self.db.execute("CREATE INDEX IF NOT EXISTS ai_due ON ai_schedules(status,next_due_utc)")
             # Ollama POST may have reached the model at process death.
             unsettled = self.db.execute("""SELECT DISTINCT task_id FROM ai_schedule_runs
@@ -154,28 +181,31 @@ class LocalReadOnlyAgentSchedules:
 
     @staticmethod
     def _public(row):
-        tid, prompt, model, raw, status, due, expires, limit, attempted, epoch, created, last = row
+        tid, prompt, model, raw, status, due, expires, limit, attempted, epoch, created, last, provider = row
         return {"task_id":tid, "prompt":prompt, "model":model,
+                "provider":provider,
                 "cadence":json.loads(raw),"status":status,
                 "next_due_utc":due if status == "ACTIVE" else None,
                 "expires_utc":expires,"max_runs":limit,
                 "attempted_runs":attempted,"control_epoch":epoch,
                 "created_utc":created,"last_run_utc":last,
                 "external_dispatch_count":0,
-                "model_tools":"LOCAL_READ_ONLY_CALCULATOR_UTC"}
+                "model_tools":("NONE_REMOTE_TEXT_ONLY" if provider=="openai_responses"
+                               else "LOCAL_READ_ONLY_CALCULATOR_UTC"),
+                "remote_api_request_limit":limit if provider=="openai_responses" else 0}
 
     def _get(self, tid):
         if type(tid) is not str or not SCHEDULE_ID.fullmatch(tid):
             raise AgentScheduleError("invalid_ai_task_id")
         result = self.db.execute("""SELECT task_id,prompt,model,config_json,status,
             next_due_utc,expires_utc,max_runs,attempted_runs,control_epoch,
-            created_utc,last_run_utc FROM ai_schedules WHERE task_id=?""", (tid,)).fetchone()
+            created_utc,last_run_utc,provider FROM ai_schedules WHERE task_id=?""", (tid,)).fetchone()
         if result is None:
             raise AgentScheduleError("ai_task_not_found", 404)
         return self._public(result)
 
     def create(self, request):
-        cadence = _validate_create(request)
+        cadence = _validate_create(request, remote_enabled=self.remote_runner is not None)
         now = _aware(self.clock())
         expires = _iso(now + timedelta(days=request["expires_days"]))
         tid = secrets.token_hex(12)
