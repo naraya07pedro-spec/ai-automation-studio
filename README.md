@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #115 · Durable cross-plan job queue (local-first, no VPS)
+
+The [private job queue](/jobs), served as `http://127.0.0.1:8765/jobs`, coordinates **two to eight separately approved read-only plans** in a dependency-aware DAG. Owner-created jobs persist in a separate SQLite ledger with priority (0–3), fair selection among equal-priority jobs, step claim/receipt digests, pause/resume/cancel, and conservative restart quarantine. Each step requires **fresh owner password + session + CSRF + click**; no background auto-run, arbitrary model tools, external writes, implicit paid calls, or blind retry. See [Stage #115 guide](docs/DURABLE_PLAN_QUEUE_V1.md) and evidence in [progress ledger](docs/PROGRESS.md).
+
+
 ## Stage #114 · Completed agent to owner-approved connector handoff (no VPS)
 
 A completed local agent plan can now be explicitly associated by the operator with an already saved deterministic workflow event and an encrypted managed HTTPS connector. The private [handoff workbench](/handoff) (served at `http://127.0.0.1:8765/handoff`) offers a hash-bound exact preview, independent owner-password approval, one durable no-retry dispatch through the existing connector ledger, and read-only status history. The model cannot grant write permission, the plan contents are never posted, and **HTTP 2xx is not downstream success**. See [the operator guide](docs/AGENT_CONNECTOR_HANDOFF_V1.md). No live owner-PC, n8n, OpenAI billing or Tencent proof is claimed by CI.

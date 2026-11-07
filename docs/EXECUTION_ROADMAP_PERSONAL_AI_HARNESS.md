@@ -31,6 +31,10 @@ The #113 improvement is **a complete engineering slice from a fake provider resu
 
 An owner-approved **plan-provenance → deterministic-workflow receipt → encrypted managed connector** handoff has been implemented and merged to `main`. It adds a durable local evidence binding, independently password-approved HTTPS one-shot send, no-retry uncertainty state, private UI, and new test coverage. It **does not** translate agent results into a business event or independently prove downstream effects. CI passed on the exact PR head, but real owner-PC/provider and downstream acceptance are still pending. Full scope: `docs/AGENT_CONNECTOR_HANDOFF_V1.md`.
 
+### Stage #115 implementation candidate (under CI review)
+
+The owner-activated **Durable Multi-Plan DAG Queue** at `/jobs` adds 2–8 existing approved plan nodes per job, explicit per-node dependencies, bounded priority with fairness between equal-priority jobs, SQLite step claims and receipt digests, owner-authenticated one-step execution, pause/resume/cancel, and crash quarantine with proven-step-only owner reconciliation. **No automatic background dispatch, no model-granted write permission, no real provider/network success claim.** See `docs/DURABLE_PLAN_QUEUE_V1.md`. Merge/CI claims must be updated only after verified GitHub evidence.
+
 ## Next implementation work, in priority order
 
 ### P0 · Actual owner-PC acceptance and continuity (next operator gate)

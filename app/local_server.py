@@ -65,6 +65,7 @@ from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
 from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
+from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -85,6 +86,7 @@ MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
 MISSION = ROOT / "web" / "mission.html"
 HANDOFF = ROOT / "web" / "handoff.html"
+JOBS = ROOT / "web" / "jobs.html"
 _CONFIGURATION = {
     "source": "mock_inbox", "destination": "mock_crm",
     "follow_up_policy": "approval_required", "ai_mode": "mock",
@@ -111,7 +113,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
                    scheduled_ai=None, on_demand_ai=None,
-                   agent_connector_handoff=None):
+                   agent_connector_handoff=None, durable_jobs=None,
+                   shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -125,13 +128,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     knowledge = MockKnowledgeRouting()
     core = local_core if local_core is not None else LocalWorkflowCore()
     batch = LocalCSVBatchIntake(core)
-    agent_gate = threading.BoundedSemaphore(1)
+    agent_gate = shared_agent_gate if shared_agent_gate is not None else threading.BoundedSemaphore(1)
     hn_discovery_gate = threading.Lock()
     greenhouse_check_gate = threading.Lock()
     # Production injects a durable local SQLite checkpoint. Tests default to
     # isolated in-memory state and may explicitly supply a disk-backed store.
     model_safety = model_safety_state if model_safety_state is not None else LocalModelSafetyState()
-    agent_state_lock = threading.Lock()
+    agent_state_lock = (shared_agent_state_lock if shared_agent_state_lock is not None
+                        else threading.Lock())
     if scheduled_ai is not None:
         scheduled_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     if on_demand_ai is not None:
@@ -335,6 +339,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "remote_on_demand_ai": on_demand_ai is not None,
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
+                                 "durable_job_queue": durable_jobs is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -581,6 +586,23 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except GmailConnectorError:
                         self._send(503, {"error":"google_grant_invalid_or_locked"})
                 return
+            if route.path in ("/api/durable-jobs", "/api/durable-job-history"):
+                if durable_jobs is None:
+                    self._send(403, {"error":"durable_job_queue_disabled"})
+                    return
+                try:
+                    if route.path=="/api/durable-jobs" and not route.query:
+                        self._send(200, durable_jobs.list())
+                        return
+                    if route.path=="/api/durable-job-history":
+                        query=parse_qs(route.query,keep_blank_values=True)
+                        if set(query)=={"job_id"} and len(query["job_id"])==1:
+                            self._send(200,durable_jobs.history(query["job_id"][0]))
+                            return
+                    self._send(422,{"error":"invalid_job_query"})
+                except DurableQueueError as exc:
+                    self._send(exc.status,{"error":str(exc)})
+                return
             if route.path == "/api/agent-connector-handoffs":
                 if agent_connector_handoff is None:
                     self._send(403, {"error":"agent_connector_handoff_disabled"})
@@ -764,6 +786,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             elif self.path == "/mission":
                 self._send(200, MISSION.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
+            elif self.path == "/jobs":
+                self._send(200, JOBS.read_text(encoding="utf-8"),
+                           "text/html; charset=utf-8")
             elif self.path == "/handoff":
                 self._send(200, HANDOFF.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
@@ -832,7 +857,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/managed-webhook-preview",
                                  "/api/managed-webhook-commit",
                                  "/api/agent-connector-handoff-preview",
-                                 "/api/agent-connector-handoff-commit"):
+                                 "/api/agent-connector-handoff-commit",
+                                 "/api/durable-job-create",
+                                 "/api/durable-job-arm",
+                                 "/api/durable-job-pause",
+                                 "/api/durable-job-resume",
+                                 "/api/durable-job-cancel",
+                                 "/api/durable-job-run-one",
+                                 "/api/durable-job-reconcile"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1985,6 +2017,67 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, result)
                 return
+            if self.path in ("/api/durable-job-create","/api/durable-job-arm",
+                             "/api/durable-job-pause","/api/durable-job-resume",
+                             "/api/durable-job-cancel","/api/durable-job-run-one",
+                             "/api/durable-job-reconcile"):
+                if durable_jobs is None:
+                    self._send(403, {"error":"durable_job_queue_disabled"})
+                    return
+                action=("DURABLE_JOB_STEP" if self.path.endswith("run-one")
+                        else "DURABLE_JOB_CONTROL")
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if type(data) is not dict or type(data.get("current_password")) is not str:
+                        raise DurableQueueError("owner_password_required",422)
+                    if operator_auth is None:
+                        raise DurableQueueError("real_owner_required",403)
+                    verified=operator_auth.confirm_current_password(data["current_password"])
+                    if verified!=200:
+                        self._audit_event(action,"DENIED")
+                        self._send(verified,{"error":(
+                            "operator_restart_required" if verified==503 else
+                            "operator_login_locked" if verified==429 else
+                            "invalid_operator_credentials")})
+                        return
+                    values={k:v for k,v in data.items() if k!="current_password"}
+                    if self.path.endswith("create"):
+                        outcome=durable_jobs.create(values)
+                    elif self.path.endswith("reconcile"):
+                        if set(values)!={"job_id","plan_id"}:
+                            raise DurableQueueError("invalid_job_fields",422)
+                        outcome=durable_jobs.reconcile_recorded(
+                            values["job_id"],values["plan_id"])
+                    elif self.path.endswith("run-one"):
+                        if not set(values).issubset({"job_id"}):
+                            raise DurableQueueError("invalid_job_fields",422)
+                        outcome=durable_jobs.run_one(values.get("job_id"))
+                    else:
+                        if set(values)!={"job_id"}:
+                            raise DurableQueueError("invalid_job_fields",422)
+                        method={
+                            "/api/durable-job-arm":durable_jobs.arm,
+                            "/api/durable-job-pause":durable_jobs.pause,
+                            "/api/durable-job-resume":durable_jobs.resume,
+                            "/api/durable-job-cancel":durable_jobs.cancel,
+                        }[self.path]
+                        outcome=method(values["job_id"])
+                except DurableQueueError as exc:
+                    uncertain=("uncertain" in str(exc) or "checkpoint" in str(exc))
+                    self._audit_event(action,"UNCERTAIN" if uncertain else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"job_state_uncertain_check_history"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"job_audit_uncertain_check_history"})
+                else:
+                    self._send(200,outcome)
+                return
             if self.path in ("/api/agent-connector-handoff-preview",
                              "/api/agent-connector-handoff-commit"):
                 if agent_connector_handoff is None:
@@ -2504,6 +2597,9 @@ def start_local_server(port=8765, enable_local_agent=False,
     managed_autopilot = None
     n8n_proofs = None
     agent_handoff = None
+    durable_queue = None
+    shared_gate = threading.BoundedSemaphore(1)
+    shared_gate_lock = threading.Lock()
     managed = None
     gmail = None
     try:
@@ -2560,6 +2656,10 @@ def start_local_server(port=8765, enable_local_agent=False,
         if plan_store is not None and managed is not None and managed._vault is not None:
             agent_handoff = AgentConnectorHandoff(
                 plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
+        if plan_store is not None and model_safety is not None:
+            durable_queue = LocalDurablePlanQueue(
+                plan_store, model_safety, shared_gate, shared_gate_lock,
+                home / "durable-plan-jobs.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -2597,6 +2697,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                            managed_autopilot=managed_autopilot,
                            n8n_proofs=n8n_proofs,
                             agent_connector_handoff=agent_handoff,
+                            durable_jobs=durable_queue,
+                            shared_agent_gate=shared_gate,
+                            shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
@@ -2636,6 +2739,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot.close()
         if outbound is not None:
             outbound.close()
+        if durable_queue is not None:
+            durable_queue.close()
         if agent_handoff is not None:
             agent_handoff.close()
         if managed is not None:

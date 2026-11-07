@@ -1,0 +1,61 @@
+name: Stage 115 durable owner-driven plan queue
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_durable_plan_queue.py'
+      - 'app/local_model_safety.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_security_audit.py'
+      - 'app/local_server.py'
+      - 'web/jobs.html'
+      - 'web/mission.html'
+      - 'tests/test_durable_plan_queue.py'
+      - 'docs/DURABLE_PLAN_QUEUE_V1.md'
+      - '.github/workflows/durable-plan-queue.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_durable_plan_queue.py'
+      - 'app/local_model_safety.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_security_audit.py'
+      - 'app/local_server.py'
+      - 'web/jobs.html'
+      - 'web/mission.html'
+      - 'tests/test_durable_plan_queue.py'
+      - 'docs/DURABLE_PLAN_QUEUE_V1.md'
+      - '.github/workflows/durable-plan-queue.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  durable-plan-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Durable cross-plan DAG and loopback owner-gate acceptance
+        run: python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
+      - name: Regress durable plan store, batch, cloud handoff and HTTP security
+        run: |
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_server_batch.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_plan_bridge.py' -v
+          python -m unittest discover -s tests -p 'test_agent_connector_handoff.py' -v
+      - name: Syntax-check local files
+        run: python -m py_compile app/local_durable_plan_queue.py app/local_security_audit.py app/local_server.py tests/test_durable_plan_queue.py
+      - name: Syntax-check operator browser scripts
+        run: |
+          node -e 'const fs=require("fs"); for(const p of ["web/jobs.html","web/mission.html","web/handoff.html"]){const s=fs.readFileSync(p,"utf8");const m=s.split("<script>")[1]?.split("</script>")[0];if(!m)throw Error(p+" missing script");new Function(m)}'
