@@ -60,7 +60,7 @@ def _valid_rel(name):
     segments = name.split("/")
     return all(
         seg not in ("", ".", "..") and not seg.endswith((".", " "))
-        and ":" not in seg and "\\" not in seg
+        and not any(char in seg for char in '< > : " | ? * \\ '.replace(" ", ""))
         and not any(ord(ch) < 32 or ord(ch) == 127 for ch in seg)
         and seg.split(".")[0].upper() not in
         {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1,10)),
