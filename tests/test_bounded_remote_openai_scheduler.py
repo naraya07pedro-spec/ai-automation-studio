@@ -142,8 +142,9 @@ class ProviderSafetyTests(unittest.TestCase):
         from urllib.request import ProxyHandler
         opener=safe_remote_opener()
         proxies=[h for h in opener.handlers if isinstance(h,ProxyHandler)]
-        self.assertEqual(len(proxies),1)
-        self.assertEqual(proxies[0].proxies,{})
+        # urllib omits an explicitly empty ProxyHandler from handlers;
+        # no proxy handler means no environment-inherited proxy route.
+        self.assertEqual(proxies,[])
         redirects=[h for h in opener.handlers if isinstance(h,NoRedirect)]
         self.assertEqual(len(redirects),1)
         self.assertIsNone(redirects[0].redirect_request(None,None,302,"","https://evil.example"))
@@ -335,6 +336,7 @@ class ScheduledRemoteTests(unittest.TestCase):
                 '2026-11-08T10:00:00+00:00',3,0,0,
                 '2026-11-07T09:00:00+00:00',NULL)""")
         db.close()
+        self.path.chmod(0o600)
         self.scheduled=LocalReadOnlyAgentSchedules(
             self.path,clock=self.clock,model_safety=self.safety,
             agent_gate=self.gate,agent_state_lock=self.lock)
