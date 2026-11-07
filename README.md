@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #119 · Real owner-run n8n acceptance client (explicit one-read consent)
+
+`python tools/owner_live_n8n_acceptance.py inspect ...` checks the actual localhost owner session, pinned provider host/workflow/node, previously accepted HMAC-signed final-step claim and no earlier provider lookup. **Inspect makes zero n8n requests.** `verify ...` separately requires a hidden owner password and a typed explicit confirmation before it can call the existing Stage #117 endpoint for **one official n8n execution GET**. Remote read errors are reported without retries or leaked secrets. CLI exit code is nonzero for failed n8n execution, uncertainty or mismatch; an execution success still **does NOT prove a downstream business effect**. Owner Windows commands: [Stage #119 guide](docs/OWNER_LIVE_N8N_ACCEPTANCE_V1.md). GitHub CI uses a stub n8n API and does not establish live owner acceptance.
+
+
 ## Stage #118 · Owner-PC six-ledger offline acceptance and encrypted recovery
 
 Run `python tools/owner_acceptance_audit.py --plan-id <24-hex-id>` **only after a clean Studio shutdown**. This strict read-only owner-device tool recalculates the original completed-plan, workflow-receipt and exact outbound-payload SHA-256 values, then cross-checks sender, signed n8n final-step claim and saved provider API execution records. It detects missing/tampered/uncorrelated evidence and can validate an existing **disposable encrypted-backup restore**. A green result means **local evidence consistency, not live API verification or an actual business effect**. Full owner procedure: [Stage #118 acceptance guide](docs/OWNER_LIVE_ACCEPTANCE_GATE_V1.md). No VPS or real provider credentials required for CI.
