@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 from pathlib import Path
+from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 import re
 import sqlite3
 import threading
@@ -66,13 +67,10 @@ class AgentConnectorHandoff:
                 "encrypted_managed_connector_and_plan_required", 403)
         self.plans, self.core, self.manager = plans, core, manager
         self.lock = threading.RLock()
-        path = str(database)
-        if path != ":memory:":
-            file = Path(path).expanduser()
-            if file.is_symlink() or file.parent.is_symlink():
-                raise AgentConnectorHandoffError("handoff_unsafe_storage", 503)
-            file.parent.mkdir(parents=True, exist_ok=True)
-            path = str(file)
+        try:
+            path = prepare_private_sqlite(database)
+        except PrivateSQLitePathError:
+            raise AgentConnectorHandoffError("handoff_unsafe_storage", 503) from None
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.execute("PRAGMA busy_timeout=5000")
         self.db.execute("PRAGMA synchronous=FULL")

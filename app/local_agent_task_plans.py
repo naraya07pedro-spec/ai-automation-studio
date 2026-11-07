@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 import re
 import secrets
 import sqlite3
@@ -424,13 +425,10 @@ class LocalAgentPlanStore:
                  memory_store=None, report_generator=None, document_analyzer=None,
                  multi_document_analyzer=None, csv_profiler=None,
                  hn_reader=None):
-        location = str(database)
-        if location != ":memory:":
-            path = Path(database).expanduser()
-            if path.is_symlink():
-                raise PlanError("plan_path_rejected")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            location = str(path)
+        try:
+            location = prepare_private_sqlite(database)
+        except PrivateSQLitePathError:
+            raise PlanError("plan_path_rejected") from None
         self.lock = threading.RLock()
         self.github_reader = github_reader
         self.memory_store = memory_store

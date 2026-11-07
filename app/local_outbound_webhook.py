@@ -14,6 +14,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 import re
 import secrets
 import socket
@@ -161,10 +162,10 @@ class LocalOutboundWebhook:
             self.host, _ = validate_https_target(url)
         if type(secret) is not str or len(secret) > 512:
             raise OutboundError("invalid_signing_secret")
-        if str(database) != ":memory:":
-            file = Path(database).expanduser()
-            file.parent.mkdir(parents=True, exist_ok=True)
-            database = str(file)
+        try:
+            database = prepare_private_sqlite(database)
+        except PrivateSQLitePathError:
+            raise OutboundError("webhook_private_storage_unsafe",503) from None
         self.db = sqlite3.connect(str(database), check_same_thread=False)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA busy_timeout=5000")

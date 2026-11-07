@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #118 · Owner-PC six-ledger offline acceptance and encrypted recovery
+
+Run `python tools/owner_acceptance_audit.py --plan-id <24-hex-id>` **only after a clean Studio shutdown**. This strict read-only owner-device tool recalculates the original completed-plan, workflow-receipt and exact outbound-payload SHA-256 values, then cross-checks sender, signed n8n final-step claim and saved provider API execution records. It detects missing/tampered/uncorrelated evidence and can validate an existing **disposable encrypted-backup restore**. A green result means **local evidence consistency, not live API verification or an actual business effect**. Full owner procedure: [Stage #118 acceptance guide](docs/OWNER_LIVE_ACCEPTANCE_GATE_V1.md). No VPS or real provider credentials required for CI.
+
+
 ## Stage #117 · Official n8n provider execution verification (opt-in read-only)
 
 The private [/handoff](/handoff) workbench can now **independently read n8n's official execution record** with an owner-provisioned API key and ONE password-approved GET, then correlate the signed execution ID, owner-pinned n8n workflow ID and original webhook delivery ID in the exact saved inbound node. This is **execution confirmation only**, never proof of CRM/email/customer outcome. The key stays server-side; 8/day and 100 total checks, crash-aware local ledger, no automatic polling/resend, DNS-pinned TLS, and no Ollama/OpenAI requirement for verification-only startup. See [Stage #117 guide](docs/N8N_READONLY_EXECUTION_VERIFY_V1.md). No live provider access is claimed from CI.
