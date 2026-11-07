@@ -65,7 +65,7 @@ def validate_cadence(data):
     return dict(data)
 
 
-def _validate_create(request, remote_enabled=False):
+def _validate_create(request, remote_enabled=False, local_enabled=True):
     fields = {"prompt", "model", "cadence", "max_runs", "expires_days"}
     if type(request) is not dict or not fields.issubset(request) or not set(request) <= fields | {"provider"}:
         raise AgentScheduleError("invalid_ai_task_fields")
@@ -85,6 +85,8 @@ def _validate_create(request, remote_enabled=False):
             raise AgentScheduleError("remote_task_request_cap_exceeded")
     elif provider != "local_ollama":
         raise AgentScheduleError("invalid_ai_task_provider")
+    elif not local_enabled:
+        raise AgentScheduleError("local_model_not_enabled", 403)
     elif not valid_model_name(model):
         raise AgentScheduleError("invalid_ai_task_model")
     if (type(request["max_runs"]) is not int or
@@ -98,10 +100,13 @@ def _validate_create(request, remote_enabled=False):
 class LocalReadOnlyAgentSchedules:
     def __init__(self, database, runner=run_agent, clock=utcnow,
                  model_safety=None, agent_gate=None, agent_state_lock=None,
-                 remote_runner=None):
+                 remote_runner=None, local_enabled=True):
         self.clock = clock
         self.runner = runner
         self.remote_runner = remote_runner
+        if type(local_enabled) is not bool:
+            raise AgentScheduleError("invalid_local_model_setting", 503)
+        self.local_enabled = local_enabled
         self.model_safety = model_safety
         self.agent_gate = agent_gate
         self.agent_state_lock = agent_state_lock or threading.RLock()
@@ -174,6 +179,12 @@ class LocalReadOnlyAgentSchedules:
                 self.db.execute("""UPDATE ai_schedules
                     SET status='PAUSED_ERROR',control_epoch=control_epoch+1
                     WHERE provider='openai_responses' AND status='ACTIVE'""")
+            # Switching to cloud-only must not dispatch or silently preserve
+            # active Ollama tasks, and no legacy task is converted to paid.
+            if not self.local_enabled:
+                self.db.execute("""UPDATE ai_schedules
+                    SET status='PAUSED_ERROR',control_epoch=control_epoch+1
+                    WHERE provider='local_ollama' AND status='ACTIVE'""")
 
     def attach_gate(self, model_safety, agent_gate, agent_state_lock):
         """Called when creating the HTTP handler, before background start."""
@@ -211,7 +222,9 @@ class LocalReadOnlyAgentSchedules:
         return self._public(result)
 
     def create(self, request):
-        cadence = _validate_create(request, remote_enabled=self.remote_runner is not None)
+        cadence = _validate_create(
+            request, remote_enabled=self.remote_runner is not None,
+            local_enabled=self.local_enabled)
         now = _aware(self.clock())
         expires = _iso(now + timedelta(days=request["expires_days"]))
         tid = secrets.token_hex(12)
@@ -239,7 +252,8 @@ class LocalReadOnlyAgentSchedules:
             return {"enabled":True,"tasks":[self._public(x) for x in rows],
                     "max_tasks":MAX_TASKS,
                     "worker_running":self.thread is not None and self.thread.is_alive(),
-                    "local_model_only":self.remote_runner is None,
+                    "local_model_only":self.remote_runner is None and self.local_enabled,
+                    "local_ollama_enabled":self.local_enabled,
                     "remote_openai_enabled":self.remote_runner is not None,
                     "remote_request_cap_per_task":3,
                     "remote_tasks_billable_and_send_prompts_to_openai":self.remote_runner is not None,
@@ -273,6 +287,8 @@ class LocalReadOnlyAgentSchedules:
                 raise AgentScheduleError("ai_task_epoch_conflict", 409)
             if not pause and prior["provider"]=="openai_responses" and self.remote_runner is None:
                 raise AgentScheduleError("remote_model_not_enabled",403)
+            if not pause and prior["provider"]=="local_ollama" and not self.local_enabled:
+                raise AgentScheduleError("local_model_not_enabled",403)
             if pause:
                 if prior["status"] != "ACTIVE":
                     raise AgentScheduleError("ai_task_not_active", 409)
@@ -358,6 +374,8 @@ class LocalReadOnlyAgentSchedules:
                         raise AgentError("remote_provider_disabled")
                     result=self.remote_runner(prompt,model)
                 else:
+                    if not self.local_enabled:
+                        raise AgentError("local_provider_disabled")
                     result=self.runner(prompt,model)
                 expected_mode=("REMOTE_OPENAI_READ_ONLY"
                                if provider=="openai_responses" else "LOCAL_MODEL")
@@ -383,7 +401,8 @@ class LocalReadOnlyAgentSchedules:
                     "local_model_transport_uncertain","agent_step_limit",
                     "empty_model_answer","invalid_model_response",
                     "model_response_too_large","remote_provider_rejected",
-                    "remote_response_uncertain","remote_provider_disabled") else "local_ai_execution_failed"
+                    "remote_response_uncertain","remote_provider_disabled",
+                    "local_provider_disabled") else "local_ai_execution_failed"
                 if str(exc) in ("local_model_timeout","local_model_transport_uncertain",
                                 "remote_response_uncertain"):
                     status="PAUSED_UNCERTAIN"
