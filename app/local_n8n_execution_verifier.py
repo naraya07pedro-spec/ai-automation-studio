@@ -13,14 +13,11 @@ from datetime import datetime, timezone
 import hashlib
 import http.client
 import json
-import os
 import re
 import sqlite3
-import threading
 from urllib.parse import urlsplit
 
 from local_agent_task_plans import ID_PATTERN as PLAN_ID
-from local_handoff_outcome_proof import HandoffOutcomeProofError
 from local_outbound_webhook import (
     OutboundError, validate_https_target, _PinnedTLS, _resolve_public_ipv4)
 
@@ -152,7 +149,7 @@ class N8NExecutionVerifier:
             api_origin, workflow_id, webhook_node_name, api_key)
         self._key = api_key
         self._fetcher = fetcher or fetch_n8n_execution
-        self.lock = threading.RLock()
+        self.lock = self.handoff.lock
         with self.handoff.lock, self.handoff.db:
             self.handoff.db.execute("""CREATE TABLE IF NOT EXISTS
                 n8n_provider_execution_checks(
@@ -275,7 +272,7 @@ class N8NExecutionVerifier:
             # Never include API key, provider payload or exceptions in UI/logs.
             try:
                 response = self._fetcher(self.host, exid, self._key)
-            except BaseException:
+            except Exception:
                 response = {"_api_error":"NETWORK_OR_RESPONSE_UNCERTAIN"}
             status, execution_state, finished, correlated = (
                 "LOOKUP_UNCERTAIN", None, None, False)
@@ -294,7 +291,8 @@ class N8NExecutionVerifier:
                 execution_state = response.get("status")
                 finished = response.get("finished")
                 if (str(raw_id) != exid or str(raw_workflow) != self.workflow_id
-                        or type(execution_state) is not str
+                        or execution_state not in (
+                            "success", "error", "running", "waiting", "unknown", "canceled", "crashed")
                         or type(finished) is not bool):
                     status = "PROVIDER_IDENTITY_MISMATCH"
                     execution_state,finished = None,None
