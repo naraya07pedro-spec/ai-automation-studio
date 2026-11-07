@@ -1,0 +1,53 @@
+name: Stage 119 operator live n8n acceptance CLI contract
+
+on:
+  pull_request:
+    paths:
+      - 'tools/owner_live_n8n_acceptance.py'
+      - 'tests/test_owner_live_n8n_acceptance.py'
+      - 'app/local_server.py'
+      - 'app/local_n8n_execution_verifier.py'
+      - 'app/local_handoff_outcome_proof.py'
+      - 'docs/OWNER_LIVE_N8N_ACCEPTANCE_V1.md'
+      - '.github/workflows/owner-live-n8n-acceptance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/owner_live_n8n_acceptance.py'
+      - 'tests/test_owner_live_n8n_acceptance.py'
+      - 'app/local_server.py'
+      - 'app/local_n8n_execution_verifier.py'
+      - 'app/local_handoff_outcome_proof.py'
+      - 'docs/OWNER_LIVE_N8N_ACCEPTANCE_V1.md'
+      - '.github/workflows/owner-live-n8n-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-119-owner-live-cli-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned encrypted connector dependency
+        run: python -m pip install -r requirements-vault.txt
+      - name: Test actual localhost owner-client + one-shot remote-read contract
+        run: python -m unittest discover -s tests -p 'test_owner_live_n8n_acceptance.py' -v
+      - name: Test existing n8n and offline recovery regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_n8n_execution_verifier.py' -v
+          python -m unittest discover -s tests -p 'test_signed_manual_handoff_outcome.py' -v
+          python -m unittest discover -s tests -p 'test_owner_acceptance_audit.py' -v
+      - name: Strict Python syntax
+        run: python -m py_compile tools/owner_live_n8n_acceptance.py tests/test_owner_live_n8n_acceptance.py
