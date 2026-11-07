@@ -5,6 +5,7 @@ on:
     paths:
       - 'app/local_agent_connector_handoff.py'
       - 'app/local_server.py'
+      - 'app/local_security_audit.py'
       - 'web/mission.html'
       - 'web/handoff.html'
       - 'tests/test_agent_connector_handoff.py'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'app/local_agent_connector_handoff.py'
       - 'app/local_server.py'
+      - 'app/local_security_audit.py'
       - 'web/mission.html'
       - 'web/handoff.html'
       - 'tests/test_agent_connector_handoff.py'
@@ -52,7 +54,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_encrypted_connector_vault.py' -v
           python -m unittest discover -s tests -p 'test_outbound_webhook.py' -v
       - name: Python syntax
-        run: python -m py_compile app/local_agent_connector_handoff.py app/local_server.py tests/test_agent_connector_handoff.py
+        run: python -m py_compile app/local_agent_connector_handoff.py app/local_security_audit.py app/local_server.py tests/test_agent_connector_handoff.py
       - name: Mission Control JS syntax
         run: |
           node -e 'const fs=require("fs"),s=fs.readFileSync("web/mission.html","utf8");const m=s.match(/<script>([\s\S]*?)<\/script>/);if(!m)process.exit(3);new Function(m[1]);const h=fs.readFileSync("web/handoff.html","utf8"),n=h.split("<script>")[1]?.split("</script>")[0];if(!n)process.exit(4);new Function(n)'
