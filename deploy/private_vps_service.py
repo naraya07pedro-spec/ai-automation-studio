@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from launch_workbench import feature_flags
 from local_connector_vault import decode_master_key, VaultError
+from openai_readonly_responses import validate_remote_api_key, RemoteInferenceError
 
 UNIT_NAME = "ai-automation-studio.service"
 PRIVATE_CREDENTIAL_ROOT = Path("/etc/ai-automation-studio")
@@ -38,7 +39,8 @@ def _path(value):
 def render_unit(*, username, checkout, home, python, mode,
                 encrypted_webhooks=False, gmail_metadata=False,
                 outbound_webhook=False, signed_webhook=False,
-                managed_autopilot=False, scheduled_local_ai=False):
+                managed_autopilot=False, scheduled_local_ai=False,
+                scheduled_openai=False):
     """Render a fixed-name loopback service with no user-controlled directives."""
     if not _ALLOWED_USER.fullmatch(username) or username == "root":
         raise PrivateVPSDeploymentError("dedicated_nonroot_user_required")
@@ -52,10 +54,14 @@ def render_unit(*, username, checkout, home, python, mode,
         raise PrivateVPSDeploymentError("managed_autopilot_requires_encrypted_webhooks")
     if scheduled_local_ai and mode == "offline":
         raise PrivateVPSDeploymentError("scheduled_local_ai_requires_local_ai_mode")
+    if scheduled_openai and not scheduled_local_ai:
+        raise PrivateVPSDeploymentError("scheduled_openai_requires_scheduled_ai")
     extra = ()
     credentials = ""
     if scheduled_local_ai:
         extra += ("--enable-scheduled-local-ai",)
+    if scheduled_openai:
+        extra += ("--enable-scheduled-openai",)
     if encrypted_webhooks:
         extra += ("--enable-encrypted-managed-webhooks",)
     if managed_autopilot:
@@ -64,6 +70,8 @@ def render_unit(*, username, checkout, home, python, mode,
         extra += ("--enable-google-gmail-metadata",)
     if outbound_webhook:
         extra += ("--enable-outbound-webhook",)
+    if scheduled_openai:
+        credentials += "LoadCredential=aas-openai-api-key:/etc/ai-automation-studio/aas-openai-api-key\n"
     if encrypted_webhooks or gmail_metadata:
         credentials += "LoadCredential=aas-vault-key:/etc/ai-automation-studio/aas-vault-key\n"
     if outbound_webhook:
@@ -111,11 +119,14 @@ def render_unit(*, username, checkout, home, python, mode,
 
 def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
                             outbound_webhook=False, signed_webhook=False,
-                            directory=PRIVATE_CREDENTIAL_ROOT, expected_uid=0):
+                            directory=PRIVATE_CREDENTIAL_ROOT, expected_uid=0,
+                            scheduled_openai=False):
     """Validate exact root-only sources before an explicit privileged install."""
     if signed_webhook and not outbound_webhook:
         raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
     expected = []
+    if scheduled_openai:
+        expected.append("aas-openai-api-key")
     if encrypted_webhooks or gmail_metadata:
         expected.append("aas-vault-key")
     if outbound_webhook:
@@ -136,6 +147,11 @@ def validate_secret_sources(*, encrypted_webhooks=False, gmail_metadata=False,
                 or stat.S_IMODE(path.stat().st_mode) & 0o077
                 or not 1 <= path.stat().st_size <= 8192):
             raise PrivateVPSDeploymentError("required_root_0600_credential_missing_or_unsafe")
+        if name == "aas-openai-api-key":
+            try:
+                validate_remote_api_key(path.read_text(encoding="ascii").removesuffix("\n"))
+            except (RemoteInferenceError, UnicodeError):
+                raise PrivateVPSDeploymentError("invalid_openai_api_key_credential") from None
         if name == "aas-vault-key":
             try:
                 decode_master_key(path.read_text(encoding="ascii").removesuffix("\n"))
@@ -210,6 +226,8 @@ def main(argv=None):
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--enable-scheduled-openai", action="store_true",
+                        help="Opt into billed owner-approved remote text inference; requires local scheduler + separate root-only API credential.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
                         help="Opt in to bounded read-only Ollama schedules in local-ai or full mode.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
@@ -234,13 +252,15 @@ def main(argv=None):
                            outbound_webhook=args.enable_webhook,
                            signed_webhook=args.enable_webhook_signing,
                            managed_autopilot=args.enable_managed_autopilot,
-                           scheduled_local_ai=args.enable_scheduled_local_ai)
+                           scheduled_local_ai=args.enable_scheduled_local_ai,
+                           scheduled_openai=args.enable_scheduled_openai)
         if args.install:
             validate_secret_sources(
                 encrypted_webhooks=args.enable_encrypted_managed_webhooks,
                 gmail_metadata=args.enable_google_gmail_metadata,
                 outbound_webhook=args.enable_webhook,
-                signed_webhook=args.enable_webhook_signing)
+                signed_webhook=args.enable_webhook_signing,
+                scheduled_openai=args.enable_scheduled_openai)
             install_unit(unit)
             print("SYSTEMD_ACTIVE: " + UNIT_NAME + "; bind=127.0.0.1:8765")
             print("Remote access must use an SSH tunnel; no public web URL is created.")
