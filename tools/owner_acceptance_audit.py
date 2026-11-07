@@ -88,7 +88,7 @@ def audit(root, plan_id, *, expected_host=None, expected_workflow=None,
     """No live writes. Return non-sensitive verdict, never raw evidence contents."""
     _require(type(plan_id) is str and PLAN_ID.fullmatch(plan_id),
              "invalid_plan_id")
-    _require(type(root) in (str,Path), "invalid_owner_root")
+    _require(isinstance(root,(str,os.PathLike)), "invalid_owner_root")
     source=Path(root).expanduser()
     _require(not source.is_symlink(), "owner_root_symlink")
     source=source.resolve(strict=True)
