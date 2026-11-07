@@ -250,13 +250,18 @@ class OfflineEvidenceAcceptance(unittest.TestCase):
         # Real encryption, restored SQLite and fixture owner password verifier.
         archive=self.home.parent/"fixture-encrypted.aasbak"
         restore=self.home.parent/"restored-for-readonly-audit"
+        original_names={
+            path.relative_to(self.home).as_posix()
+            for path in self.home.rglob("*") if path.is_file()
+        }
         with patch.object(backup,"_offline_guard",side_effect=nullcontext):
-            snapshot=backup._snapshot(self.home)
-            for name,blob in snapshot.items():
-                if name.endswith(".sqlite3"):
-                    with self.subTest(sqlite_file=name):
-                        backup._check_sqlite_bytes(blob)
             made=backup.create(self.home,archive,PASSPHRASE)
+        restored_names={
+            path.relative_to(self.home).as_posix()
+            for path in self.home.rglob("*") if path.is_file()
+        }
+        self.assertEqual(original_names,restored_names,
+            "Read-only encrypted backup must not leave WAL/SHM sidecars")
         self.assertEqual(made["status"],"ENCRYPTED_OFFLINE_BACKUP_CREATED")
         self.assertNotIn(b"Compute 2+2",archive.read_bytes())
         self.assertNotIn(SIGN_KEY.encode(),archive.read_bytes())
