@@ -99,11 +99,12 @@ def _source_root(root):
 def _offline_guard():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind(("127.0.0.1", 8765))
-        sock.listen(1)
+        try:
+            sock.bind(("127.0.0.1", 8765))
+            sock.listen(1)
+        except OSError:
+            raise BackupError("stop_local_studio_before_backup") from None
         yield
-    except OSError:
-        raise BackupError("stop_local_studio_before_backup") from None
     finally:
         sock.close()
 
@@ -203,7 +204,8 @@ def _unpack(plain):
                 raise BackupError("archive_size_limit_exceeded")
             record = json.loads(archive.read(MANIFEST))
             if (type(record) is not dict or set(record) != {"version", "files"}
-                    or record["version"] != 1 or type(record["files"]) is not dict
+                    or type(record["version"]) is not int or record["version"] != 1
+                    or type(record["files"]) is not dict
                     or set(record["files"]) != set(names) - {MANIFEST}):
                 raise BackupError("manifest_invalid")
             files = {}
@@ -248,25 +250,23 @@ def _decrypt(blob, password):
         raise BackupError("backup_format_invalid")
     offset = len(MAGIC)
     salt, nonce = blob[offset:offset+16], blob[offset+16:offset+28]
+    from cryptography.exceptions import InvalidTag
     try:
         return _crypto()(_derive(password, salt)).decrypt(
             nonce, blob[offset+28:], AAD)
-    except ValueError:
+    except (ValueError, InvalidTag):
         raise BackupError("backup_authentication_failed") from None
-    except Exception as exc:
-        if exc.__class__.__name__ == "InvalidTag":
-            raise BackupError("backup_authentication_failed") from None
-        raise
 
 
 def _outside_important_roots(target, source):
-    path = target.expanduser().absolute()
-    root = source.expanduser().absolute()
+    raw = target.expanduser().absolute()
+    if any(part.is_symlink() for part in (raw, *raw.parents)):
+        raise BackupError("symlinked_destination_forbidden")
+    path = raw.resolve(strict=False)
+    root = source.expanduser().resolve(strict=False)
     repository = Path(__file__).resolve().parents[1]
     if path == root or path.is_relative_to(root) or path.is_relative_to(repository):
         raise BackupError("destination_inside_live_owner_or_git_checkout")
-    if target.is_symlink() or path.parent.is_symlink():
-        raise BackupError("symlinked_destination_forbidden")
     if not path.parent.is_dir():
         raise BackupError("destination_parent_must_exist")
     return path
