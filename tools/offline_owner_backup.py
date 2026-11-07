@@ -164,12 +164,12 @@ def _sqlite_snapshot(path):
     # The backup already copied all committed pages into the main image;
     # normalize ONLY the two journal-format header bytes to rollback mode,
     # then validate the resulting self-contained database before encryption.
-    if (len(result) < 100 or result[:16] != b"SQLite format 3\\x00"
+    if (len(result) < 100 or result[:16] != b"SQLite format 3\x00"
             or result[18] not in (1,2) or result[19] not in (1,2)):
         raise BackupError("sqlite_snapshot_invalid_header")
-    if result[18:20] != b"\\x01\\x01":
+    if result[18:20] != b"\x01\x01":
         image = bytearray(result)
-        image[18:20] = b"\\x01\\x01"
+        image[18:20] = b"\x01\x01"
         result = bytes(image)
     _check_sqlite_bytes(result)
     return result
