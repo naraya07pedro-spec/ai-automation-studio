@@ -13,6 +13,10 @@ CREDENTIAL_NAMES = {
     "AAS_WEBHOOK_URL": "aas-webhook-url",
     "AAS_WEBHOOK_SIGNING_SECRET": "aas-webhook-signing-secret",
     "AAS_OPENAI_API_KEY": "aas-openai-api-key",
+    "AAS_N8N_API_KEY": "aas-n8n-api-key",
+    "AAS_N8N_API_ORIGIN": "aas-n8n-api-origin",
+    "AAS_N8N_WORKFLOW_ID": "aas-n8n-workflow-id",
+    "AAS_N8N_WEBHOOK_NODE_NAME": "aas-n8n-webhook-node-name",
 }
 MAX_SECRET_BYTES = 8192
 
