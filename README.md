@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Instant owner-approved OpenAI text · Stage #112 (no VPS or Ollama)
+
+Mission Control section **13 · Ask Cloud AI Now** can submit one owner-password-confirmed, explicitly paid OpenAI Responses text prompt immediately, with no Ollama installation or scheduling delay. Exact request IDs are claimed durably before dispatch, duplicate IDs are never retried, uncertain model/provider outcomes latch the shared safety checkpoint, and the app keeps read-only receipts. At most 5 attempted calls per UTC day and 200 total recorded calls; **not a USD limit**. No tools/MCP/web/shell/Gmail/n8n action is enabled by this route. Use the existing `cloud-only` launch and a separately provisioned OpenAI API key; ChatGPT subscription billing is different. Full owner guide: [docs/ON_DEMAND_CLOUD_AI_V1.md](docs/ON_DEMAND_CLOUD_AI_V1.md). CI is fixture-only; actual paid account/usage remains unverified.
+
 ## Low-RAM cloud-only scheduled AI (no Ollama required)
 
 Start the owner-approved private scheduled OpenAI Responses text worker **without an installed Ollama model, local chat or local-agent tools**: `git pull`, then `.\START_AI_STUDIO.cmd --mode cloud-only --enable-scheduled-openai` in Windows, with the separately provisioned `AAS_OPENAI_API_KEY`. For a verified new Linux private systemd installation, preview `deploy/private_vps_service.py --mode cloud-only --enable-scheduled-openai` with the existing nonroot user and root-only `LoadCredential`. The Studio server runs its durable model safety checkpoint even in cloud-only mode, blocks existing local-model tasks from running, and requires **literal server-validated `paid_api_consent=true` plus owner password/CSRF** before any paid remote task can be created. No automatic API call occurs at startup or at task creation. This is **not** yet proof of Tencent VM deployment, real API billing or 24/7 operation. [Exact private runbook](docs/CLOUD_ONLY_PRIVATE_AI_V1.md).

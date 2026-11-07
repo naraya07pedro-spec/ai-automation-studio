@@ -389,6 +389,27 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
   </div>
 </section>
 
+<section class="panel" id="on-demand-cloud-ai-panel" aria-label="On-demand OpenAI text inference" style="margin-top:20px">
+ <div class="split"><h2>13 · Ask Cloud AI Now · One request</h2><span class="pill" id="cloud-ask-badge">Checking</span></div>
+ <p class="sub">Ask one text question without Ollama. Every call requires owner approval, incurs possible separate API charges, and sends the prompt to the provider. Maximum 5 attempts per UTC day and 200 total attempts. No web, MCP, shell, email, n8n, or model tools. Prompt hash, reply and token usage persist in local plaintext SQLite.</p>
+ <div class="grid">
+  <div>
+   <label for="cloud-ask-model">Model ID enabled in your OpenAI API account</label><input id="cloud-ask-model" maxlength="80" autocomplete="off" placeholder="Exact OpenAI API model ID">
+   <label for="cloud-ask-prompt">One text question (max 3000 characters)</label><textarea id="cloud-ask-prompt" rows="5" maxlength="3000" placeholder="Ask a brief nonsensitive question."></textarea>
+   <label><input id="cloud-ask-consent" type="checkbox"> I authorize one potentially billable OpenAI API request. Billing is separate from ChatGPT and no USD cap is guaranteed.</label>
+   <label for="cloud-ask-owner">Current owner password</label><input id="cloud-ask-owner" type="password" autocomplete="off">
+   <div class="btnrow"><button id="cloud-ask-submit" type="button" class="btn primary" disabled>Send one paid text request</button><button id="cloud-ask-recover" type="button" class="btn" disabled>Check last receipt (no retry)</button></div>
+   <p class="status" id="cloud-ask-status" role="status">No request made.</p>
+  </div>
+  <div>
+   <div class="split"><strong>Answer and durable receipts</strong><button id="cloud-ask-refresh" type="button" class="btn" disabled>Refresh receipts</button></div>
+   <div class="output" id="cloud-ask-answer">Authenticated answers appear here. Verify model claims independently.</div>
+   <div class="note" id="cloud-ask-receipts">Sign in to view receipts.</div>
+   <p class="sub">If network response fails, DO NOT send again blindly. Check the original receipt and actual provider billing first. Uncertain outcomes require the owner safety review in section 12.</p>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -440,6 +461,7 @@ function lock(message){
  managedAutoClear();
  n8nProofClear();
  aiRecurringClear();
+ cloudAskClear();
  setBusy(false);
 }
 async function unlock(){
@@ -451,13 +473,15 @@ async function loadCapabilities(){
  try{
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
+  cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
+  if(cloudAskEnabled)loadCloudAskReceipts();
   chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":
-    (info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
+    (info.remote_on_demand_ai?"OpenAI instant + scheduled enabled":info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
   $("scope").textContent=enabled?
    "Live local AI is enabled. Plans use a strict tool allowlist and explicit review. Real email sending, arbitrary websites, CRM mutation and shell execution are not enabled.":
    (info.remote_scheduled_ai?
-    "Cloud-only scheduled OpenAI tasks are available in section 12 after owner approval. Interactive Ollama chat and local model listing are disabled; no Ollama installation is required.":
+    "Cloud-only scheduled AI is in section 12, and owner-approved instant OpenAI questions are in section 13. Ollama remains optional.":
     "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.");
   setBusy(false);
  }catch(error){status("chat-status","Cannot load agent capabilities: "+error.message,true);}
@@ -991,6 +1015,91 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  }
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
+
+
+let cloudAskEnabled=false,cloudAskBusy=false,cloudAskLastId=null;
+function cloudAskControls(){
+ $("cloud-ask-badge").textContent=cloudAskEnabled?"OpenAI enabled":"Disabled";
+ $("cloud-ask-submit").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||
+  !$("cloud-ask-model").value.trim()||!$("cloud-ask-prompt").value.trim()||
+  !$("cloud-ask-owner").value||!$("cloud-ask-consent").checked;
+ $("cloud-ask-recover").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||!cloudAskLastId;
+ $("cloud-ask-refresh").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled;
+}
+function cloudAskClear(){
+ cloudAskEnabled=false;cloudAskLastId=null;cloudAskBusy=false;
+ $("cloud-ask-owner").value="";$("cloud-ask-consent").checked=false;
+ $("cloud-ask-prompt").value="";
+ $("cloud-ask-answer").textContent="Session locked.";
+ $("cloud-ask-receipts").textContent="Session locked.";
+ $("cloud-ask-status").textContent="No paid request made in this session.";
+ cloudAskControls();
+}
+function cloudAskShow(receipt){
+ const used=receipt.usage_tokens;
+ $("cloud-ask-answer").textContent=
+  (receipt.status==="COMPLETED"&&typeof receipt.answer==="string"?
+   receipt.answer:"No verified response saved; status: "+receipt.status)+
+  "\n\nReceipt "+receipt.request_id+" · "+receipt.status+
+  (used?" · Tokens in="+used.input_tokens+" out="+used.output_tokens:"")+
+  "\nProvider billing NOT independently verified. No automatic retries.";
+}
+async function cloudAskLookup(requestId){
+ if(!csrf||!cloudAskEnabled||!requestId)return;
+ try{
+  const receipt=await request("/api/read-only-ai-ask-receipt?request_id="+encodeURIComponent(requestId));
+  if(csrf){cloudAskShow(receipt);status("cloud-ask-status","Existing request receipt retrieved. Zero new API calls.");}
+ }catch(error){if(csrf)status("cloud-ask-status","Receipt unavailable: "+error.message,true);}
+}
+async function loadCloudAskReceipts(){
+ if(!csrf||!cloudAskEnabled||cloudAskBusy){cloudAskControls();return;}
+ try{
+  const data=await request("/api/read-only-ai-ask-history");
+  if(!csrf)return;
+  const box=$("cloud-ask-receipts");box.replaceChildren();
+  const items=Array.isArray(data.receipts)?data.receipts:[];
+  if(!items.length){box.textContent="No direct OpenAI attempts recorded.";return;}
+  for(const item of items){
+   const btn=document.createElement("button");btn.type="button";btn.className="record";
+   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc;
+   btn.addEventListener("click",()=>cloudAskLookup(item.request_id));
+   box.append(btn);
+  }
+ }catch(error){if(csrf)status("cloud-ask-status","Cannot load receipts: "+error.message,true);}
+ finally{cloudAskControls();}
+}
+for(const id of ["cloud-ask-prompt","cloud-ask-model","cloud-ask-owner"]){
+ $(id).addEventListener("input",cloudAskControls);
+}
+$("cloud-ask-consent").addEventListener("change",cloudAskControls);
+$("cloud-ask-refresh").addEventListener("click",loadCloudAskReceipts);
+$("cloud-ask-recover").addEventListener("click",()=>cloudAskLookup(cloudAskLastId));
+$("cloud-ask-submit").addEventListener("click",async()=>{
+ if(!csrf||busy||cloudAskBusy||!cloudAskEnabled||!$("cloud-ask-consent").checked)return;
+ if(!window.confirm("Authorize exactly ONE potentially billable OpenAI API text request? Your prompt leaves the device, with separate billing and no model tools. Continue?"))return;
+ if(!window.crypto||!window.crypto.getRandomValues){
+  status("cloud-ask-status","Secure random request ID unavailable.",true);return;
+ }
+ const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
+ const request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+ cloudAskLastId=request_id;
+ const body={request_id,model:$("cloud-ask-model").value.trim(),
+  prompt:$("cloud-ask-prompt").value.trim(),paid_api_consent:true,
+  current_password:$("cloud-ask-owner").value};
+ $("cloud-ask-owner").value="";$("cloud-ask-consent").checked=false;
+ cloudAskBusy=true;cloudAskControls();
+ status("cloud-ask-status","One request attempted: "+request_id+". Do not resend after network interruption.");
+ try{
+  const receipt=await request("/api/read-only-ai-ask",body);
+  if(csrf){cloudAskShow(receipt);status("cloud-ask-status","One remote response saved. Verify claims and provider billing.");}
+ }catch(error){
+  if(csrf)status("cloud-ask-status","Outcome unconfirmed: "+error.message+
+   ". Check receipt "+request_id+" and real provider usage. Never auto-retry.",true);
+ }finally{
+  cloudAskBusy=false;cloudAskControls();
+  if(csrf)loadCloudAskReceipts();
+ }
+});
 
 let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false,aiRecurringSafetyUncertain=false;
 function aiRecurringClear(){
