@@ -67,7 +67,7 @@ def validate_cadence(data):
 
 def _validate_create(request, remote_enabled=False, local_enabled=True):
     fields = {"prompt", "model", "cadence", "max_runs", "expires_days"}
-    if type(request) is not dict or not fields.issubset(request) or not set(request) <= fields | {"provider"}:
+    if type(request) is not dict or not fields.issubset(request) or not set(request) <= fields | {"provider", "paid_api_consent"}:
         raise AgentScheduleError("invalid_ai_task_fields")
     prompt, model = request["prompt"], request["model"]
     if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
@@ -76,6 +76,8 @@ def _validate_create(request, remote_enabled=False, local_enabled=True):
     if provider == "openai_responses":
         if not remote_enabled:
             raise AgentScheduleError("remote_model_not_enabled", 403)
+        if request.get("paid_api_consent") is not True:
+            raise AgentScheduleError("paid_api_consent_required", 403)
         if not valid_remote_model_name(model):
             raise AgentScheduleError("invalid_remote_model_name")
         if (type(request.get("max_runs")) is not int
@@ -85,6 +87,8 @@ def _validate_create(request, remote_enabled=False, local_enabled=True):
             raise AgentScheduleError("remote_task_request_cap_exceeded")
     elif provider != "local_ollama":
         raise AgentScheduleError("invalid_ai_task_provider")
+    elif "paid_api_consent" in request:
+        raise AgentScheduleError("paid_api_consent_invalid_for_local_task")
     elif not local_enabled:
         raise AgentScheduleError("local_model_not_enabled", 403)
     elif not valid_model_name(model):
