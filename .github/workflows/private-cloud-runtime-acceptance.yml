@@ -1,0 +1,46 @@
+name: Stage 109 read-only private cloud runtime acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/verify_private_cloud_ai_runtime.py'
+      - 'deploy/verify_private_vps_runtime.py'
+      - 'tests/test_private_cloud_runtime_acceptance.py'
+      - 'docs/PRIVATE_CLOUD_RUNTIME_ACCEPTANCE_V1.md'
+      - '.github/workflows/private-cloud-runtime-acceptance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/verify_private_cloud_ai_runtime.py'
+      - 'deploy/verify_private_vps_runtime.py'
+      - 'tests/test_private_cloud_runtime_acceptance.py'
+      - 'docs/PRIVATE_CLOUD_RUNTIME_ACCEPTANCE_V1.md'
+      - '.github/workflows/private-cloud-runtime-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-readonly-observation-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Offline verifier negative and synthetic-fixture tests
+        run: python -m unittest discover -s tests -p 'test_private_cloud_runtime_acceptance.py' -v
+      - name: Existing private-VPS and cloud scheduler regression
+        run: |
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_only_scheduler.py' -v
+      - name: Compile verifier without starting service or spending API credits
+        run: python -m py_compile deploy/verify_private_cloud_ai_runtime.py
