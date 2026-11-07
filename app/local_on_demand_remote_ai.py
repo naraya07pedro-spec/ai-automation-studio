@@ -16,7 +16,7 @@ import threading
 
 from local_model_safety import ModelSafetyError
 from local_ollama_agent import MAX_PROMPT
-from openai_readonly_responses import valid_remote_model_name, RemoteInferenceError
+from openai_readonly_responses import valid_remote_model_name, RemoteInferenceError, MAX_OUTPUT_TOKENS
 
 REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z", re.ASCII)
 MAX_ROWS = 200
@@ -201,8 +201,10 @@ class LocalOnDemandRemoteAI:
         usage = result.get("usage")
         if (type(usage) is not dict
                 or set(usage) != {"input_tokens", "output_tokens"}
-                or any(type(v) is not int or not 0 <= v <= 200000
-                       for v in usage.values())):
+                or type(usage["input_tokens"]) is not int
+                or not 0 <= usage["input_tokens"] <= 200000
+                or type(usage["output_tokens"]) is not int
+                or not 0 <= usage["output_tokens"] <= MAX_OUTPUT_TOKENS):
             raise RemoteInferenceError("remote_response_uncertain")
         return result
 
