@@ -264,6 +264,8 @@ class OwnerAuthenticatedHTTPTests(unittest.TestCase):
         self.assertEqual(duplicate.exception.code,409)
         self.assertEqual(len(self.calls),1)
         recent=self.audit.recent(30)
+        self.assertTrue(any(e["action"]=="ON_DEMAND_REMOTE_AI" and e["outcome"]=="DENIED"
+                            for e in recent))
         self.assertTrue(any(e["action"]=="ON_DEMAND_REMOTE_AI" and e["outcome"]=="SUCCESS"
                             for e in recent))
 
