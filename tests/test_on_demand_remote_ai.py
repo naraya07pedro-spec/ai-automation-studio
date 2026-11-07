@@ -143,6 +143,8 @@ class DirectModelStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(OnDemandRemoteAIError,"daily_cap_reached"):
             self.store.run(payload("f"*32))
         self.assertEqual(len(self.calls),MAX_DAILY_ATTEMPTS)
+        self.assertEqual(self.safety.phase(),"IDLE")
+        self.assertEqual(len(self.store.recent()["receipts"]),MAX_DAILY_ATTEMPTS)
 
     def test_impossible_reported_output_token_count_quarantines_call(self):
         self.store.runner=lambda *_:{
