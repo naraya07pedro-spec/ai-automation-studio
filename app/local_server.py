@@ -2147,8 +2147,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise
     if enable_scheduled_local_ai and not enable_local_agent:
         raise ValueError("scheduled_local_ai_requires_local_agent")
-    if enable_scheduled_openai and not enable_scheduled_local_ai:
-        raise ValueError("scheduled_openai_requires_ai_scheduler")
+    # OpenAI-only scheduling is a valid low-memory server configuration.
+    # The local-Ollama flag still requires interactive local agent enablement.
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
@@ -2199,8 +2199,10 @@ def start_local_server(port=8765, enable_local_agent=False,
             csv_profiler=(profile_selected_csv if enable_plan_csv else None))
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
+    # The same durable model checkpoint is REQUIRED for remote-only
+    # inference: uncertain network/charge outcomes must survive restart.
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
-                    if enable_local_agent else None)
+                    if (enable_local_agent or enable_scheduled_openai) else None)
     scheduler = None
     scheduled_ai = None
     outbound = None
@@ -2237,7 +2239,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                 url=destination,
                 secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
-        if enable_scheduled_local_ai:
+        if enable_scheduled_local_ai or enable_scheduled_openai:
             openai_runner = None
             if enable_scheduled_openai:
                 # The key is deliberately absent from owner UI and databases.
@@ -2246,7 +2248,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                     read_runtime_secret("AAS_OPENAI_API_KEY"))
             scheduled_ai = LocalReadOnlyAgentSchedules(
                 home / "readonly-ai-schedules.sqlite3",
-                remote_runner=openai_runner)
+                remote_runner=openai_runner,
+                local_enabled=enable_local_agent)
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -2411,8 +2414,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.enable_scheduled_local_ai and not args.enable_local_agent:
         parser.error("--enable-scheduled-local-ai requires --enable-local-agent")
-    if args.enable_scheduled_openai and not args.enable_scheduled_local_ai:
-        parser.error("--enable-scheduled-openai requires --enable-scheduled-local-ai")
+    # --enable-scheduled-openai alone is explicitly cloud-only:
+    # no local Ollama chat, model listing, or model tool functions enabled.
     if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
