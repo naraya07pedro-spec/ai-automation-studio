@@ -2021,7 +2021,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     else:
                         result=agent_connector_handoff.preview(values)
                 except AgentConnectorHandoffError as exc:
-                    self._audit_event(action,"DENIED")
+                    self._audit_event(action, "UNCERTAIN"
+                                      if "uncertain" in str(exc) else "DENIED")
                     self._send(exc.status, {"error":str(exc)})
                     return
                 except (sqlite3.Error,OSError):
