@@ -146,6 +146,7 @@ class Stage117VerifierTests(unittest.TestCase):
         result=self.verifier.verify_one({"plan_id":PLAN})
         self.assertEqual(result["status"],"EXECUTION_SUCCESS_CORRELATED")
         self.assertTrue(result["provider_api_execution_verified"])
+        self.assertEqual(result["provider_hostname"],"stage117.app.n8n.cloud")
         self.assertTrue(result["inbound_delivery_correlated"])
         self.assertTrue(result["provider_execution_verified_with_delivery"])
         self.assertFalse(result["business_effect_verified"])
@@ -240,9 +241,11 @@ class Stage117VerifierTests(unittest.TestCase):
             self.handoff.db.execute("""INSERT INTO n8n_provider_execution_checks
                 (plan_id,connector_id,execution_id,delivery_id,
                  provider_workflow_id,pinned_node_sha256,signed_message_sha256,
-                 status,checked_at_utc) VALUES(?,?,?,?,?,?,?,'IN_FLIGHT',?)""",
+                 status,checked_at_utc,provider_hostname)
+                VALUES(?,?,?,?,?,?,?,'IN_FLIGHT',?,?)""",
                 (PLAN,CID,N8N_EXECUTION,self.delivery_id,
-                 N8N_WORKFLOW,"a"*64,"b"*64,"2026-11-07T12:00:00+00:00"))
+                 N8N_WORKFLOW,"a"*64,"b"*64,"2026-11-07T12:00:00+00:00",
+                 "stage117.app.n8n.cloud"))
         restarted=self.new_verifier()
         self.assertEqual(restarted.history()["records"][0]["status"],
                          "LOOKUP_UNCERTAIN")
@@ -273,10 +276,11 @@ class Stage117VerifierTests(unittest.TestCase):
                 self.handoff.db.execute("""INSERT INTO n8n_provider_execution_checks
                     (plan_id,connector_id,execution_id,delivery_id,
                      provider_workflow_id,pinned_node_sha256,signed_message_sha256,
-                     status,checked_at_utc)
-                    VALUES(?,?,?,?,?,?,?,?,?)""",
+                     status,checked_at_utc,provider_hostname)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (f"b{n:023d}",CID,str(1000+n),self.delivery_id,
-                     N8N_WORKFLOW,"b"*64,"c"*64,"LOOKUP_NOT_FOUND",today+"T01:00:00+00:00"))
+                     N8N_WORKFLOW,"b"*64,"c"*64,"LOOKUP_NOT_FOUND",
+                     today+"T01:00:00+00:00","stage117.app.n8n.cloud"))
         with self.assertRaisesRegex(ProviderExecutionError,"daily_limit"):
             self.verifier.verify_one({"plan_id":PLAN})
         self.assertEqual(self.api_calls,[])
