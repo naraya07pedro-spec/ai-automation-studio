@@ -168,6 +168,12 @@ class LocalReadOnlyAgentSchedules:
             for (tid,) in unsettled:
                 self.db.execute("""UPDATE ai_schedules SET status='PAUSED_UNCERTAIN',
                     control_epoch=control_epoch+1 WHERE task_id=?""", (tid,))
+            # Disabling the paid provider immediately pauses any older
+            # remote tasks before their next potential billable due slot.
+            if remote_runner is None:
+                self.db.execute("""UPDATE ai_schedules
+                    SET status='PAUSED_ERROR',control_epoch=control_epoch+1
+                    WHERE provider='openai_responses' AND status='ACTIVE'""")
 
     def attach_gate(self, model_safety, agent_gate, agent_state_lock):
         """Called when creating the HTTP handler, before background start."""
@@ -215,38 +221,45 @@ class LocalReadOnlyAgentSchedules:
                 raise AgentScheduleError("ai_task_capacity_reached", 409)
             self.db.execute("""INSERT INTO ai_schedules(
                 task_id,prompt,model,config_json,status,next_due_utc,expires_utc,
-                max_runs,created_utc) VALUES(?,?,?,?,'ACTIVE',?,?,?,?)""",
+                max_runs,created_utc,provider)
+                VALUES(?,?,?,?,'ACTIVE',?,?,?,?,?)""",
                 (tid,request["prompt"].strip(),request["model"],
                  json.dumps(cadence,sort_keys=True),
                  _iso(next_occurrence(cadence,now)),expires,
-                 request["max_runs"],_iso(now)))
+                 request["max_runs"],_iso(now),
+                 request.get("provider","local_ollama")))
             return self._get(tid)
 
     def list(self):
         with self.lock:
             rows=self.db.execute("""SELECT task_id,prompt,model,config_json,status,
                 next_due_utc,expires_utc,max_runs,attempted_runs,control_epoch,
-                created_utc,last_run_utc FROM ai_schedules
+                created_utc,last_run_utc,provider FROM ai_schedules
                 ORDER BY created_utc,task_id""").fetchall()
             return {"enabled":True,"tasks":[self._public(x) for x in rows],
                     "max_tasks":MAX_TASKS,
                     "worker_running":self.thread is not None and self.thread.is_alive(),
-                    "local_model_only":True,"external_dispatch_count":0,
+                    "local_model_only":self.remote_runner is None,
+                    "remote_openai_enabled":self.remote_runner is not None,
+                    "remote_request_cap_per_task":3,
+                    "remote_tasks_billable_and_send_prompts_to_openai":self.remote_runner is not None,
+                    "external_dispatch_count":0,
                     "plaintext_local_results":True}
 
     def history(self, tid):
         with self.lock:
             self._get(tid)
             rows=self.db.execute("""SELECT slot_utc,status,answer,tools_json,error,
-                claimed_utc,finished_utc FROM ai_schedule_runs WHERE task_id=?
+                claimed_utc,finished_utc,usage_json FROM ai_schedule_runs WHERE task_id=?
                 ORDER BY slot_utc DESC LIMIT ?""",
                 (tid,MAX_RESULTS_PER_TASK)).fetchall()
         return {"task_id":tid,"runs":[{
             "scheduled_for_utc":slot,"status":status,"answer":answer,
             "tools_used":json.loads(tools) if tools is not None else [],
             "error":error,"claimed_utc":claimed,"finished_utc":finished,
+            "usage_tokens":json.loads(usage_json) if usage_json else None,
             "external_dispatch_count":0}
-            for slot,status,answer,tools,error,claimed,finished in rows]}
+            for slot,status,answer,tools,error,claimed,finished,usage_json in rows]}
 
     def change(self, request, *, pause):
         if (type(request) is not dict or
@@ -258,6 +271,8 @@ class LocalReadOnlyAgentSchedules:
             prior=self._get(request["task_id"])
             if prior["control_epoch"] != request["expected_epoch"]:
                 raise AgentScheduleError("ai_task_epoch_conflict", 409)
+            if not pause and prior["provider"]=="openai_responses" and self.remote_runner is None:
+                raise AgentScheduleError("remote_model_not_enabled",403)
             if pause:
                 if prior["status"] != "ACTIVE":
                     raise AgentScheduleError("ai_task_not_active", 409)
@@ -314,11 +329,11 @@ class LocalReadOnlyAgentSchedules:
             with self.lock, self.db:
                 now=_iso(self.clock())
                 row=self.db.execute("""SELECT task_id,prompt,model,config_json,
-                    next_due_utc,expires_utc,max_runs,attempted_runs
+                    next_due_utc,expires_utc,max_runs,attempted_runs,provider
                     FROM ai_schedules WHERE status='ACTIVE' AND next_due_utc<=?
                     ORDER BY next_due_utc,task_id LIMIT 1""",(now,)).fetchone()
                 if row is not None:
-                    tid,prompt,model,raw,slot,expiry,limit,attempted=row
+                    tid,prompt,model,raw,slot,expiry,limit,attempted,provider=row
                     if now >= expiry or attempted >= limit:
                         self.db.execute("""UPDATE ai_schedules SET status=?,
                             control_epoch=control_epoch+1 WHERE task_id=?""",
@@ -332,14 +347,21 @@ class LocalReadOnlyAgentSchedules:
                         self.db.execute("""UPDATE ai_schedules SET attempted_runs=attempted_runs+1,
                             status=?,next_due_utc=?,last_run_utc=?
                             WHERE task_id=?""",(newstatus,next_due,now,tid))
-                        claimed=(tid,slot,prompt,model)
+                        claimed=(tid,slot,prompt,model,provider)
             if claimed is None:
                 return 0
-            tid,slot,prompt,model=claimed
-            status,answer,tools,error="PAUSED_ERROR",None,None,None
+            tid,slot,prompt,model,provider=claimed
+            status,answer,tools,error,usage="PAUSED_ERROR",None,None,None,None
             try:
-                result=self.runner(prompt,model)
-                if (type(result) is not dict or result.get("mode")!="LOCAL_MODEL"
+                if provider=="openai_responses":
+                    if self.remote_runner is None:
+                        raise AgentError("remote_provider_disabled")
+                    result=self.remote_runner(prompt,model)
+                else:
+                    result=self.runner(prompt,model)
+                expected_mode=("REMOTE_OPENAI_READ_ONLY"
+                               if provider=="openai_responses" else "LOCAL_MODEL")
+                if (type(result) is not dict or result.get("mode")!=expected_mode
                         or result.get("external_dispatch_count") != 0
                         or type(result.get("answer")) is not str
                         or not 1 <= len(result["answer"].strip()) <= MAX_ANSWER
@@ -347,14 +369,23 @@ class LocalReadOnlyAgentSchedules:
                         or any(x not in ALLOWED_TOOLS for x in result["tools_used"])
                         or len(result["tools_used"]) > 8):
                     raise AgentScheduleError("invalid_readonly_ai_result", 503)
+                if provider=="openai_responses":
+                    usage=result.get("usage")
+                    if (type(usage) is not dict
+                            or set(usage)!={"input_tokens","output_tokens"}
+                            or any(type(v) is not int or not 0<=v<=200000
+                                   for v in usage.values())):
+                        raise AgentScheduleError("invalid_remote_usage",503)
                 status,answer,tools="COMPLETED",result["answer"],result["tools_used"]
             except AgentError as exc:
                 error=str(exc) if str(exc) in (
                     "local_model_unavailable", "local_model_timeout",
                     "local_model_transport_uncertain","agent_step_limit",
                     "empty_model_answer","invalid_model_response",
-                    "model_response_too_large") else "local_ai_execution_failed"
-                if str(exc) in ("local_model_timeout","local_model_transport_uncertain"):
+                    "model_response_too_large","remote_provider_rejected",
+                    "remote_response_uncertain","remote_provider_disabled") else "local_ai_execution_failed"
+                if str(exc) in ("local_model_timeout","local_model_transport_uncertain",
+                                "remote_response_uncertain"):
                     status="PAUSED_UNCERTAIN"
                     try:
                         self.model_safety.timeout()
@@ -364,10 +395,13 @@ class LocalReadOnlyAgentSchedules:
                 error="local_ai_execution_failed"
             with self.lock, self.db:
                 self.db.execute("""UPDATE ai_schedule_runs SET status=?,answer=?,
-                    tools_json=?,error=?,finished_utc=? WHERE task_id=? AND slot_utc=?
+                    tools_json=?,error=?,finished_utc=?,usage_json=?
+                    WHERE task_id=? AND slot_utc=?
                     AND status='IN_FLIGHT'""",
                     (status,answer,json.dumps(tools) if tools is not None else None,
-                     error,_iso(self.clock()),tid,slot))
+                     error,_iso(self.clock()),
+                     json.dumps(usage,sort_keys=True) if usage is not None else None,
+                     tid,slot))
                 if status != "COMPLETED":
                     self.db.execute("""UPDATE ai_schedules SET status=?,
                         control_epoch=control_epoch+1
