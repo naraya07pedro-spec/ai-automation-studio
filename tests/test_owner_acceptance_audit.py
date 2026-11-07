@@ -4,7 +4,7 @@ Real deterministic plan + encrypted connector registry + Stage 114 send + Stage
 116 signed claim + Stage 117 stubbed provider execution + offline encrypted
 backup. No real HTTPS requests, owner secrets, provider usage, or VPS.
 """
-from contextlib import nullcontext
+from contextlib import nullcontext, closing
 import hashlib
 import hmac
 import importlib.util
@@ -139,8 +139,11 @@ class OfflineEvidenceAcceptance(unittest.TestCase):
             expected_node=pins.get("node",N8N_NODE))
 
     def mutate(self,relative,sql,args=()):
-        with sqlite3.connect(self.home/relative) as db:
-            db.execute(sql,args)
+        # sqlite3.Connection.__exit__ commits but DOES NOT close the DB.
+        # A lingering WAL connection would correctly trip the offline guard.
+        with closing(sqlite3.connect(self.home/relative)) as db:
+            with db:
+                db.execute(sql,args)
 
     def test_complete_authentic_local_chain_and_zero_network(self):
         got=self.check()
@@ -248,6 +251,11 @@ class OfflineEvidenceAcceptance(unittest.TestCase):
         archive=self.home.parent/"fixture-encrypted.aasbak"
         restore=self.home.parent/"restored-for-readonly-audit"
         with patch.object(backup,"_offline_guard",side_effect=nullcontext):
+            snapshot=backup._snapshot(self.home)
+            for name,blob in snapshot.items():
+                if name.endswith(".sqlite3"):
+                    with self.subTest(sqlite_file=name):
+                        backup._check_sqlite_bytes(blob)
             made=backup.create(self.home,archive,PASSPHRASE)
         self.assertEqual(made["status"],"ENCRYPTED_OFFLINE_BACKUP_CREATED")
         self.assertNotIn(b"Compute 2+2",archive.read_bytes())
