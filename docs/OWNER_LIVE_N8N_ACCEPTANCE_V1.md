@@ -67,3 +67,10 @@ Successful **local CLI execution in GitHub Actions** shows only that this intera
 `tests/test_owner_live_n8n_acceptance.py` uses actual loopback HTTP + real password+cookie+CSRF, temporary SQLite, AES-256-GCM test registry and signed delivery, with a fake n8n network response. It covers inspect with no remote read, successful one-shot final correlation, wrong expected target, bad claimed outcome, missing consent, duplicate POST prevention, provider status contradiction, n8n timeout, lost localhost acknowledgement **after** the external read, arbitrary URL ban, redirect refusal, session revocation and redacted JSON output. The dedicated CI runs on Python 3.11/3.12/3.13 with the encryption dependency and existing Stage #116–#118 regressions. Full repo and Chromium CI are required on the exact final PR commit before merge.
 
 **LIVE_OWNER_PC_VERIFIED=FALSE**, **LIVE_N8N_PROVIDER_EXECUTION_VERIFIED=FALSE**, **BUSINESS_EFFECT_VERIFIED=FALSE**, **OFF_DEVICE_OWNER_RECOVERY_VERIFIED=FALSE**, **ONLINE_24_7_VERIFIED=FALSE** until independently checked against the real environment.
+
+
+## Final implementation and CI acceptance
+
+Stage #119 implementation is merged as [PR #119](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/119), merge SHA `f31226afc141bc2e4ef4d2eca1a944be3906b114`. Final tested head `ff3f554b18654b939abaa1111e59603c19f44ef3`, 5/5 workflows passed. Owner live CLI acceptance: 11/11 tests per Python 3.11/3.12/3.13. Full Python standard-library regression: 1,306 per runtime, 139 optional skips each (crypto-powered focused CI runs explicitly); Chromium 58/58. **GitHub CI uses synthetic n8n responses and never checks the real user's account.** A human owner still needs to run `inspect` and `verify` with a disposable n8n execution from an account authorized to perform the verification.
+
+Note: API histories shown by the UI are bounded recent lists (30 entries). The Stage #117 SQLite per-plan unique claim and one-time dispatch policy remain the all-time authoritative repeat-prevention gates, including if an older entry does not appear in `inspect` output.
