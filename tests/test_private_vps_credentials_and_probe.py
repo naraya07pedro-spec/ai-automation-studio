@@ -181,7 +181,7 @@ class CredentialProvisionerTests(unittest.TestCase):
     def test_provisioner_never_accepts_cli_secret_argument(self):
         self.assertNotIn("--value",provisioner.NAMES)
         self.assertEqual(set(provisioner.NAMES),
-                         {"vault-key","webhook-url","webhook-signing-secret"})
+                         {"vault-key","webhook-url","webhook-signing-secret","openai-api-key"})
 
 
 class LiveProbeContractTests(unittest.TestCase):
