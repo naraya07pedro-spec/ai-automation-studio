@@ -18,10 +18,10 @@ import sqlite3
 import stat
 import sys
 
-from offline_owner_backup import _offline_guard, _source_root, _check_private
+from offline_owner_backup import BackupError, _offline_guard, _source_root, _check_private
 
 PLAN_ID = re.compile(r"^[a-f0-9]{24}$", re.ASCII)
-CID = re.compile(r"^[a-z][a-z0-9_-]{2,39}$", re.ASCII)
+CID = re.compile(r"^[a-z][a-z0-9_-]{2,31}$", re.ASCII)
 DIGEST = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
 DELIVERY = re.compile(r"^[a-f0-9]{32}$", re.ASCII)
 HOST = re.compile(r"^[A-Za-z0-9.-]{4,253}$", re.ASCII)
@@ -262,8 +262,8 @@ def main(argv=None):
                      expected_host=args.expected_n8n_host,
                      expected_workflow=args.expected_n8n_workflow,
                      expected_node=args.expected_n8n_node)
-    except (AcceptanceError,OSError,ValueError,sqlite3.Error) as exc:
-        reason=str(exc) if isinstance(exc,AcceptanceError) else "local_state_unreadable"
+    except (AcceptanceError,BackupError,OSError,ValueError,sqlite3.Error) as exc:
+        reason=str(exc) if isinstance(exc,(AcceptanceError,BackupError)) else "local_state_unreadable"
         print(json.dumps({"status":"LOCAL_EVIDENCE_CHAIN_NOT_PROVEN",
                           "reason":reason,"live_provider_queried_now":False,
                           "business_effect_verified":False,
