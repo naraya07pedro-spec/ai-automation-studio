@@ -41,6 +41,10 @@ The owner-activated **Durable Multi-Plan DAG Queue** at `/jobs` adds 2–8 exist
 
 Connect the manual owner-approved Stage #114 handoff to a **domain-separated, HMAC-valid n8n final-step claim**, matching the existing immutable per-connector delivery ledger and protecting against swapped delivery IDs, tampered payload/destination, forged or conflicting claims, replay and blind retries. Import and list via the existing private `/handoff` UI and owner-authenticated API. This remains an **owner-imported shared-secret claim**, **not independent provider API attestation** or business success. See `docs/SIGNED_MANUAL_HANDOFF_OUTCOME_V1.md`; PR #116 merged after 19/19 GitHub Actions checks; real provider and owner-PC acceptance remain unverified.
 
+### Stage #117 · Owner-scoped independent n8n execution lookup (under PR CI)
+
+Implemented a separately opted-in official n8n GET execution verifier that requires an exact Stage #116 signed receipt and matches the provider execution ID, an owner-pinned n8n workflow ID, and exact original delivery/workflow/event IDs within one pinned incoming Webhook node. It stores metadata digests only, has fail-closed SSRF/privacy constraints, 8/day + 100 lifetime caps, one owner-password-confirmed request per signed plan and no model/other connector side effects. It can run **without Ollama or OpenAI** using the existing local plan store. This verifies the **n8n execution/input association**, not independent downstream business completion. Full runbook and limits: docs/N8N_READONLY_EXECUTION_VERIFY_V1.md. PR merge and real provider acceptance gates remain pending.
+
 ## Next implementation work, in priority order
 
 ### P0 · Actual owner-PC acceptance and continuity (next operator gate)
