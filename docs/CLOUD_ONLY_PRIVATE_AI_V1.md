@@ -56,6 +56,12 @@ Expected preview: \`LoadCredential=aas-openai-api-key:/etc/ai-automation-studio/
 
 Never expose Studio port 8765 publicly. Access it through a private SSH local tunnel. After login, create a **single, short, one-attempt** task and verify the genuine provider-reported token usage and bill from the user-controlled provider console. Provider-side budget alerts and spending controls are recommended; a maximum of 3 requests/7 days is **not** a USD ceiling.
 
+## Owner recovery after uncertain API cost or interrupted inference
+
+A remote HTTP timeout may occur **after** the provider accepted a billable request. The task enters `PAUSED_UNCERTAIN` and the durable model checkpoint is `UNCERTAIN`; there is no retry. In cloud-only mode, there is intentionally no Ollama chat or old Ollama-only recovery UI. The new owner-authenticated `GET /api/read-only-ai-safety` exposes a safe checkpoint status without revealing credentials or task prompts. Mission Control section 12 displays a dedicated manual review/acknowledgement control.
+
+Before acknowledging, the owner must independently inspect actual OpenAI API usage/billing and any Ollama operation if both were enabled previously. The new `POST /api/read-only-ai-safety-acknowledge` requires an authenticated session, CSRF, the **current owner password** and the exact `acknowledge="ALL_MODEL_OUTCOMES_REVIEWED"` statement. It only accepts the `UNCERTAIN` phase and waits for the shared model inference gate. It records an `AI_MODEL_SAFETY_ACKNOWLEDGE` security audit event, clears the checkpoint for future separately authorized work, returns zero model calls, and leaves the affected scheduled task **PAUSED_UNCERTAIN**. The owner must then separately and explicitly **resume** the task with password and epoch. An acknowledgement does not prove that provider billing was zero, that the remote backend stopped, or that a task completed. It never retries automatically. This closure is required to keep cloud-only recovery possible without installing Ollama.
+
 ## Safety properties and migration
 
 - Cloud-only launch is **not** automatic from a generic offline invocation; owner must explicitly select both \`--mode cloud-only\` and \`--enable-scheduled-openai\`. Existing \`local-ai\` and \`full\` paths retain their original local model flags. The standalone server can run \`--enable-scheduled-openai\` without Ollama.
