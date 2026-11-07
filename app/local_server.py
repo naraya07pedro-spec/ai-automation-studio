@@ -27,6 +27,7 @@ from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
 from local_n8n_delivery_proof import SignedN8NDeliveryProof, N8NProofError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_readonly_agent_scheduler import LocalReadOnlyAgentSchedules, AgentScheduleError
+from openai_readonly_responses import create_openai_runner, RemoteInferenceError
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
@@ -2132,7 +2133,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_encrypted_managed_webhooks=False,
                        enable_google_gmail_metadata=False,
                        enable_managed_autopilot=False,
-                       enable_scheduled_local_ai=False):
+                       enable_scheduled_local_ai=False,
+                       enable_scheduled_openai=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -2145,6 +2147,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise
     if enable_scheduled_local_ai and not enable_local_agent:
         raise ValueError("scheduled_local_ai_requires_local_agent")
+    if enable_scheduled_openai and not enable_scheduled_local_ai:
+        raise ValueError("scheduled_openai_requires_ai_scheduler")
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
@@ -2234,8 +2238,15 @@ def start_local_server(port=8765, enable_local_agent=False,
                 secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
         if enable_scheduled_local_ai:
+            openai_runner = None
+            if enable_scheduled_openai:
+                # The key is deliberately absent from owner UI and databases.
+                # A separate root-only systemd LoadCredential is required on VPS.
+                openai_runner = create_openai_runner(
+                    read_runtime_secret("AAS_OPENAI_API_KEY"))
             scheduled_ai = LocalReadOnlyAgentSchedules(
-                home / "readonly-ai-schedules.sqlite3")
+                home / "readonly-ai-schedules.sqlite3",
+                remote_runner=openai_runner)
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -2357,6 +2368,8 @@ def main(argv=None):
                        help="Create/rotate a high-entropy offline recovery code.")
     group.add_argument("--recover-owner", action="store_true",
                        help="Use a one-time code to reset lost owner password offline.")
+    parser.add_argument("--enable-scheduled-openai", action="store_true",
+                        help="Opt in to owner-armed billable OpenAI Responses scheduled text tasks; requires --enable-scheduled-local-ai and a separately provisioned AAS_OPENAI_API_KEY.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
                         help="Opt in to owner-armed recurring local Ollama read-only inference; requires local agent.")
     parser.add_argument("--enable-local-agent", action="store_true",
@@ -2398,6 +2411,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.enable_scheduled_local_ai and not args.enable_local_agent:
         parser.error("--enable-scheduled-local-ai requires --enable-local-agent")
+    if args.enable_scheduled_openai and not args.enable_scheduled_local_ai:
+        parser.error("--enable-scheduled-openai requires --enable-scheduled-local-ai")
     if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
@@ -2508,8 +2523,9 @@ def main(argv=None):
                            enable_encrypted_managed_webhooks=args.enable_encrypted_managed_webhooks,
                            enable_google_gmail_metadata=args.enable_google_gmail_metadata,
                            enable_managed_autopilot=args.enable_managed_autopilot,
-                           enable_scheduled_local_ai=args.enable_scheduled_local_ai)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError) as exc:
+                           enable_scheduled_local_ai=args.enable_scheduled_local_ai,
+                           enable_scheduled_openai=args.enable_scheduled_openai)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
