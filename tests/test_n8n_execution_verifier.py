@@ -10,7 +10,10 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import os
+import subprocess
 import sys
+import time
 import tempfile
 import threading
 import unittest
@@ -390,6 +393,73 @@ class Stage117VerifierTests(unittest.TestCase):
             self.assertEqual(len(self.sent),1)
         finally:
             server.shutdown();server.server_close();thread.join(5);audit.close()
+
+
+@unittest.skipUnless(HAS_CRYPTO,"Dedicated CI includes encryption dependency")
+class Stage117LightweightStartup(unittest.TestCase):
+    def test_actual_private_server_starts_without_paid_or_local_model(self):
+        with tempfile.TemporaryDirectory(prefix="aas-n8n117-") as tmp:
+            home=Path(tmp)
+            LocalOperatorAuth.provision(home/".ai-automation-studio"/"operator.json",PASS)
+            env=dict(os.environ)
+            # Do not inherit unrelated paid API flags or private user state.
+            for name in ("AAS_OPENAI_API_KEY","AAS_WEBHOOK_URL",
+                         "CREDENTIALS_DIRECTORY"):
+                env.pop(name,None)
+            env.update({
+                "HOME":str(home),"USERPROFILE":str(home),
+                "PYTHONUNBUFFERED":"1",
+                "AAS_VAULT_MASTER_KEY":generate_master_key(),
+                "AAS_N8N_API_ORIGIN":API_ORIGIN,
+                "AAS_N8N_API_KEY":API_KEY,
+                "AAS_N8N_WORKFLOW_ID":N8N_WORKFLOW,
+                "AAS_N8N_WEBHOOK_NODE_NAME":NODE,
+            })
+            proc=subprocess.Popen([
+                sys.executable,str(ROOT/"app"/"local_server.py"),
+                "--enable-encrypted-managed-webhooks",
+                "--enable-n8n-execution-verify"],
+                cwd=str(ROOT),env=env,stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL)
+            host="http://127.0.0.1:8765"
+            opener=build_opener(ProxyHandler({}),HTTPCookieProcessor(CookieJar()))
+            try:
+                available=False
+                deadline=time.monotonic()+20
+                while time.monotonic()<deadline:
+                    if proc.poll() is not None:break
+                    try:
+                        with opener.open(host+"/mission",timeout=1) as response:
+                            available=response.status==200
+                            break
+                    except OSError:
+                        time.sleep(0.2)
+                self.assertTrue(available,"private n8n-only local server failed to start")
+                with self.assertRaises(HTTPError) as anon:
+                    opener.open(host+"/api/n8n-execution-check-history",timeout=3)
+                self.assertEqual(anon.exception.code,401)
+                with opener.open(Request(
+                    host+"/api/operator-login",
+                    json.dumps({"password":PASS}).encode(),
+                    headers={"Content-Type":"application/json"},method="POST"),
+                    timeout=5) as response:
+                    self.assertTrue(json.load(response)["authenticated"])
+                with opener.open(host+"/api/local-agent-capabilities",timeout=3) as response:
+                    caps=json.load(response)
+                self.assertTrue(caps["n8n_execution_readonly_verify"])
+                self.assertFalse(caps["remote_scheduled_ai"])
+                self.assertFalse(caps["remote_on_demand_ai"])
+                self.assertFalse(caps["enabled"])
+                self.assertEqual(caps["n8n_execution_hostname"],
+                                 "stage117.app.n8n.cloud")
+                with opener.open(host+"/api/n8n-execution-check-history",timeout=3) as response:
+                    self.assertEqual(json.load(response)["records"],[])
+                self.assertFalse((home/".ai-automation-studio"/"on-demand-remote-ai.sqlite3").exists())
+            finally:
+                proc.terminate()
+                try:proc.wait(timeout=7)
+                except subprocess.TimeoutExpired:
+                    proc.kill();proc.wait(timeout=5)
 
 
 if __name__=="__main__":
