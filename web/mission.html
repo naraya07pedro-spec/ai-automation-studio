@@ -466,7 +466,7 @@ function lock(message){
 }
 async function unlock(){
  $("gate").hidden=true;$("logout").hidden=false;$("connection").textContent="Private session active";
- $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs(),loadAIRecurring(),loadCloudAskReceipts()]);
+ $("password").value="";setBusy(false);await Promise.all([loadModels(),loadList(),loadCapabilities(),refreshFlows(),refreshSchedules(),loadConnectors(),loadAutopilots(),managedRefresh(),googleGmailRefresh(),loadManagedAutopilots(),loadN8NProofs(),loadAIRecurring()]);
  stopSchedulerPoll();schedulerRefreshTimer=setInterval(()=>{if(csrf){refreshSchedules();loadAutopilots();loadManagedAutopilots();loadN8NProofs();loadAIRecurring();}},10000);
 }
 async function loadCapabilities(){
@@ -474,6 +474,7 @@ async function loadCapabilities(){
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
   cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
+  if(cloudAskEnabled)loadCloudAskReceipts();
   chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":
     (info.remote_on_demand_ai?"OpenAI instant + scheduled enabled":info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
