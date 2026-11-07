@@ -146,7 +146,9 @@ def _sqlite_snapshot(path):
         if Path(str(path) + suffix).exists():
             raise BackupError("sqlite_sidecar_requires_clean_shutdown")
     try:
-        with closing(sqlite3.connect(path.as_uri() + "?mode=ro",
+        # Clean shutdown is mandatory; immutable mode avoids creating
+        # SQLite -shm/-wal sidecars during the *read-only* backup itself.
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1",
                                      uri=True, timeout=3)) as original:
             with closing(sqlite3.connect(":memory:")) as target:
                 original.backup(target, pages=128, sleep=0.01)
