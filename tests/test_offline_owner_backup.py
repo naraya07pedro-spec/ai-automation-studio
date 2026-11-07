@@ -1,5 +1,5 @@
 """Offline owner backup acceptance with disposable, non-user fixture state."""
-from contextlib import contextmanager
+from contextlib import closing
 import hashlib
 import io
 import json
@@ -35,16 +35,18 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
         self.vault.write_text('{"encrypted":"SECRET-FIXTURE-DATA"}', encoding="utf-8")
         self.vault.chmod(0o600)
         self.database = self.owner / "readonly-ai-schedules.sqlite3"
-        with sqlite3.connect(self.database) as conn:
-            conn.execute("CREATE TABLE test_task (id INTEGER PRIMARY KEY, value TEXT)")
-            conn.execute("INSERT INTO test_task(value) VALUES (?)", ("private-stored-task",))
+        with closing(sqlite3.connect(self.database)) as conn:
+            with conn:
+                conn.execute("CREATE TABLE test_task (id INTEGER PRIMARY KEY, value TEXT)")
+                conn.execute("INSERT INTO test_task(value) VALUES (?)", ("private-stored-task",))
         self.database.chmod(0o600)
         self.ledger = self.owner / "managed-webhook-ledgers"
         self.ledger.mkdir(mode=0o700)
         self.ledger_file = self.ledger / "abc.sqlite3"
-        with sqlite3.connect(self.ledger_file) as conn:
-            conn.execute("CREATE TABLE test_receipt (value TEXT)")
-            conn.execute("INSERT INTO test_receipt VALUES ('receipt')")
+        with closing(sqlite3.connect(self.ledger_file)) as conn:
+            with conn:
+                conn.execute("CREATE TABLE test_receipt (value TEXT)")
+                conn.execute("INSERT INTO test_receipt VALUES ('receipt')")
         self.ledger_file.chmod(0o600)
         self.archive = self.base / "private.aasbak"
         self.test_folder = self.base / "test-restore"
@@ -74,7 +76,7 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
                           for p in self.owner.rglob("*") if p.is_file()}, before)
         self.assertEqual(self.vault.read_bytes(),
                          (self.test_folder / "managed-webhooks-vault.json").read_bytes())
-        with sqlite3.connect(self.test_folder / "readonly-ai-schedules.sqlite3") as conn:
+        with closing(sqlite3.connect(self.test_folder / "readonly-ai-schedules.sqlite3")) as conn:
             self.assertEqual(conn.execute("SELECT value FROM test_task").fetchone()[0],
                              "private-stored-task")
         self.assertEqual((self.test_folder / "managed-webhook-ledgers" /
