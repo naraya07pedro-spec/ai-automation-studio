@@ -46,6 +46,10 @@ Connect the manual owner-approved Stage #114 handoff to a **domain-separated, HM
 
 Implemented a separately opted-in official n8n GET execution verifier that requires an exact Stage #116 signed receipt and matches the provider execution ID, an owner-pinned n8n workflow ID, and exact original delivery/workflow/event IDs within one pinned incoming Webhook node. It stores metadata digests only, has fail-closed SSRF/privacy constraints, 8/day + 100 lifetime caps, one owner-password-confirmed request per signed plan and no model/other connector side effects. It can run **without Ollama or OpenAI** using the existing local plan store. This verifies the **n8n execution/input association**, not independent downstream business completion. Full runbook and limits: docs/N8N_READONLY_EXECUTION_VERIFY_V1.md. PR #117 merged after 20/20 workflows succeeded on the exact tested head. Real owner-PC and live n8n API acceptance remain outstanding.
 
+### Stage #118 · Owner-PC acceptance and offline six-ledger provenance gate (CI pending)
+
+Added a **real executable offline owner acceptance auditor** for one already-completed Stage #114→#117 handoff, not another claim of autonomous agent capability. After clean shutdown it recomputes plan/workflow/payload digests, matches the actual connector send ledger, Stage #116 signed claim, and saved Stage #117 provider record, with explicit owner-pinned n8n host/workflow/node checks. No keys, prompts or provider response data are exported; no network access, automatic retry or SQLite mutation. Dedicated tests include synthetic encrypted managed connector, signed completion, simulated n8n GET, adversarial evidence edits, and real encrypted backup plus disposable restore then re-audit. The correct conclusion is **locally consistent stored evidence only**, not fresh live n8n or independently proven business success. Runbook: `docs/OWNER_LIVE_ACCEPTANCE_GATE_V1.md`. CI/merge evidence and actual owner-PC acceptance still pending.
+
 ## Next implementation work, in priority order
 
 ### P0 · Actual owner-PC acceptance and continuity (next operator gate)
