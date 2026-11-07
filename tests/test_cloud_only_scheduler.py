@@ -299,6 +299,78 @@ class CloudOnlyHTTP(unittest.TestCase):
         self.assertEqual(self.get("/api/read-only-ai-schedules")["tasks"],[])
         self.assertEqual(self.calls,[])
 
+    def test_uncertain_remote_usage_needs_separate_owner_acknowledge_then_resume(self):
+        with self.assertRaises(HTTPError) as anonymous:
+            self.get("/api/read-only-ai-safety")
+        self.assertEqual(anonymous.exception.code,401)
+        self.login()
+        initial=self.get("/api/read-only-ai-safety")
+        self.assertEqual(initial["checkpoint_state"],"IDLE")
+        self.assertFalse(initial["requires_owner_review"])
+        with self.assertRaises(HTTPError) as premature:
+            self.post("/api/read-only-ai-safety-acknowledge",{
+                "acknowledge":"ALL_MODEL_OUTCOMES_REVIEWED",
+                "current_password":PASSWORD})
+        self.assertEqual(premature.exception.code,409)
+        data={**remote_payload(),"max_runs":2,"current_password":PASSWORD}
+        created=self.post("/api/read-only-ai-schedule-create",data)
+        attempts=[]
+        def uncertain(prompt,model):
+            attempts.append((prompt,model))
+            raise RemoteInferenceError("remote_response_uncertain")
+        self.scheduled.remote_runner=uncertain
+        self.clock.advance(minutes=1)
+        self.assertEqual(self.scheduled.run_due(),1)
+        self.assertEqual(len(attempts),1)
+        self.assertEqual(self.safety.phase(),"UNCERTAIN")
+        before=self.get("/api/read-only-ai-safety")
+        self.assertTrue(before["requires_owner_review"])
+        self.assertFalse(before["provider_billing_verified"])
+        self.assertFalse(before["automatic_retry_allowed"])
+        with self.assertRaises(HTTPError) as missing_csrf:
+            self.post("/api/read-only-ai-safety-acknowledge",{
+                "acknowledge":"ALL_MODEL_OUTCOMES_REVIEWED",
+                "current_password":PASSWORD},csrf=False)
+        self.assertEqual(missing_csrf.exception.code,403)
+        for invalid in ("OLLAMA_INSPECTED","true",1,None):
+            body={"acknowledge":invalid,"current_password":PASSWORD}
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(HTTPError) as rejected:
+                    self.post("/api/read-only-ai-safety-acknowledge",body)
+                self.assertEqual(rejected.exception.code,422)
+        with self.assertRaises(HTTPError) as wrong:
+            self.post("/api/read-only-ai-safety-acknowledge",{
+                "acknowledge":"ALL_MODEL_OUTCOMES_REVIEWED",
+                "current_password":"wrong"})
+        self.assertEqual(wrong.exception.code,401)
+        self.clock.advance(minutes=1)
+        self.assertEqual(self.scheduled.run_due(),0)
+        self.assertEqual(len(attempts),1,"uncertain request must never auto-retry")
+        result=self.post("/api/read-only-ai-safety-acknowledge",{
+            "acknowledge":"ALL_MODEL_OUTCOMES_REVIEWED",
+            "current_password":PASSWORD})
+        self.assertEqual(result["status"],"MODEL_UNCERTAINTY_OWNER_ACKNOWLEDGED")
+        self.assertFalse(result["provider_billing_verified"])
+        self.assertFalse(result["automatic_retry_triggered"])
+        self.assertTrue(result["tasks_remain_paused_until_owner_resumes"])
+        self.assertEqual(self.safety.phase(),"IDLE")
+        self.assertEqual(self.scheduled.list()["tasks"][0]["status"],
+                         "PAUSED_UNCERTAIN")
+        self.assertEqual(len(attempts),1)
+        self.assertTrue(any(event["action"]=="AI_MODEL_SAFETY_ACKNOWLEDGE"
+                            and event["outcome"]=="SUCCESS"
+                            for event in self.audit.recent()))
+        resumed=self.post("/api/read-only-ai-schedule-resume",{
+            "task_id":created["task_id"],"expected_epoch":1,
+            "current_password":PASSWORD})
+        self.assertEqual(resumed["status"],"ACTIVE")
+        self.assertEqual(len(attempts),1)
+        with self.assertRaises(HTTPError) as redundant:
+            self.post("/api/read-only-ai-safety-acknowledge",{
+                "acknowledge":"ALL_MODEL_OUTCOMES_REVIEWED",
+                "current_password":PASSWORD})
+        self.assertEqual(redundant.exception.code,409)
+
     def test_existing_ollama_task_pauses_when_switched_to_cloud_only(self):
         # Existing owner schedules must never silently change provider or run.
         self.scheduled.close()
