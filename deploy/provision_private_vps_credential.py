@@ -19,6 +19,7 @@ NAMES = {
     "vault-key": "aas-vault-key",
     "webhook-url": "aas-webhook-url",
     "webhook-signing-secret": "aas-webhook-signing-secret",
+    "openai-api-key": "aas-openai-api-key",
 }
 
 
@@ -38,6 +39,12 @@ def _validate(name, value):
             decode_master_key(value)
         except VaultError:
             raise ProvisionError("invalid_vault_master_key") from None
+    if name == "openai-api-key":
+        from openai_readonly_responses import validate_remote_api_key, RemoteInferenceError
+        try:
+            validate_remote_api_key(value)
+        except RemoteInferenceError:
+            raise ProvisionError("invalid_openai_api_key") from None
     if name == "webhook-url":
         if not value.startswith("https://") or not 12 <= len(value) <= 420:
             raise ProvisionError("invalid_https_webhook_url")
