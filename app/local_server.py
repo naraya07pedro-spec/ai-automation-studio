@@ -586,6 +586,23 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except GmailConnectorError:
                         self._send(503, {"error":"google_grant_invalid_or_locked"})
                 return
+            if route.path in ("/api/durable-jobs", "/api/durable-job-history"):
+                if durable_jobs is None:
+                    self._send(403, {"error":"durable_job_queue_disabled"})
+                    return
+                try:
+                    if route.path=="/api/durable-jobs" and not route.query:
+                        self._send(200, durable_jobs.list())
+                        return
+                    if route.path=="/api/durable-job-history":
+                        query=parse_qs(route.query,keep_blank_values=True)
+                        if set(query)=={"job_id"} and len(query["job_id"])==1:
+                            self._send(200,durable_jobs.history(query["job_id"][0]))
+                            return
+                    self._send(422,{"error":"invalid_job_query"})
+                except DurableQueueError as exc:
+                    self._send(exc.status,{"error":str(exc)})
+                return
             if route.path == "/api/agent-connector-handoffs":
                 if agent_connector_handoff is None:
                     self._send(403, {"error":"agent_connector_handoff_disabled"})
@@ -840,7 +857,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/managed-webhook-preview",
                                  "/api/managed-webhook-commit",
                                  "/api/agent-connector-handoff-preview",
-                                 "/api/agent-connector-handoff-commit"):
+                                 "/api/agent-connector-handoff-commit",
+                                 "/api/durable-job-create",
+                                 "/api/durable-job-arm",
+                                 "/api/durable-job-pause",
+                                 "/api/durable-job-resume",
+                                 "/api/durable-job-cancel",
+                                 "/api/durable-job-run-one",
+                                 "/api/durable-job-reconcile"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
