@@ -1,5 +1,9 @@
 # AI Automation Studio
 
+## Cloud plan-to-local execution · Stage #113 (no VPS)
+
+The private Mission Control now supports an owner-approved **one-shot cloud AI plan** and actual local read-only tool execution. In section **14**, a paid OpenAI Responses model may PROPOSE up to 3 `calculate`/`utc_now` steps, but the human must review, approve and execute each step separately in section **02**. Reuse a saved request receipt to recover a lost response with **zero additional paid model calls**. No unreviewed external writes, arbitrary agent tools or VPS are needed. See [Stage #113 guide](docs/CLOUD_PLAN_HANDOFF_V1.md) and [living roadmap / unresolved product gates](docs/EXECUTION_ROADMAP_PERSONAL_AI_HARNESS.md). Model/provider/PC live integration remains unverified by synthetic CI.
+
 ## Instant owner-approved OpenAI text · Stage #112 (no VPS or Ollama)
 
 Mission Control section **13 · Ask Cloud AI Now** can submit one owner-password-confirmed, explicitly paid OpenAI Responses text prompt immediately, with no Ollama installation or scheduling delay. Exact request IDs are claimed durably before dispatch, duplicate IDs are never retried, uncertain model/provider outcomes latch the shared safety checkpoint, and the app keeps read-only receipts. At most 5 attempted calls per UTC day and 200 total recorded calls; **not a USD limit**. No tools/MCP/web/shell/Gmail/n8n action is enabled by this route. Use the existing `cloud-only` launch and a separately provisioned OpenAI API key; ChatGPT subscription billing is different. Full owner guide: [docs/ON_DEMAND_CLOUD_AI_V1.md](docs/ON_DEMAND_CLOUD_AI_V1.md). CI is fixture-only; actual paid account/usage remains unverified.
