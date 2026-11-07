@@ -79,6 +79,26 @@ button:disabled{opacity:.4;cursor:not-allowed}.row{display:flex;gap:12px;flex-wr
 </div>
 </div>
 </section>
+<section class="panel" aria-label="Independent read-only n8n execution check" style="margin-top:22px">
+<h2>4 · Read-only n8n API execution verification</h2>
+<p class="sub">After importing a signed claim in section 3, select that plan above. This check makes <strong>ONE real GET</strong> to the separately configured official n8n execution API, using an owner-provisioned key stored outside this page. It verifies the execution ID, pinned n8n workflow ID and the exact original delivery ID in the configured incoming webhook node. This is <strong>execution verification</strong>, not proof of a downstream CRM, email or customer effect.</p>
+<div class="grid">
+<div>
+<div class="notice">Requires separately enabled `--enable-n8n-execution-verify`, encrypted managed connector, owner configuration of n8n API origin/workflow/input node and a read-only API key. Max 8 remote reads per UTC day and one lookup per signed plan. No redirects, no arbitrary URLs, no auto-retry. If n8n's execution data was not retained, this feature fails closed.</div>
+<div class="output" id="verify-target">No n8n API instance provisioned in this server session.</div>
+<label for="verify-password">Current owner password (required for this single n8n GET)</label>
+<input id="verify-password" type="password" autocomplete="off">
+<div class="row">
+<button type="button" class="primary" id="verify-run" disabled>Authorize ONE read-only n8n execution lookup</button>
+<button type="button" id="verify-history-btn" disabled>Read local verification history</button>
+</div>
+<p class="state" id="verify-status" role="status">No remote lookup performed.</p>
+</div>
+<div>
+<div class="output" id="verify-history">No independent n8n execution records loaded.</div>
+</div>
+</div>
+</section>
 <p class="muted">Important: HTTP 2xx only shows the endpoint accepted the request, not that n8n or another external system completed the intended business outcome. This workbench uses your private loopback/SSH-tunnel server and does not provide unattended 24/7 execution.</p>
 </main>
 <script>
@@ -145,7 +165,17 @@ async function refresh(){
    api("/api/local-workflows"),api("/api/managed-connectors")]);
   enabled=!!caps.agent_connector_handoff&&connectors.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
   signedEnabled=!!caps.signed_handoff_outcome_import;
-  signedControls();
+  verifierEnabled=!!caps.n8n_execution_readonly_verify;
+  verifierConfig=verifierEnabled?{host:caps.n8n_execution_hostname,
+   workflow_id:caps.n8n_pinned_workflow_id,
+   node:caps.n8n_pinned_webhook_node}:null;
+  el("verify-target").textContent=verifierConfig?
+   "PINNED HTTPS HOST: "+verifierConfig.host+"\n"+
+   "PINNED n8n WORKFLOW: "+verifierConfig.workflow_id+"\n"+
+   "PINNED INBOUND NODE: "+verifierConfig.node+"\n"+
+   "API key: NEVER displayed or transmitted to browser.":
+   "Provider verification disabled. No n8n credential has been loaded.";
+  signedControls();verifierControls();
   const completed=(plans.plans||[]).filter(x=>x.status==="COMPLETED");
   const active=(connectors.connectors||[]).filter(x=>x.status==="ACTIVE");
   selectOptions("plan",completed,"plan_id",x=>x.plan_id+" · "+x.goal);
@@ -157,7 +187,7 @@ async function refresh(){
   state("preview-state",completed.length+" completed plan(s), "+active.length+" active encrypted destination(s).");
   clearPreview();
  }catch(e){state("preview-state","Unable to load private state: "+e.message,true);}
- finally{working=false;updateButtons();signedControls();if(csrf&&enabled){history();signedHistory();}}
+ finally{working=false;updateButtons();signedControls();verifierControls();if(csrf&&enabled){history();signedHistory();verifierHistory();}}
 }
 for(const id of ["plan","connector","workflow","event"]){
  el(id).addEventListener("change",clearPreview);
@@ -278,6 +308,62 @@ el("signed-import").addEventListener("click",async()=>{
  }catch(e){if(csrf)state("signed-status","Claim not recorded: "+e.message+
     ". Inspect original webhook and signed receipt; NEVER retry automatically.",true);}
  finally{signedBusy=false;signedControls();}
+});
+
+// Stage 117: explicit one-shot owner n8n GET; absolutely no browser API key.
+let verifierEnabled=false,verifierBusy=false,verifierConfig=null;
+function verifierControls(){
+ const active=!!csrf&&enabled&&verifierEnabled&&!working&&!signedBusy&&!verifierBusy;
+ el("verify-run").disabled=!active||!/^[0-9a-f]{24}$/.test(el("plan").value)||
+  !el("verify-password").value;
+ el("verify-history-btn").disabled=!active;
+}
+async function verifierHistory(){
+ if(!csrf||!verifierEnabled)return;
+ try{
+  const data=await api("/api/n8n-execution-check-history");
+  if(!csrf)return;
+  el("verify-history").textContent=(data.records||[]).length?
+    data.records.map(x=>"Plan "+x.plan_id+" · n8n exec "+x.execution_id+
+     "\nVerification: "+x.status+
+     "\nProvider state: "+(x.provider_execution_status||"not proven")+
+     "\nIncoming delivery correlated: "+x.inbound_delivery_correlated+
+     "\nExecution metadata SHA256: "+(x.provider_metadata_sha256||"none")+
+     "\nBUSINESS EFFECT NOT VERIFIED. No automatic retry.").join("\n\n"):
+    "No n8n provider-side execution lookups recorded.";
+ }catch(e){if(csrf)state("verify-status","Local lookup history unavailable: "+e.message,true);}
+}
+el("verify-password").addEventListener("input",verifierControls);
+el("plan").addEventListener("change",verifierControls);
+el("verify-history-btn").addEventListener("click",verifierHistory);
+el("verify-run").addEventListener("click",async()=>{
+ if(!csrf||working||verifierBusy||!verifierEnabled||!el("plan").value)return;
+ const plan_id=el("plan").value;
+ if(!window.confirm("AUTHORIZE ONE REAL READ-ONLY n8n API GET?\n\n"+
+  "Signed local plan: "+plan_id+"\n"+
+  "Pinned n8n host: "+(verifierConfig?.host||"unavailable")+"\n"+
+  "Pinned n8n workflow: "+(verifierConfig?.workflow_id||"unavailable")+"\n"+
+  "Pinned n8n input node: "+(verifierConfig?.node||"unavailable")+"\n"+
+  "\nThe n8n API key stays inside the local server. No webhook will be sent or retried. "+
+  "If the API cannot prove the exact incoming delivery, the outcome is NOT VERIFIED. "+
+  "Only one request can be attempted for this plan."))return;
+ const current_password=el("verify-password").value;
+ if(!current_password)return;
+ el("verify-password").value="";verifierBusy=true;verifierControls();
+ try{
+  const result=await api("/api/n8n-execution-check",{plan_id,current_password});
+  if(!csrf)return;
+  const matched=result.status==="EXECUTION_SUCCESS_CORRELATED"||
+   result.status==="EXECUTION_FAILED_CORRELATED";
+  state("verify-status",result.status+
+   (matched?". Pinned execution and inbound delivery independently verified by n8n API.":
+    ". Provider execution/delivery correlation NOT proven.")+
+   " No business effect verified.",
+   !matched);
+  await verifierHistory();
+ }catch(e){if(csrf)state("verify-status","Read-only lookup result unavailable: "+
+    e.message+". Inspect local history. Never automatically retry.",true);}
+ finally{verifierBusy=false;verifierControls();}
 });
 (async()=>{
  try{

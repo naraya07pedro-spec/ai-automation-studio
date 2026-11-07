@@ -66,6 +66,7 @@ from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIErr
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
 from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
 from local_handoff_outcome_proof import SignedManualHandoffOutcome, HandoffOutcomeProofError
+from local_n8n_execution_verifier import N8NExecutionVerifier, ProviderExecutionError
 from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
@@ -115,6 +116,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
                    scheduled_ai=None, on_demand_ai=None,
                    agent_connector_handoff=None, handoff_outcomes=None,
+                   n8n_execution_verifier=None,
                    durable_jobs=None,
                    shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
@@ -342,6 +344,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
                                   "signed_handoff_outcome_import": handoff_outcomes is not None,
+                                  "n8n_execution_readonly_verify": n8n_execution_verifier is not None,
+                                  "n8n_execution_hostname": (n8n_execution_verifier.host if n8n_execution_verifier is not None else None),
+                                  "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
+                                  "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
                                  "durable_job_queue": durable_jobs is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
@@ -605,6 +611,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(422,{"error":"invalid_job_query"})
                 except DurableQueueError as exc:
                     self._send(exc.status,{"error":str(exc)})
+                return
+            if route.path == "/api/n8n-execution-check-history":
+                if n8n_execution_verifier is None:
+                    self._send(403,{"error":"n8n_execution_verify_disabled"})
+                elif route.query:
+                    self._send(422,{"error":"invalid_execution_check_history_query"})
+                else:
+                    try:
+                        self._send(200,n8n_execution_verifier.history())
+                    except ProviderExecutionError as exc:
+                        self._send(exc.status,{"error":str(exc)})
                 return
             if route.path == "/api/signed-handoff-outcomes":
                 if handoff_outcomes is None:
@@ -873,6 +890,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/agent-connector-handoff-preview",
                                  "/api/agent-connector-handoff-commit",
                                  "/api/signed-handoff-outcome-import",
+                                 "/api/n8n-execution-check",
                                  "/api/durable-job-create",
                                  "/api/durable-job-arm",
                                  "/api/durable-job-pause",
@@ -2207,6 +2225,56 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path == "/api/n8n-execution-check":
+                if n8n_execution_verifier is None:
+                    self._send(403,{"error":"n8n_execution_verify_disabled"})
+                    return
+                action="N8N_EXECUTION_READONLY_VERIFY"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                if (type(data) is not dict or
+                        set(data)!={"plan_id","current_password"} or
+                        type(data.get("current_password")) is not str):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"invalid_execution_check_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503
+                        else "operator_login_locked" if verified==429
+                        else "invalid_operator_credentials")})
+                    return
+                try:
+                    result=n8n_execution_verifier.verify_one(
+                        {"plan_id":data["plan_id"]})
+                except ProviderExecutionError as exc:
+                    self._audit_event(action,"UNCERTAIN" if exc.status==503 else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"n8n_execution_check_uncertain_read_ledger"})
+                    return
+                audit_result=(
+                    "SUCCESS" if result["status"] in (
+                        "EXECUTION_SUCCESS_CORRELATED",
+                        "EXECUTION_FAILED_CORRELATED")
+                    else "UNCERTAIN" if result["status"] in (
+                        "LOOKUP_UNCERTAIN",
+                        "LOOKUP_NETWORK_OR_RESPONSE_UNCERTAIN")
+                    else "FAILED")
+                if not self._audit_event(action,audit_result):
+                    self._send(503,{"error":"n8n_check_audit_uncertain_read_ledger"})
+                else:
+                    self._send(200,result)
+                return
             if self.path == "/api/signed-handoff-outcome-import":
                 if handoff_outcomes is None:
                     self._send(403,{"error":"handoff_outcome_import_disabled"})
@@ -2579,7 +2647,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_google_gmail_metadata=False,
                        enable_managed_autopilot=False,
                        enable_scheduled_local_ai=False,
-                       enable_scheduled_openai=False):
+                       enable_scheduled_openai=False,
+                       enable_n8n_execution_verify=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -2596,6 +2665,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     # The local-Ollama flag still requires interactive local agent enablement.
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
+    if enable_n8n_execution_verify and not enable_encrypted_managed_webhooks:
+        raise ValueError("n8n_execution_verify_requires_encrypted_managed_webhooks")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
         raise ValueError("select_only_one_managed_connector_storage_mode")
     if enable_agent_memory and not enable_local_agent:
@@ -2629,7 +2700,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
-    if enable_agent_plans or enable_scheduled_openai:
+    if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None
@@ -2657,6 +2728,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     n8n_proofs = None
     agent_handoff = None
     handoff_outcomes = None
+    n8n_execution_verifier = None
     durable_queue = None
     shared_gate = threading.BoundedSemaphore(1)
     shared_gate_lock = threading.Lock()
@@ -2718,6 +2790,15 @@ def start_local_server(port=8765, enable_local_agent=False,
                 plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
         if agent_handoff is not None:
             handoff_outcomes = SignedManualHandoffOutcome(agent_handoff, managed)
+        if enable_n8n_execution_verify:
+            if handoff_outcomes is None:
+                raise ProviderExecutionError("signed_manual_handoff_required",403)
+            n8n_execution_verifier = N8NExecutionVerifier(
+                handoff_outcomes,
+                api_origin=read_runtime_secret("AAS_N8N_API_ORIGIN"),
+                workflow_id=read_runtime_secret("AAS_N8N_WORKFLOW_ID"),
+                webhook_node_name=read_runtime_secret("AAS_N8N_WEBHOOK_NODE_NAME"),
+                api_key=read_runtime_secret("AAS_N8N_API_KEY"))
         if plan_store is not None and model_safety is not None:
             durable_queue = LocalDurablePlanQueue(
                 plan_store, model_safety, shared_gate, shared_gate_lock,
@@ -2760,6 +2841,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            n8n_proofs=n8n_proofs,
                             agent_connector_handoff=agent_handoff,
                             handoff_outcomes=handoff_outcomes,
+                            n8n_execution_verifier=n8n_execution_verifier,
                             durable_jobs=durable_queue,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
@@ -2874,6 +2956,8 @@ def main(argv=None):
                         help="Opt in to separate owner-clicked official public HN jobstories preview (max 5 titles, no grants). Requires --enable-hn-story-read.")
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
+    parser.add_argument("--enable-n8n-execution-verify", action="store_true",
+                        help="Explicitly opt into owner-clicked GET-only official n8n execution checks; reuses existing private plan store without enabling OpenAI or Ollama. Requires encrypted managed webhooks and externally provisioned n8n API config.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
                         help="Explicitly enable bounded owner-approved schedules for encrypted managed HTTPS connectors; requires --enable-encrypted-managed-webhooks.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -2893,6 +2977,8 @@ def main(argv=None):
     # no local Ollama chat, model listing, or model tool functions enabled.
     if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
+    if args.enable_n8n_execution_verify and not args.enable_encrypted_managed_webhooks:
+        parser.error("--enable-n8n-execution-verify requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
         parser.error("choose encrypted or legacy plaintext managed-webhooks, not both")
     if args.enable_agent_memory and not args.enable_local_agent:
@@ -3002,8 +3088,9 @@ def main(argv=None):
                            enable_google_gmail_metadata=args.enable_google_gmail_metadata,
                            enable_managed_autopilot=args.enable_managed_autopilot,
                            enable_scheduled_local_ai=args.enable_scheduled_local_ai,
-                           enable_scheduled_openai=args.enable_scheduled_openai)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError) as exc:
+                           enable_scheduled_openai=args.enable_scheduled_openai,
+                           enable_n8n_execution_verify=args.enable_n8n_execution_verify)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
