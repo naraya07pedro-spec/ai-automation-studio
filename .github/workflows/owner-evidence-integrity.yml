@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - 'tools/owner_acceptance_audit.py'
+      - 'app/local_private_sqlite_path.py'
+      - 'app/local_workflow_core.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_outbound_webhook.py'
       - 'tests/test_owner_acceptance_audit.py'
       - 'tools/offline_owner_backup.py'
       - 'app/local_n8n_execution_verifier.py'
@@ -15,6 +20,11 @@ on:
     branches: [main]
     paths:
       - 'tools/owner_acceptance_audit.py'
+      - 'app/local_private_sqlite_path.py'
+      - 'app/local_workflow_core.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_outbound_webhook.py'
       - 'tests/test_owner_acceptance_audit.py'
       - 'tools/offline_owner_backup.py'
       - 'app/local_n8n_execution_verifier.py'
@@ -54,4 +64,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_agent_connector_handoff.py' -v
       - name: Static Python parse / compile
         run: |
-          python -m py_compile tools/owner_acceptance_audit.py tests/test_owner_acceptance_audit.py
+          python -m py_compile tools/owner_acceptance_audit.py app/local_private_sqlite_path.py tests/test_owner_acceptance_audit.py
