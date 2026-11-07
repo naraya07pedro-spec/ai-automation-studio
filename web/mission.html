@@ -1134,6 +1134,7 @@ $("ai-recurring-create").addEventListener("click",async()=>{
   expires_days:Number($("ai-recurring-days").value),current_password};
  const remote=body.provider==="openai_responses";
  if(remote&&(!aiRemoteEnabled||!$("ai-recurring-provider-consent").checked))return;
+ if(remote)body.paid_api_consent=true;
  if(!window.confirm(remote?
    ("Authorize up to "+body.max_runs+" PAID OpenAI API requests over "+body.expires_days+
     " days? Your prompt will leave the VPS, API charges are separate from ChatGPT, and no dollar cap is guaranteed. No external tools or business writes.") :
