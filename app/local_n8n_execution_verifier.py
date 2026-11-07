@@ -165,7 +165,8 @@ class N8NExecutionVerifier:
                   provider_finished INTEGER,
                   inbound_delivery_correlated INTEGER NOT NULL DEFAULT 0,
                   provider_metadata_sha256 TEXT,
-                  checked_at_utc TEXT NOT NULL
+                  checked_at_utc TEXT NOT NULL,
+                  provider_hostname TEXT NOT NULL
                 )""")
             # Interrupted network read is NOT proof of any provider result.
             self.handoff.db.execute("""UPDATE n8n_provider_execution_checks
@@ -183,6 +184,7 @@ class N8NExecutionVerifier:
             "inbound_delivery_correlated":bool(row[10]),
             "provider_metadata_sha256":row[11],
             "checked_at_utc":row[12],
+            "provider_hostname":row[13],
             "provider_api_execution_verified":row[7] in (
                 "EXECUTION_SUCCESS_CORRELATED", "EXECUTION_FAILED_CORRELATED",
                 "CLAIM_MISMATCH", "DELIVERY_NOT_CORRELATED"),
@@ -200,7 +202,7 @@ class N8NExecutionVerifier:
                     pinned_node_sha256,signed_message_sha256,status,
                     provider_execution_status,provider_finished,
                     inbound_delivery_correlated,provider_metadata_sha256,
-                    checked_at_utc FROM n8n_provider_execution_checks
+                    checked_at_utc,provider_hostname FROM n8n_provider_execution_checks
                     ORDER BY checked_at_utc DESC,plan_id LIMIT 30""").fetchall()
             except sqlite3.Error:
                 raise ProviderExecutionError("n8n_check_storage_unavailable", 503) from None
@@ -258,11 +260,11 @@ class N8NExecutionVerifier:
                         self.handoff.db.execute("""INSERT INTO n8n_provider_execution_checks
                             (plan_id,connector_id,execution_id,delivery_id,
                              provider_workflow_id,pinned_node_sha256,
-                             signed_message_sha256,status,checked_at_utc)
-                            VALUES(?,?,?,?,?,?,?,'IN_FLIGHT',?)""",
+                             signed_message_sha256,status,checked_at_utc,provider_hostname)
+                            VALUES(?,?,?,?,?,?,?,'IN_FLIGHT',?,?)""",
                             (pid,cid,exid,did,self.workflow_id,
                              hashlib.sha256(self.node_name.encode()).hexdigest(),
-                             message_hash,now))
+                             message_hash,now,self.host))
                 except sqlite3.IntegrityError:
                     raise ProviderExecutionError(
                         "n8n_execution_already_checked_read_history", 409) from None
@@ -318,7 +320,8 @@ class N8NExecutionVerifier:
                         "stoppedAt":response.get("stoppedAt") if
                             type(response.get("stoppedAt")) is str else None,
                         "inbound_correlated":correlated,
-                        "signed_message_sha256":message_hash})
+                        "signed_message_sha256":message_hash,
+                        "provider_hostname":self.host})
             try:
                 with self.handoff.lock, self.handoff.db:
                     changed=self.handoff.db.execute("""UPDATE n8n_provider_execution_checks
@@ -337,7 +340,7 @@ class N8NExecutionVerifier:
                         pinned_node_sha256,signed_message_sha256,status,
                         provider_execution_status,provider_finished,
                         inbound_delivery_correlated,provider_metadata_sha256,
-                        checked_at_utc FROM n8n_provider_execution_checks
+                        checked_at_utc,provider_hostname FROM n8n_provider_execution_checks
                         WHERE plan_id=?""", (pid,)).fetchone()
             except sqlite3.Error:
                 raise ProviderExecutionError(
