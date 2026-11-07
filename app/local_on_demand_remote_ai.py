@@ -131,6 +131,32 @@ class LocalOnDemandRemoteAI:
             raise OnDemandRemoteAIError("remote_ask_not_found", 404)
         return self._public_receipt(row)
 
+    def bound_receipt(self, request_id, model, prompt):
+        """Read a receipt only if the caller reproduces the exact paid request.
+
+        This is an internal binding check; not an HTTP endpoint. Prevents
+        importing some unrelated paid answer as a plan for a different goal.
+        """
+        if type(request_id) is not str or not REQUEST_ID.fullmatch(request_id):
+            raise OnDemandRemoteAIError("invalid_remote_ask_id")
+        if not valid_remote_model_name(model):
+            raise OnDemandRemoteAIError("invalid_remote_model_name")
+        if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
+            raise OnDemandRemoteAIError("invalid_remote_ask_prompt")
+        from hmac import compare_digest
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        with self.lock:
+            row = self.db.execute(
+                """SELECT prompt_sha256,model FROM remote_asks
+                   WHERE request_id=?""", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise OnDemandRemoteAIError("remote_ask_not_found", 404)
+            if row[1] != model or not compare_digest(row[0], digest):
+                raise OnDemandRemoteAIError("remote_ask_binding_mismatch", 409)
+            # Keep the database lock until the entire receipt is read.
+            return self.receipt(request_id)
+
     def recent(self):
         with self.lock:
             rows = self.db.execute(

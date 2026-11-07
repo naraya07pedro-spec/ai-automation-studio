@@ -410,6 +410,27 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
  </div>
 </section>
 
+<section class="panel" id="cloud-plan-panel" aria-label="Cloud generated approved local tool plans" style="margin-top:20px">
+ <div class="split"><h2>14 · Cloud AI → Reviewed Local Plan</h2><span class="pill" id="cloud-plan-badge">Checking</span></div>
+ <p class="sub">Ask OpenAI for up to 3 read-only calculation/UTC clock steps. The model NEVER executes a tool. Review its validated proposal in section 02, then separately approve and run the steps. No shell, Gmail, n8n, GitHub edits, external writes or unsupervised actions.</p>
+ <div class="grid">
+  <div>
+   <label for="cloud-plan-model">OpenAI API model ID</label><input id="cloud-plan-model" maxlength="80" autocomplete="off" placeholder="Exact model enabled in your API account">
+   <label for="cloud-plan-goal">Goal (up to 1,200 characters)</label><textarea id="cloud-plan-goal" maxlength="1200" rows="4" placeholder="Calculate 18 × 7 then show current UTC time."></textarea>
+   <label><input id="cloud-plan-consent" type="checkbox"> I authorize exactly ONE potentially billable OpenAI API proposal. My goal leaves this device, with billing separate from ChatGPT.</label>
+   <label for="cloud-plan-owner">Current owner password, required for every proposal/recovery</label><input id="cloud-plan-owner" type="password" autocomplete="off">
+   <div class="btnrow"><button id="cloud-plan-propose" type="button" class="btn primary" disabled>Create one reviewed plan proposal</button></div>
+   <p class="status" id="cloud-plan-status" role="status">No cloud proposal submitted.</p>
+  </div>
+  <div>
+   <label for="cloud-plan-request-id">Existing request ID (32 lowercase hex) for zero-charge recovery</label><input id="cloud-plan-request-id" maxlength="32" autocomplete="off" placeholder="From the saved receipt in section 13">
+   <div class="btnrow"><button id="cloud-plan-recover" type="button" class="btn" disabled>Recover proposal, NO AI call</button></div>
+   <div class="output" id="cloud-plan-result">No validated plan. A model's proposed steps remain untrusted until reviewed.</div>
+   <p class="note">If a response is interrupted, enter exactly the original goal, model and request ID. Recovery verifies the saved prompt hash and never resends a paid request. Review the plan and choose Approve then Execute in section 02.</p>
+  </div>
+ </div>
+</section>
+
 <footer>Private localhost / SSH-tunnel application · No public HTTP, cloud sync, unsupervised business writes, or guaranteed external delivery. <a href="/">Full workbench</a> contains connectors, documents, memory, and advanced task controls.</footer>
 </div>
 <div class="overlay" id="gate">
@@ -426,7 +447,7 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false;
+let csrf="",plan=null,busy=false,revision=0,reportText="",poller=null,chatEnabled=false,planningEnabled=false,cloudPlanningEnabled=false;
 const readTools=new Set(["calculate","utc_now","github_public_issues","github_issue_triage","github_issue_analysis","local_document_question","local_multi_document_question","local_csv_profile","hn_public_story"]);
 function status(id,message,error=false){$(id).textContent=message;$(id).classList.toggle("error",error);}
 function stopPolling(){if(poller!==null){clearInterval(poller);poller=null;}}
@@ -462,6 +483,7 @@ function lock(message){
  n8nProofClear();
  aiRecurringClear();
  cloudAskClear();
+ cloudPlanClear();
  setBusy(false);
 }
 async function unlock(){
@@ -474,6 +496,7 @@ async function loadCapabilities(){
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
   cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
+  cloudPlanningEnabled=!!info.cloud_plan_review;cloudPlanControls();
   if(cloudAskEnabled)loadCloudAskReceipts();
   chatEnabled=enabled;planningEnabled=!!info.planning;
   $("model-badge").textContent=enabled?"Ollama optional":
@@ -585,7 +608,7 @@ function refreshActions(){
   "next":idle&&!activeBatch&&["APPROVED","NEXT_READY"].includes(s),
   "run-remaining":idle&&!activeBatch&&["APPROVED","NEXT_READY"].includes(s)&&supported,
   "stop":idle&&run==="RUNNING",
-  "report":idle&&s==="COMPLETED"&&!p.report,
+  "report":idle&&s==="COMPLETED"&&!p.report&&planningEnabled,
   "cancel":idle&&!activeBatch&&["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(s),
   "resume":idle&&s==="INTERRUPTED",
  })){
@@ -1017,6 +1040,76 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
 
+
+let cloudPlanBusy=false;
+function cloudPlanControls(){
+ $("cloud-plan-badge").textContent=cloudPlanningEnabled?"Cloud planning enabled":"Disabled";
+ const enabled=!!csrf&&!busy&&!cloudPlanBusy&&cloudPlanningEnabled&&
+  !!$("cloud-plan-goal").value.trim()&&!!$("cloud-plan-model").value.trim()&&
+  !!$("cloud-plan-owner").value;
+ $("cloud-plan-propose").disabled=!enabled||!$("cloud-plan-consent").checked;
+ $("cloud-plan-recover").disabled=!enabled||!/^[0-9a-f]{32}$/.test(
+  $("cloud-plan-request-id").value.trim());
+}
+function cloudPlanClear(){
+ cloudPlanningEnabled=false;cloudPlanBusy=false;
+ $("cloud-plan-owner").value="";$("cloud-plan-consent").checked=false;
+ $("cloud-plan-goal").value="";$("cloud-plan-request-id").value="";
+ $("cloud-plan-result").textContent="Session locked.";
+ $("cloud-plan-status").textContent="No cloud plan submitted in this session.";
+ cloudPlanControls();
+}
+async function cloudPlanRequest(recover){
+ if(!csrf||busy||cloudPlanBusy||!cloudPlanningEnabled)return;
+ if(!recover&&!$("cloud-plan-consent").checked)return;
+ const goal=$("cloud-plan-goal").value.trim(),model=$("cloud-plan-model").value.trim();
+ const current_password=$("cloud-plan-owner").value;
+ if(!goal||!model||!current_password)return;
+ if(!recover&&!confirm("Authorize ONE potentially billable OpenAI API planning request? The model can only PROPOSE calculation/time steps. No tools will run before your separate approval."))return;
+ if(!recover&&(!window.crypto||!window.crypto.getRandomValues)){
+  status("cloud-plan-status","Secure request ID generation unavailable.",true);return;
+ }
+ let request_id=$("cloud-plan-request-id").value.trim();
+ if(recover){
+  if(!/^[0-9a-f]{32}$/.test(request_id))return;
+ }else{
+  const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
+  request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+  $("cloud-plan-request-id").value=request_id;
+ }
+ const body={request_id,model,goal,current_password};
+ if(!recover)body.paid_api_consent=true;
+ $("cloud-plan-owner").value="";$("cloud-plan-consent").checked=false;
+ cloudPlanBusy=true;cloudPlanControls();
+ status("cloud-plan-status",recover?"Reading prior receipt without a model call…":
+  "One paid proposal attempted. If interrupted, use Recover, NOT Propose again.");
+ try{
+  const result=await request(recover?"/api/cloud-ai-plan-recover":
+   "/api/cloud-ai-plan-create",body);
+  if(!csrf)return;
+  $("cloud-plan-result").textContent="Request ID "+result.request_id+
+   "\nPlan: "+result.plan.plan_id+" · "+result.plan.status+
+   "\n\n"+result.plan.steps.map((x,i)=>(i+1)+". "+x.tool+" "+JSON.stringify(x.args)).join("\n")+
+   "\n\nTools executed: ZERO. Owner review is required in section 02.";
+  renderPlan(result.plan);
+  status("cloud-plan-status","Proposal saved. Scroll up to section 02, review each step, then click Approve and Execute separately.");
+  $("plan-detail").scrollIntoView({behavior:"smooth",block:"start"});
+ }catch(error){
+  if(csrf)status("cloud-plan-status","Plan not confirmed: "+error.message+
+   ". Request ID "+request_id+
+   ". Check existing receipt/real provider usage; recovery makes NO new AI call.",true);
+ }finally{
+  cloudPlanBusy=false;cloudPlanControls();
+  if(csrf)loadList();
+ }
+}
+for(const id of ["cloud-plan-goal","cloud-plan-model","cloud-plan-owner","cloud-plan-request-id"]){
+ $(id).addEventListener("input",cloudPlanControls);
+}
+$("cloud-plan-consent").addEventListener("change",cloudPlanControls);
+$("cloud-plan-propose").addEventListener("click",()=>cloudPlanRequest(false));
+$("cloud-plan-recover").addEventListener("click",()=>cloudPlanRequest(true));
+
 let cloudAskEnabled=false,cloudAskBusy=false,cloudAskLastId=null;
 function cloudAskControls(){
  $("cloud-ask-badge").textContent=cloudAskEnabled?"OpenAI enabled":"Disabled";
@@ -1061,7 +1154,7 @@ async function loadCloudAskReceipts(){
   if(!items.length){box.textContent="No direct OpenAI attempts recorded.";return;}
   for(const item of items){
    const btn=document.createElement("button");btn.type="button";btn.className="record";
-   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc;
+   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc+" · ID "+item.request_id;
    btn.addEventListener("click",()=>cloudAskLookup(item.request_id));
    box.append(btn);
   }
