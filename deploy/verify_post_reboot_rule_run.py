@@ -132,9 +132,12 @@ def observe(wait_seconds=0):
     last = None
     while True:
         last = _read_observations(state,invocation,after["boot_id"],boot,captured)
-        if last["matching_completed_receipts"] or time.monotonic()-started >= wait_seconds:
+        if last["matching_completed_receipts"]:
             break
-        time.sleep(min(5.0,wait_seconds-(time.monotonic()-started)))
+        remaining = wait_seconds-(time.monotonic()-started)
+        if remaining <= 0:
+            break
+        time.sleep(min(5.0,remaining))
     # Recheck service identity & privacy AFTER reading the new real ledger
     # so a service restart during wait cannot be mistaken for old invocation.
     final = reboot.live_snapshot()
