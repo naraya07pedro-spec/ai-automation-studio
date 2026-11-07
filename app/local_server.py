@@ -65,6 +65,7 @@ from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
 from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
+from local_handoff_outcome_proof import SignedManualHandoffOutcome, HandoffOutcomeProofError
 from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
@@ -113,7 +114,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
                    scheduled_ai=None, on_demand_ai=None,
-                   agent_connector_handoff=None, durable_jobs=None,
+                   agent_connector_handoff=None, handoff_outcomes=None,
+                   durable_jobs=None,
                    shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
@@ -339,6 +341,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "remote_on_demand_ai": on_demand_ai is not None,
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
+                                  "signed_handoff_outcome_import": handoff_outcomes is not None,
                                  "durable_job_queue": durable_jobs is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
@@ -603,6 +606,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except DurableQueueError as exc:
                     self._send(exc.status,{"error":str(exc)})
                 return
+            if route.path == "/api/signed-handoff-outcomes":
+                if handoff_outcomes is None:
+                    self._send(403,{"error":"handoff_outcome_import_disabled"})
+                elif route.query:
+                    self._send(422,{"error":"invalid_signed_handoff_query"})
+                else:
+                    try:
+                        self._send(200,handoff_outcomes.list())
+                    except HandoffOutcomeProofError as exc:
+                        self._send(exc.status,{"error":str(exc)})
+                return
             if route.path == "/api/agent-connector-handoffs":
                 if agent_connector_handoff is None:
                     self._send(403, {"error":"agent_connector_handoff_disabled"})
@@ -858,6 +872,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/managed-webhook-commit",
                                  "/api/agent-connector-handoff-preview",
                                  "/api/agent-connector-handoff-commit",
+                                 "/api/signed-handoff-outcome-import",
                                  "/api/durable-job-create",
                                  "/api/durable-job-arm",
                                  "/api/durable-job-pause",
@@ -2597,6 +2612,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     managed_autopilot = None
     n8n_proofs = None
     agent_handoff = None
+    handoff_outcomes = None
     durable_queue = None
     shared_gate = threading.BoundedSemaphore(1)
     shared_gate_lock = threading.Lock()
@@ -2656,6 +2672,8 @@ def start_local_server(port=8765, enable_local_agent=False,
         if plan_store is not None and managed is not None and managed._vault is not None:
             agent_handoff = AgentConnectorHandoff(
                 plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
+        if agent_handoff is not None:
+            handoff_outcomes = SignedManualHandoffOutcome(agent_handoff, managed)
         if plan_store is not None and model_safety is not None:
             durable_queue = LocalDurablePlanQueue(
                 plan_store, model_safety, shared_gate, shared_gate_lock,
@@ -2697,6 +2715,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            managed_autopilot=managed_autopilot,
                            n8n_proofs=n8n_proofs,
                             agent_connector_handoff=agent_handoff,
+                            handoff_outcomes=handoff_outcomes,
                             durable_jobs=durable_queue,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
