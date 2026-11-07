@@ -1,0 +1,83 @@
+name: Bounded paid OpenAI Responses model scheduler acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/openai_readonly_responses.py'
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/local_server.py'
+      - 'app/local_service_credentials.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'deploy/provision_private_vps_credential.py'
+      - 'web/mission.html'
+      - 'tests/test_bounded_remote_openai_scheduler.py'
+      - 'docs/BOUNDED_REMOTE_MODEL_SCHEDULES_V1.md'
+      - '.github/workflows/bounded-remote-model-schedules.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/openai_readonly_responses.py'
+      - 'app/local_readonly_agent_scheduler.py'
+      - 'app/local_server.py'
+      - 'app/local_service_credentials.py'
+      - 'app/launch_workbench.py'
+      - 'deploy/private_vps_service.py'
+      - 'deploy/provision_private_vps_credential.py'
+      - 'web/mission.html'
+      - 'tests/test_bounded_remote_openai_scheduler.py'
+      - 'docs/BOUNDED_REMOTE_MODEL_SCHEDULES_V1.md'
+      - '.github/workflows/bounded-remote-model-schedules.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  remote-ai-finite-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test remote network control without any paid OpenAI requests
+        run: python -m unittest discover -s tests -p 'test_bounded_remote_openai_scheduler.py' -v
+      - name: Preserve old local schedules, HTTP, model checkpoint and credential protections
+        run: |
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_readonly_agent_scheduler_http.py' -v
+          python -m unittest discover -s tests -p 'test_local_model_safety.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_release.py' -v
+      - name: Compile Python and parse actual browser code
+        run: |
+          python -m py_compile app/openai_readonly_responses.py app/local_readonly_agent_scheduler.py app/local_server.py app/local_service_credentials.py app/launch_workbench.py deploy/private_vps_service.py deploy/provision_private_vps_credential.py
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const html=fs.readFileSync('web/mission.html','utf8');
+          const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if(!scripts.length)throw Error('No Mission Control code');
+          scripts.forEach(s=>new vm.Script(s[1]));
+          console.log('Mission Control JS parsed');
+          NODE
+      - name: Verify opt-in private unit and account-free default
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0,'deploy')
+          from private_vps_service import render_unit
+          a=dict(username='studio',home='/home/studio',checkout='/home/studio/studio',python='/usr/bin/python3',mode='local-ai')
+          off=render_unit(**a)
+          on=render_unit(**a,scheduled_local_ai=True,scheduled_openai=True)
+          assert 'aas-openai-api-key' not in off
+          assert '--enable-scheduled-openai' not in off
+          assert 'LoadCredential=aas-openai-api-key:' in on
+          assert '--enable-scheduled-openai' in on
+          assert 'Environment=AAS_OPENAI_API_KEY' not in on
+          PY
+      - name: State honestly that live cost and Tencent deployment were not tested
+        run: echo "No actual OpenAI account, billable token use, Tencent VM or user credentials touched. All API transport results are injected test fixtures."
