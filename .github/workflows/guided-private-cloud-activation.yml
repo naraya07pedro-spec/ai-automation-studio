@@ -1,0 +1,45 @@
+name: Stage 110 guided private cloud activation (offline only)
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/activate_private_cloud.py'
+      - 'tests/test_guided_private_cloud_activation.py'
+      - 'docs/GUIDED_PRIVATE_CLOUD_ACTIVATION_V1.md'
+      - '.github/workflows/guided-private-cloud-activation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/activate_private_cloud.py'
+      - 'tests/test_guided_private_cloud_activation.py'
+      - 'docs/GUIDED_PRIVATE_CLOUD_ACTIVATION_V1.md'
+      - '.github/workflows/guided-private-cloud-activation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-safety-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify first-time activation negative paths without sudo or API
+        run: python -m unittest discover -s tests -p 'test_guided_private_cloud_activation.py' -v
+      - name: Existing private cloud and systemd contract regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_private_cloud_runtime_acceptance.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_only_scheduler.py' -v
+      - name: Python syntax and import compilation
+        run: python -m py_compile deploy/activate_private_cloud.py
