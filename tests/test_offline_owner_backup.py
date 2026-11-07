@@ -152,7 +152,7 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
         self.assertTrue(backup._valid_rel("managed-webhook-ledgers/key_1.sqlite3"))
 
     def test_modified_manifest_or_duplicate_archive_entry_refused(self):
-        files = {"operator.json": b"fixture"}
+        files = {"operator.json": self.operator.read_bytes()}
         plain = backup._pack(files)
         self.assertEqual(backup._unpack(plain), files)
         with zipfile.ZipFile(io.BytesIO(plain)) as z:
@@ -170,6 +170,23 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
                 z.writestr(backup.MANIFEST, b'{"version":1,"files":{}}')
         with self.assertRaisesRegex(backup.BackupError, "entries"):
             backup._unpack(other.getvalue())
+
+    def test_corrupt_owner_verifier_rejected_before_backup_and_restore(self):
+        original = self.operator.read_bytes()
+        self.operator.write_text('{"version":99}')
+        with self.assertRaisesRegex(backup.BackupError, "owner_config_invalid"):
+            self._create()
+        self.assertFalse(self.archive.exists())
+        self.operator.write_bytes(original)
+        invalid = backup._pack({"operator.json": b'{"version":99}'})
+        with self.assertRaisesRegex(backup.BackupError, "owner_config_invalid"):
+            backup._unpack(invalid)
+
+    def test_malicious_file_directory_collision_rejected(self):
+        files = {"operator.json": self.operator.read_bytes(),
+                 "nested": b"file", "nested/child.txt": b"subfile"}
+        with self.assertRaisesRegex(backup.BackupError, "archive_path_collision"):
+            backup._unpack(backup._pack(files))
 
     def test_corrupt_sqlite_snapshot_fails_without_archive(self):
         self.database.write_bytes(b"broken sqlite bytes")
