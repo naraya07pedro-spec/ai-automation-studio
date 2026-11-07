@@ -1015,6 +1015,91 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
+
+let cloudAskEnabled=false,cloudAskBusy=false,cloudAskLastId=null;
+function cloudAskControls(){
+ $("cloud-ask-badge").textContent=cloudAskEnabled?"OpenAI enabled":"Disabled";
+ $("cloud-ask-submit").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||
+  !$("cloud-ask-model").value.trim()||!$("cloud-ask-prompt").value.trim()||
+  !$("cloud-ask-owner").value||!$("cloud-ask-consent").checked;
+ $("cloud-ask-recover").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||!cloudAskLastId;
+ $("cloud-ask-refresh").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled;
+}
+function cloudAskClear(){
+ cloudAskEnabled=false;cloudAskLastId=null;cloudAskBusy=false;
+ $("cloud-ask-owner").value="";$("cloud-ask-consent").checked=false;
+ $("cloud-ask-prompt").value="";
+ $("cloud-ask-answer").textContent="Session locked.";
+ $("cloud-ask-receipts").textContent="Session locked.";
+ $("cloud-ask-status").textContent="No paid request made in this session.";
+ cloudAskControls();
+}
+function cloudAskShow(receipt){
+ const used=receipt.usage_tokens;
+ $("cloud-ask-answer").textContent=
+  (receipt.status==="COMPLETED"&&typeof receipt.answer==="string"?
+   receipt.answer:"No verified response saved; status: "+receipt.status)+
+  "\n\nReceipt "+receipt.request_id+" · "+receipt.status+
+  (used?" · Tokens in="+used.input_tokens+" out="+used.output_tokens:"")+
+  "\nProvider billing NOT independently verified. No automatic retries.";
+}
+async function cloudAskLookup(requestId){
+ if(!csrf||!cloudAskEnabled||!requestId)return;
+ try{
+  const receipt=await request("/api/read-only-ai-ask-receipt?request_id="+encodeURIComponent(requestId));
+  if(csrf){cloudAskShow(receipt);status("cloud-ask-status","Existing request receipt retrieved. Zero new API calls.");}
+ }catch(error){if(csrf)status("cloud-ask-status","Receipt unavailable: "+error.message,true);}
+}
+async function loadCloudAskReceipts(){
+ if(!csrf||!cloudAskEnabled||cloudAskBusy){cloudAskControls();return;}
+ try{
+  const data=await request("/api/read-only-ai-ask-history");
+  if(!csrf)return;
+  const box=$("cloud-ask-receipts");box.replaceChildren();
+  const items=Array.isArray(data.receipts)?data.receipts:[];
+  if(!items.length){box.textContent="No direct OpenAI attempts recorded.";return;}
+  for(const item of items){
+   const btn=document.createElement("button");btn.type="button";btn.className="record";
+   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc;
+   btn.addEventListener("click",()=>cloudAskLookup(item.request_id));
+   box.append(btn);
+  }
+ }catch(error){if(csrf)status("cloud-ask-status","Cannot load receipts: "+error.message,true);}
+ finally{cloudAskControls();}
+}
+for(const id of ["cloud-ask-prompt","cloud-ask-model","cloud-ask-owner"]){
+ $(id).addEventListener("input",cloudAskControls);
+}
+$("cloud-ask-consent").addEventListener("change",cloudAskControls);
+$("cloud-ask-refresh").addEventListener("click",loadCloudAskReceipts);
+$("cloud-ask-recover").addEventListener("click",()=>cloudAskLookup(cloudAskLastId));
+$("cloud-ask-submit").addEventListener("click",async()=>{
+ if(!csrf||busy||cloudAskBusy||!cloudAskEnabled||!$("cloud-ask-consent").checked)return;
+ if(!window.confirm("Authorize exactly ONE potentially billable OpenAI API text request? Your prompt leaves the device, with separate billing and no model tools. Continue?"))return;
+ if(!window.crypto||!window.crypto.getRandomValues){
+  status("cloud-ask-status","Secure random request ID unavailable.",true);return;
+ }
+ const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
+ const request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
+ cloudAskLastId=request_id;
+ const body={request_id,model:$("cloud-ask-model").value.trim(),
+  prompt:$("cloud-ask-prompt").value.trim(),paid_api_consent:true,
+  current_password:$("cloud-ask-owner").value};
+ $("cloud-ask-owner").value="";$("cloud-ask-consent").checked=false;
+ cloudAskBusy=true;cloudAskControls();
+ status("cloud-ask-status","One request attempted: "+request_id+". Do not resend after network interruption.");
+ try{
+  const receipt=await request("/api/read-only-ai-ask",body);
+  if(csrf){cloudAskShow(receipt);status("cloud-ask-status","One remote response saved. Verify claims and provider billing.");}
+ }catch(error){
+  if(csrf)status("cloud-ask-status","Outcome unconfirmed: "+error.message+
+   ". Check receipt "+request_id+" and real provider usage. Never auto-retry.",true);
+ }finally{
+  cloudAskBusy=false;cloudAskControls();
+  if(csrf)loadCloudAskReceipts();
+ }
+});
+
 let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false,aiRecurringSafetyUncertain=false;
 function aiRecurringClear(){
  aiRecurringEnabled=false;aiRemoteEnabled=false;aiRecurringLocalEnabled=false;aiRecurringSafetyUncertain=false;
