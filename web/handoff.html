@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Approved Agent Handoff | AI Automation Studio</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui,-apple-system,"Segoe UI",sans-serif;background:#0a111b;color:#edf7fa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 20% 0,#173c48,transparent 45%),#0a111b}
+main{max-width:1100px;margin:auto;padding:32px 20px 90px}a{color:#65e5bc}h1{font-size:clamp(28px,4vw,44px);margin:16px 0 10px}
+h2{font-size:21px}.intro,.sub,.muted{color:#a9bdcd;line-height:1.6}.intro{max-width:790px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:23px}
+.panel{border:1px solid #2a3f53;background:#132334;border-radius:18px;padding:24px}
+label{display:block;margin:16px 0 7px;color:#d0e4ec;font-weight:600;font-size:13px}
+select,input{width:100%;background:#071624;color:#eef6fa;padding:13px;border:1px solid #36516b;border-radius:10px;font:inherit}
+button{background:#223849;color:#e6f5f4;border:1px solid #4e6a77;border-radius:10px;padding:12px 15px;font:inherit;cursor:pointer}
+button.primary{background:#65e5bc;color:#081b17;border:0;font-weight:700}
+button.warn{background:#4a302a;color:#f9d8cb;border-color:#835d4d;font-weight:700}
+button:disabled{opacity:.4;cursor:not-allowed}.row{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+.output{white-space:pre-wrap;overflow-wrap:anywhere;background:#071624;border:1px solid #2e4a60;border-radius:10px;padding:16px;max-height:400px;overflow:auto;min-height:80px;font:12px/1.7 ui-monospace,Consolas,monospace}
+.notice{border-left:3px solid #efb76d;padding:14px 16px;background:#302b29;border-radius:8px;color:#ffdfb7;line-height:1.6}
+.state{color:#95e0bd;min-height:24px;margin-top:15px}.state.error{color:#ff969b}
+.check{font-weight:normal;display:flex;gap:10px;align-items:flex-start}.check input{width:auto;margin-top:3px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main>
+<a href="/mission">← Mission Control</a>
+<h1>15 · Approved Agent → Connector Handoff</h1>
+<p class="intro">Bind a <strong>completed local AI plan</strong> to an <strong>already-recorded deterministic local workflow receipt</strong>. Review its exact outbound payload, then separately authorize a single HTTPS POST using an encrypted managed connector. The model does not pick the destination or gain write permission.</p>
+<div id="boundary" class="notice">Checking your private owner session and connector permissions. No automatic network action is performed.</div>
+<div class="grid">
+<section class="panel" aria-label="Preview exact bound evidence">
+<h2>1 · Select evidence &amp; preview</h2>
+<p class="sub">Plans and workflow runs are separate records. You select their association. The connector only sends the workflow receipt; private plan results stay on the machine.</p>
+<label for="plan">Completed agent plan</label><select id="plan"></select>
+<label for="connector">Encrypted managed connector</label><select id="connector"></select>
+<label for="workflow">Local workflow</label><select id="workflow"></select>
+<label for="event">Already-saved workflow event ID</label><input id="event" maxlength="60" autocomplete="off" placeholder="Example: handoff_event_001">
+<div class="row"><button id="reload">Refresh sources</button><button class="primary" id="preview" disabled>Prepare exact preview, no send</button></div>
+<p class="state" id="preview-state" role="status">Nothing has been sent.</p>
+<div class="output" id="preview-result">Complete a read-only plan and record a workflow event first.</div>
+</section>
+<section class="panel" aria-label="Owner confirms external action">
+<h2>2 · Separate owner authorization</h2>
+<p class="sub">The preview lasts five minutes. Changing a selected plan, connector, workflow or event invalidates your local approval. A failed or uncertain dispatch is never retried automatically.</p>
+<label for="password">Current owner password</label><input id="password" type="password" autocomplete="off">
+<label class="check"><input id="consent" type="checkbox"><span>I authorize <strong>one real HTTPS POST</strong> of the previewed workflow receipt to this connector. This approval is independent of the AI plan.</span></label>
+<div class="row"><button class="warn" id="send" disabled>Authorize one HTTPS POST</button><button id="history-btn">Read existing handoff ledger</button></div>
+<p class="state" id="send-state" role="status">No external dispatch authorized.</p>
+<div class="output" id="history">No handoff history loaded.</div>
+</section>
+</div>
+<p class="muted">Important: HTTP 2xx only shows the endpoint accepted the request, not that n8n or another external system completed the intended business outcome. This workbench uses your private loopback/SSH-tunnel server and does not provide unattended 24/7 execution.</p>
+</main>
+<script>
+"use strict";
+const el=id=>document.getElementById(id);
+let csrf="",enabled=false,working=false,currentPreview=null;
+const state=(id,msg,error=false)=>{el(id).textContent=msg;el(id).classList.toggle("error",error);};
+async function api(path,body){
+ const headers={};
+ if(body!==undefined){headers["Content-Type"]="application/json";headers["X-AAS-CSRF"]=csrf;}
+ const response=await fetch(path,{method:body===undefined?"GET":"POST",
+  credentials:"same-origin",headers,
+  ...(body===undefined?{}:{body:JSON.stringify(body)})});
+ let data;try{data=await response.json();}catch(_){throw Error("invalid_response");}
+ if(!response.ok){
+  if(response.status===401){window.location.assign("/mission");}
+  throw Error(data.error||"request_failed");
+ }
+ return data;
+}
+function clearPreview(){
+ currentPreview=null;el("password").value="";el("consent").checked=false;
+ el("preview-result").textContent="No valid preview. A new preview is required before any send.";
+ updateButtons();
+}
+function values(){
+ return {plan_id:el("plan").value,connector_id:el("connector").value,
+  workflow_id:el("workflow").value,event_id:el("event").value.trim()};
+}
+function selectOptions(id,rows,valueName,labelFn){
+ const target=el(id),before=target.value;target.replaceChildren();
+ for(const item of rows){
+  const option=document.createElement("option");
+  option.value=item[valueName];option.textContent=labelFn(item);target.append(option);
+ }
+ if(rows.some(x=>x[valueName]===before))target.value=before;
+}
+function updateButtons(){
+ const active=!!csrf&&enabled&&!working;
+ el("reload").disabled=working||!csrf;
+ el("preview").disabled=!active||!el("plan").value||!el("connector").value||
+  !el("workflow").value||!el("event").value.trim();
+ el("send").disabled=!active||!currentPreview||!el("password").value||
+  !el("consent").checked;
+ el("history-btn").disabled=!active;
+}
+async function history(){
+ if(!csrf||!enabled)return;
+ try{
+  const h=await api("/api/agent-connector-handoffs");
+  el("history").textContent=h.handoffs.length?
+   h.handoffs.map(x=>x.status+" · plan "+x.plan_id+
+    "\nConnector "+x.connector_id+" · workflow "+x.workflow_id+"/"+x.event_id+
+    "\nHTTP: "+(x.http_status??"unknown")+" · delivery "+(x.delivery_id||"none")+
+    "\nDownstream completion NOT verified.").join("\n\n"):
+   "No agent connector handoffs yet.";
+ }catch(e){state("send-state","History unavailable: "+e.message,true);}
+}
+async function refresh(){
+ if(!csrf||working)return;working=true;updateButtons();
+ try{
+  const [caps,plans,workflows,connectors]=await Promise.all([
+   api("/api/local-agent-capabilities"),api("/api/local-agent-plans"),
+   api("/api/local-workflows"),api("/api/managed-connectors")]);
+  enabled=!!caps.agent_connector_handoff&&connectors.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
+  const completed=(plans.plans||[]).filter(x=>x.status==="COMPLETED");
+  const active=(connectors.connectors||[]).filter(x=>x.status==="ACTIVE");
+  selectOptions("plan",completed,"plan_id",x=>x.plan_id+" · "+x.goal);
+  selectOptions("connector",active,"connector_id",x=>x.label+" · "+x.destination_hostname);
+  selectOptions("workflow",workflows.workflows||[],"workflow_id",x=>x.display_name+" · "+x.workflow_id);
+  el("boundary").textContent=enabled?
+   "Enabled: this flow uses an encrypted connector and a distinct owner approval. NO automatic send. Plan answers never enter the webhook payload.":
+   "Disabled: run an owner-enabled plan service together with an AES-256-GCM managed webhook vault. Legacy plaintext mode is intentionally rejected.";
+  state("preview-state",completed.length+" completed plan(s), "+active.length+" active encrypted destination(s).");
+  clearPreview();
+ }catch(e){state("preview-state","Unable to load private state: "+e.message,true);}
+ finally{working=false;updateButtons();if(csrf&&enabled)history();}
+}
+for(const id of ["plan","connector","workflow","event"]){
+ el(id).addEventListener("change",clearPreview);
+ el(id).addEventListener("input",clearPreview);
+}
+el("password").addEventListener("input",updateButtons);
+el("consent").addEventListener("change",updateButtons);
+el("reload").addEventListener("click",refresh);
+el("history-btn").addEventListener("click",history);
+el("preview").addEventListener("click",async()=>{
+ if(!csrf||working||!enabled)return;
+ const original=values();clearPreview();working=true;updateButtons();
+ try{
+  const p=await api("/api/agent-connector-handoff-preview",original);
+  if(JSON.stringify(values())!==JSON.stringify(original))return;
+  if(p.status!=="PREVIEW_ONLY"||p.external_write_count!==0)throw Error("bad_preview");
+  currentPreview=p;
+  el("preview-result").textContent=
+   "NO EXTERNAL SEND\nHTTPS host: "+p.destination_hostname+
+   "\nPlan SHA256: "+p.plan_sha256+"\nWorkflow SHA256: "+p.workflow_sha256+
+   "\nPayload SHA256: "+p.payload_sha256+
+   "\nExpires in "+p.expires_in_seconds+" seconds\n\n"+
+   JSON.stringify(p.payload,null,2)+
+   "\n\nPrivate plan answer is NOT sent.";
+  state("preview-state","Review exact payload before separately approving one POST.");
+ }catch(e){state("preview-state","Preview rejected: "+e.message,true);}
+ finally{working=false;updateButtons();}
+});
+el("send").addEventListener("click",async()=>{
+ const p=currentPreview;if(!p||!csrf||working||!enabled)return;
+ if(JSON.stringify(values())!==JSON.stringify({
+  plan_id:p.plan_id,connector_id:p.connector_id,
+  workflow_id:p.workflow_id,event_id:p.event_id}))return;
+ if(!window.confirm("AUTHORIZE EXACTLY ONE HTTPS POST?\n\n"+
+  p.destination_hostname+"\nPayload SHA256: "+p.payload_sha256+
+  "\n\nThe agent does not grant permission. Unknown outcomes must NOT be resent."))return;
+ const current_password=el("password").value;
+ if(!current_password||!el("consent").checked)return;
+ currentPreview=null;working=true;el("password").value="";el("consent").checked=false;
+ el("preview-result").textContent="Attempt submitted. If connectivity fails, inspect the local ledger. Do not blindly retry.";
+ updateButtons();
+ try{
+  const result=await api("/api/agent-connector-handoff-commit",{
+   plan_id:p.plan_id,connector_id:p.connector_id,
+   workflow_id:p.workflow_id,event_id:p.event_id,
+   plan_sha256:p.plan_sha256,workflow_sha256:p.workflow_sha256,
+   payload_sha256:p.payload_sha256,preview_token:p.preview_token,current_password});
+  el("preview-result").textContent=JSON.stringify(result,null,2);
+  state("send-state",result.status==="REMOTE_ACCEPTED"?
+   "One HTTPS endpoint accepted the request. Downstream completion NOT verified.":
+   "External result UNCERTAIN. Inspect the connector and downstream system; do not retry.",
+   result.status!=="REMOTE_ACCEPTED");
+ }catch(e){state("send-state","No verified final outcome: "+e.message+
+  ". Inspect both ledgers before taking any new action.",true);}
+ finally{working=false;updateButtons();if(csrf)history();}
+});
+(async()=>{
+ try{
+  const response=await fetch("/api/operator-session",{credentials:"same-origin"});
+  const data=await response.json();
+  if(!data.authenticated||!data.csrf_token){
+   window.location.assign("/mission");return;
+  }
+  csrf=data.csrf_token;await refresh();
+ }catch(e){state("preview-state","Private operator session unavailable.",true);}
+})();
+</script>
+</body></html>
