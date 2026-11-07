@@ -291,6 +291,7 @@ class CloudOnlyHTTP(unittest.TestCase):
         self.login()
         body={**remote_payload(),"current_password":PASSWORD}
         body.pop("provider")
+        body.pop("paid_api_consent")
         body["model"]="llama3.2:3b"
         with self.assertRaises(HTTPError) as rejected:
             self.post("/api/read-only-ai-schedule-create",body)
@@ -312,6 +313,8 @@ class CloudOnlyHTTP(unittest.TestCase):
         self.scheduled=LocalReadOnlyAgentSchedules(
             self.base/"task.sqlite3",clock=self.clock,
             remote_runner=self.remote,local_enabled=False)
+        self.scheduled.attach_gate(
+            self.safety,threading.BoundedSemaphore(1),threading.Lock())
         local=self.scheduled.list()["tasks"][0]
         self.assertEqual(local["task_id"],old["task_id"])
         self.assertEqual(local["provider"],"local_ollama")
