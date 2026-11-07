@@ -207,6 +207,20 @@ class SignedManualOutcomeTests(unittest.TestCase):
                 "plan_id":PLAN,"connector_id":CID,
                 "workflow_id":WID,"event_id":EID})
 
+    def test_history_distinguishes_sender_accepted_from_crash_uncertain_handoff(self):
+        did=self.send()["delivery_id"]
+        with self.handoff.db:
+            self.handoff.db.execute("""UPDATE agent_connector_handoffs
+                SET status='REVIEW_REQUIRED' WHERE plan_id=?""",(PLAN,))
+        claim=self.proofs.import_receipt(self.signed(did))
+        self.assertEqual(claim["local_dispatch_status_unchanged"],"REMOTE_ACCEPTED")
+        self.assertEqual(claim["handoff_record_status_unchanged"],"REVIEW_REQUIRED")
+        after=self.proofs.list()["records"][0]
+        self.assertEqual(after["local_dispatch_status_unchanged"],"REMOTE_ACCEPTED")
+        self.assertEqual(after["handoff_record_status_unchanged"],"REVIEW_REQUIRED")
+        self.assertFalse(after["independently_verified_remote"])
+        self.assertEqual(len(self.calls),1)
+
     def test_restart_retains_signed_claim_no_auto_send(self):
         did=self.send()["delivery_id"]
         self.proofs.import_receipt(self.signed(did))
