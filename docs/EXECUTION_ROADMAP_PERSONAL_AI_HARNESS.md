@@ -26,6 +26,10 @@ Critical distinctions:
 
 The #113 improvement is **a complete engineering slice from a fake provider result to real local tools**, not live proof of the paid provider and not a general multi-tool autonomous agent. It does not obtain permission from model-supplied text, does not send email or mutate live CRM, and does not invoke tools without owner approval.
 
+### Stage #114 engineering advance (under CI review)
+
+An owner-approved **plan-provenance → deterministic-workflow receipt → encrypted managed connector** handoff has been implemented in a review branch. It adds a durable local evidence binding, independently password-approved HTTPS one-shot send, no-retry uncertainty state, private UI, and new test coverage. It **does not** translate agent results into a business event or independently prove downstream effects. Main-branch and live claims depend on the stage PR merge and operator acceptance. Full scope: `docs/AGENT_CONNECTOR_HANDOFF_V1.md`.
+
 ## Next implementation work, in priority order
 
 ### P0 · Actual owner-PC acceptance and continuity (next operator gate)

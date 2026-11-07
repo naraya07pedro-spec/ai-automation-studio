@@ -2705,3 +2705,18 @@ Dedicated CI on Python 3.11/3.12/3.13 covers interactive confirmation, unsafe pr
 **Safety and evidence boundary:** Local owner-supplied goals and step results are plaintext SQLite; external prompts leave the host only upon explicit paid consent. The API attempt count cap is not a USD spending guarantee. No Gmail sending, shell, unreviewed writes, arbitrary MCP, live CRM mutation, true multi-provider routing or unsupervised general-agent execution was added. `LIVE_CLOUD_PLAN_MODEL_VERIFIED=FALSE`, `LIVE_EXTERNAL_ACTION_VERIFIED=FALSE`, `ONLINE_24_7_VERIFIED=FALSE`. Local PC startup, a real model bill/response, live third-party integration, and real restore remain unverified without the owner's actual host/provider consent. Operator guide: `docs/CLOUD_PLAN_HANDOFF_V1.md`. Living project completion roadmap: `docs/EXECUTION_ROADMAP_PERSONAL_AI_HARNESS.md`.
 
 **Next prioritized engineering after local owner-pilot acceptance:** one useful end-to-end owner-approved real connector task with independent terminal outcome reconciliation, not just another synthetic acceptance layer. VPS remains deferred.
+
+
+## Core milestone #114 · Owner-approved agent-to-connector provenance bridge · 2026-11-07 WIB
+
+**Scope:** Link a COMPLETED agent tool plan to a separately saved local deterministic workflow receipt. This is a manual association made by the owner, **not model-granted connector authority**. Reuse the existing encrypted managed HTTPS connector and its exact preview, one-shot dispatch ledger, SSRF checks and no-blind-retry behavior.
+
+**Files added:** `app/local_agent_connector_handoff.py` (SQLite evidence binding and pre-dispatch irreversible claim), `tests/test_agent_connector_handoff.py` (local SQLite/HTTP/vault acceptance, fake external callback), `web/handoff.html` (owner interface), `.github/workflows/agent-connector-handoff.yml` (3-version CI), `docs/AGENT_CONNECTOR_HANDOFF_V1.md` (runbook and explicit security constraints).
+
+**Files updated:** `app/local_server.py` (owner-gated API, dedicated private HTML route, runtime wiring, shutdown), `web/mission.html` (handoff entrypoint), `README.md`, `docs/EXECUTION_ROADMAP_PERSONAL_AI_HARNESS.md`, and this progress ledger. Required independent owner password + session + CSRF on commit; preview requires authenticated session + CSRF. The model's private plan text and outputs never enter the webhook payload.
+
+**Verification status at implementation checkpoint:** Branch committed. Dedicated CI, full mock regressions, browser JS and merge status **PENDING independent GitHub evidence**. No real OpenAI model, n8n endpoint, user Windows owner data or Tencent VPS touched. `LIVE_OWNER_PC_HANDOFF_VERIFIED=FALSE`, `LIVE_OPENAI_MODEL_VERIFIED=FALSE`, `ONLINE_24_7_VERIFIED=FALSE`.
+
+**Known limits:** The only sent payload is the existing deterministic workflow receipt, NOT an automatic transformation of agent output. A 2xx webhook response never proves downstream completion. Plan/receipt association is owner-chosen. Inter-database crash windows are handled conservatively as no-retry unknown outcomes. No automatic replay from failed/uncertain commits. Additional real-world acceptance and independent provider-side verification required.
+
+**Next:** Review stage-specific Python 3.11/3.12/3.13 + security/browser CI on exact commit, repair failures, then merge only if all required checks pass. Afterward prioritize durable dependency-aware agent jobs and downstream outcome verification.

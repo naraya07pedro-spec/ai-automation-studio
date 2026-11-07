@@ -64,6 +64,7 @@ from local_windows_preflight import preflight as check_local_device_preflight
 from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
+from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -83,6 +84,7 @@ from lead_inquiry_template_catalog import (list_templates, setup_choices,
 MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
 MISSION = ROOT / "web" / "mission.html"
+HANDOFF = ROOT / "web" / "handoff.html"
 _CONFIGURATION = {
     "source": "mock_inbox", "destination": "mock_crm",
     "follow_up_policy": "approval_required", "ai_mode": "mock",
@@ -108,7 +110,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
-                   scheduled_ai=None, on_demand_ai=None):
+                   scheduled_ai=None, on_demand_ai=None,
+                   agent_connector_handoff=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -331,6 +334,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                      and scheduled_ai.remote_runner is not None),
                                  "remote_on_demand_ai": on_demand_ai is not None,
                                  "cloud_plan_review": cloud_plan_bridge is not None,
+                                 "agent_connector_handoff": agent_connector_handoff is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -577,6 +581,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except GmailConnectorError:
                         self._send(503, {"error":"google_grant_invalid_or_locked"})
                 return
+            if route.path == "/api/agent-connector-handoffs":
+                if agent_connector_handoff is None:
+                    self._send(403, {"error":"agent_connector_handoff_disabled"})
+                elif route.query:
+                    self._send(422, {"error":"invalid_handoff_query"})
+                else:
+                    try:
+                        self._send(200, agent_connector_handoff.history())
+                    except AgentConnectorHandoffError as exc:
+                        self._send(exc.status, {"error":str(exc)})
+                return
             if route.path in ("/api/managed-connectors", "/api/managed-connector-history"):
                 if managed_connectors is None:
                     self._send(200 if route.path=="/api/managed-connectors" else 403,
@@ -749,6 +764,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             elif self.path == "/mission":
                 self._send(200, MISSION.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
+            elif self.path == "/handoff":
+                self._send(200, HANDOFF.read_text(encoding="utf-8"),
+                           "text/html; charset=utf-8")
             elif self.path == "/api/health":
                 self._send(200, {"status": "MOCK_ONLY", "external_dispatch_count": 0})
             elif self.path == "/api/templates":
@@ -812,7 +830,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/managed-connector-add",
                                  "/api/managed-connector-revoke",
                                  "/api/managed-webhook-preview",
-                                 "/api/managed-webhook-commit"):
+                                 "/api/managed-webhook-commit",
+                                 "/api/agent-connector-handoff-preview",
+                                 "/api/agent-connector-handoff-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -1965,6 +1985,57 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, result)
                 return
+            if self.path in ("/api/agent-connector-handoff-preview",
+                             "/api/agent-connector-handoff-commit"):
+                if agent_connector_handoff is None:
+                    self._send(403, {"error":"agent_connector_handoff_disabled"})
+                    return
+                action="AGENT_CONNECTOR_HANDOFF"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if type(data) is not dict:
+                        raise AgentConnectorHandoffError("invalid_handoff_fields", 422)
+                    values={k:v for k,v in data.items() if k!="current_password"}
+                    if self.path.endswith("-commit"):
+                        if (set(data) != {"plan_id","connector_id",
+                                "workflow_id","event_id","plan_sha256",
+                                "workflow_sha256","payload_sha256",
+                                "preview_token","current_password"} or
+                                type(data["current_password"]) is not str):
+                            raise AgentConnectorHandoffError(
+                                "owner_password_required",422)
+                        if operator_auth is None:
+                            raise AgentConnectorHandoffError("real_owner_required",403)
+                        verified=operator_auth.confirm_current_password(
+                            data["current_password"])
+                        if verified != 200:
+                            self._audit_event(action,"DENIED")
+                            self._send(verified,{"error":(
+                                "operator_restart_required" if verified==503
+                                else "operator_login_locked" if verified==429
+                                else "invalid_operator_credentials")})
+                            return
+                        result=agent_connector_handoff.commit(values)
+                    else:
+                        result=agent_connector_handoff.preview(values)
+                except AgentConnectorHandoffError as exc:
+                    self._audit_event(action, "UNCERTAIN"
+                                      if "uncertain" in str(exc) else "DENIED")
+                    self._send(exc.status, {"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503, {"error":"handoff_state_uncertain_inspect_ledgers"})
+                    return
+                outcome=("UNCERTAIN" if result["status"] in (
+                    "OUTCOME_UNCERTAIN","REVIEW_REQUIRED") else "SUCCESS")
+                if not self._audit_event(action,outcome):
+                    self._send(503, {"error":"handoff_audit_uncertain_inspect_ledgers"})
+                else:
+                    self._send(200,result)
+                return
             if self.path in ("/api/managed-connector-add",
                              "/api/managed-connector-revoke",
                              "/api/managed-webhook-preview",
@@ -2432,6 +2503,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     autopilot = None
     managed_autopilot = None
     n8n_proofs = None
+    agent_handoff = None
     managed = None
     gmail = None
     try:
@@ -2485,6 +2557,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             autopilot = ScheduledWebhookAutopilot(
                 scheduler,outbound,audit,home / "scheduled-webhook-autopilot.sqlite3")
             scheduler.outbound_autopilot = autopilot
+        if plan_store is not None and managed is not None and managed._vault is not None:
+            agent_handoff = AgentConnectorHandoff(
+                plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -2521,6 +2596,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            managed_connectors=managed,
                            managed_autopilot=managed_autopilot,
                            n8n_proofs=n8n_proofs,
+                            agent_connector_handoff=agent_handoff,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
@@ -2560,6 +2636,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot.close()
         if outbound is not None:
             outbound.close()
+        if agent_handoff is not None:
+            agent_handoff.close()
         if managed is not None:
             managed.close()
         if memory_store is not None:

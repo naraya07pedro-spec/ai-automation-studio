@@ -1,0 +1,60 @@
+name: Stage 114 agent connector approved handoff
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'web/handoff.html'
+      - 'tests/test_agent_connector_handoff.py'
+      - 'docs/AGENT_CONNECTOR_HANDOFF_V1.md'
+      - '.github/workflows/agent-connector-handoff.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'web/handoff.html'
+      - 'tests/test_agent_connector_handoff.py'
+      - 'docs/AGENT_CONNECTOR_HANDOFF_V1.md'
+      - '.github/workflows/agent-connector-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-approved-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned AES-GCM optional dependency (test must NOT skip)
+        run: python -m pip install -r requirements-vault.txt
+      - name: Stage 114 real loopback and in-memory fake sender
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_connector_handoff.py' -v
+      - name: Regress paid plan bridge and existing connector contracts
+        run: |
+          python -m unittest discover -s tests -p 'test_cloud_plan_bridge.py' -v
+          python -m unittest discover -s tests -p 'test_local_connector_manager.py' -v
+          python -m unittest discover -s tests -p 'test_encrypted_connector_vault.py' -v
+          python -m unittest discover -s tests -p 'test_outbound_webhook.py' -v
+      - name: Python syntax
+        run: python -m py_compile app/local_agent_connector_handoff.py app/local_security_audit.py app/local_server.py tests/test_agent_connector_handoff.py
+      - name: Mission Control JS syntax
+        run: |
+          node -e 'const fs=require("fs"),s=fs.readFileSync("web/mission.html","utf8");const m=s.match(/<script>([\s\S]*?)<\/script>/);if(!m)process.exit(3);new Function(m[1]);const h=fs.readFileSync("web/handoff.html","utf8"),n=h.split("<script>")[1]?.split("</script>")[0];if(!n)process.exit(4);new Function(n)'
