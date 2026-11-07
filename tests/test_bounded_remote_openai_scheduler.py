@@ -213,6 +213,7 @@ class ScheduledRemoteTests(unittest.TestCase):
     def create(self,**updates):
         data={"prompt":"Draft one brief idea without accessing external tools.",
               "model":"gpt-6-luna","provider":"openai_responses",
+              "paid_api_consent":True,
               "cadence":{"cadence":"minutes","timezone":"Asia/Jakarta","every":1},
               "max_runs":2,"expires_days":3}
         data.update(updates)
@@ -250,6 +251,24 @@ class ScheduledRemoteTests(unittest.TestCase):
         with self.assertRaisesRegex(AgentScheduleError,"invalid_ai_task_provider"):
             self.create(provider="evil")
         self.assertEqual(self.scheduled.list()["tasks"],[])
+
+    def test_true_billing_consent_required_even_for_valid_remote_model(self):
+        for invalid in (None, False, "true", 1, 0):
+            with self.subTest(invalid=invalid):
+                request={
+                    "prompt":"Short text only", "model":"gpt-6-luna",
+                    "provider":"openai_responses",
+                    "cadence":{"cadence":"minutes","every":1,
+                               "timezone":"Asia/Jakarta"},
+                    "max_runs":1, "expires_days":1,
+                }
+                if invalid is not None:
+                    request["paid_api_consent"]=invalid
+                with self.assertRaisesRegex(AgentScheduleError,
+                                            "paid_api_consent_required"):
+                    self.scheduled.create(request)
+        self.assertEqual(self.scheduled.list()["tasks"],[])
+        self.assertEqual(self.requests,[])
 
     def test_paid_task_cap_and_expiry_bounded(self):
         for args in ({"max_runs":4},{"max_runs":30},{"expires_days":8},

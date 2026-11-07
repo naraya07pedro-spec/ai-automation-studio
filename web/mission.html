@@ -376,6 +376,9 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
       <label for="ai-recurring-owner">Current owner password, required to create or change schedules</label><input id="ai-recurring-owner" type="password" autocomplete="off" placeholder="Owner password">
       <div class="btnrow"><button id="ai-recurring-create" class="btn primary" type="button" disabled>Create bounded read-only AI task</button></div>
       <p class="status" id="ai-recurring-status" role="status">No AI task scheduled.</p>
+      <p class="status" id="ai-recurring-safety-state" role="status">Model safety checkpoint not checked.</p>
+      <div class="btnrow"><button id="ai-recurring-safety-ack" class="btn warn" type="button" disabled>I've reviewed uncertain model/provider outcomes</button></div>
+      <p class="sub">After a timeout, inspect your OpenAI API usage and billing (and Ollama if also enabled) before acknowledging. Acknowledgment NEVER resumes a task or retries a paid request; resume requires another owner-approved action.</p>
     </div>
     <div>
       <div class="split"><strong>AI tasks and safe controls</strong><button class="btn" type="button" id="ai-recurring-refresh">Refresh</button></div>
@@ -449,10 +452,13 @@ async function loadCapabilities(){
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
   chatEnabled=enabled;planningEnabled=!!info.planning;
-  $("model-badge").textContent=enabled?"Ollama optional":"AI disabled in server";
+  $("model-badge").textContent=enabled?"Ollama optional":
+    (info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
   $("scope").textContent=enabled?
    "Live local AI is enabled. Plans use a strict tool allowlist and explicit review. Real email sending, arbitrary websites, CRM mutation and shell execution are not enabled.":
-   "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.";
+   (info.remote_scheduled_ai?
+    "Cloud-only scheduled OpenAI tasks are available in section 12 after owner approval. Interactive Ollama chat and local model listing are disabled; no Ollama installation is required.":
+    "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.");
   setBusy(false);
  }catch(error){status("chat-status","Cannot load agent capabilities: "+error.message,true);}
 }
@@ -986,9 +992,10 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
-let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false;
+let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false,aiRecurringSafetyUncertain=false;
 function aiRecurringClear(){
- aiRecurringEnabled=false;aiRemoteEnabled=false;
+ aiRecurringEnabled=false;aiRemoteEnabled=false;aiRecurringLocalEnabled=false;aiRecurringSafetyUncertain=false;
+ $("ai-recurring-safety-state").textContent="Session locked.";
  $("ai-recurring-provider").value="local_ollama";
  $("ai-recurring-provider-consent").checked=false;
  aiProviderRender();
@@ -1002,9 +1009,12 @@ function aiRecurringControls(){
  $("ai-recurring-create").disabled=!csrf||busy||aiRecurringBusy||!aiRecurringEnabled||
    !$("ai-recurring-owner").value||!$("ai-recurring-prompt").value.trim()||
    !$("ai-recurring-model").value.trim()||
+   ($("ai-recurring-provider").value==="local_ollama"&&!aiRecurringLocalEnabled)||
    ($("ai-recurring-provider").value==="openai_responses"&&
     (!aiRemoteEnabled||!$("ai-recurring-provider-consent").checked));
  $("ai-recurring-refresh").disabled=!csrf||busy||aiRecurringBusy;
+ $("ai-recurring-safety-ack").disabled=!csrf||busy||aiRecurringBusy||
+   !aiRecurringEnabled||!aiRecurringSafetyUncertain||!$("ai-recurring-owner").value;
 }
 function aiProviderRender(){
  const remote=$("ai-recurring-provider").value==="openai_responses";
@@ -1039,6 +1049,21 @@ function aiCadencePayload(){
  }
  return out;
 }
+async function loadAISafety(){
+ if(!csrf||aiRecurringBusy)return;
+ try{
+  const data=await request("/api/read-only-ai-safety");
+  if(!csrf)return;
+  aiRecurringSafetyUncertain=data.checkpoint_state==="UNCERTAIN";
+  $("ai-recurring-safety-state").textContent=aiRecurringSafetyUncertain?
+   "MODEL OUTCOME UNCERTAIN. Inspect provider usage/billing and any local Ollama work before acknowledging. No automatic retries.":
+   "Model safety checkpoint: "+(data.checkpoint_state||"unknown")+".";
+ }catch(error){
+  aiRecurringSafetyUncertain=false;
+  if(csrf)$("ai-recurring-safety-state").textContent="Unable to verify model checkpoint: "+error.message;
+ }
+ aiRecurringControls();
+}
 async function loadAIRecurring(){
  if(!csrf||aiRecurringBusy)return;
  try{
@@ -1046,13 +1071,19 @@ async function loadAIRecurring(){
   if(!csrf)return;
   aiRecurringEnabled=!!data.enabled;
   aiRemoteEnabled=!!data.remote_openai_enabled;
-  $("ai-recurring-provider").querySelector('option[value="openai_responses"]').disabled=!aiRemoteEnabled;
-  if(!aiRemoteEnabled&&$("ai-recurring-provider").value==="openai_responses"){
-    $("ai-recurring-provider").value="local_ollama";aiProviderRender();
+  aiRecurringLocalEnabled=!!data.local_ollama_enabled;
+  const providerSelect=$("ai-recurring-provider");
+  providerSelect.querySelector('option[value="local_ollama"]').disabled=!aiRecurringLocalEnabled;
+  providerSelect.querySelector('option[value="openai_responses"]').disabled=!aiRemoteEnabled;
+  if((providerSelect.value==="local_ollama"&&!aiRecurringLocalEnabled)||
+     (providerSelect.value==="openai_responses"&&!aiRemoteEnabled)){
+    providerSelect.value=aiRemoteEnabled?"openai_responses":"local_ollama";
+    $("ai-recurring-provider-consent").checked=false;
+    aiProviderRender();
   }
   $("ai-recurring-badge").textContent=aiRecurringEnabled?
-    (data.worker_running?"Local AI worker running":"Enabled · worker not running"):
-    "Disabled by default · enable local AI and scheduling";
+    (data.worker_running?"Scheduled AI worker running":"Enabled · worker not running"):
+    "Disabled by default · enable an AI scheduler explicitly";
   const list=$("ai-recurring-list");list.replaceChildren();
   const tasks=Array.isArray(data.tasks)?data.tasks:[];
   if(!tasks.length)list.textContent="No bounded AI schedules configured.";
@@ -1105,6 +1136,7 @@ async function loadAIRecurring(){
    list.append(entry);
   }
   aiRecurringControls();
+  await loadAISafety();
  }catch(e){if(csrf)status("ai-recurring-status","Unable to load AI schedules: "+e.message,true);}
 }
 $("ai-recurring-cadence").addEventListener("change",aiCadenceRender);
@@ -1124,6 +1156,7 @@ $("ai-recurring-create").addEventListener("click",async()=>{
   expires_days:Number($("ai-recurring-days").value),current_password};
  const remote=body.provider==="openai_responses";
  if(remote&&(!aiRemoteEnabled||!$("ai-recurring-provider-consent").checked))return;
+ if(remote)body.paid_api_consent=true;
  if(!window.confirm(remote?
    ("Authorize up to "+body.max_runs+" PAID OpenAI API requests over "+body.expires_days+
     " days? Your prompt will leave the VPS, API charges are separate from ChatGPT, and no dollar cap is guaranteed. No external tools or business writes.") :
@@ -1138,6 +1171,28 @@ $("ai-recurring-create").addEventListener("click",async()=>{
   $("ai-recurring-history").textContent="Inference will begin at its first due time. It is not a live model result yet.";
  }catch(e){status("ai-recurring-status","AI schedule not confirmed: "+e.message,true);}
  finally{aiRecurringBusy=false;aiRecurringControls();if(csrf)loadAIRecurring();}
+});
+$("ai-recurring-safety-ack").addEventListener("click",async()=>{
+ if(!csrf||!aiRecurringSafetyUncertain||aiRecurringBusy)return;
+ const current_password=$("ai-recurring-owner").value;
+ if(!current_password){
+  status("ai-recurring-status","Enter the current owner password before acknowledging model uncertainty.",true);
+  return;
+ }
+ if(!window.confirm("I have independently reviewed possible OpenAI API charges/usage and any local Ollama work. This acknowledgement cannot prove the backend stopped and it will NOT automatically retry or resume any task. Continue?"))return;
+ $("ai-recurring-owner").value="";
+ aiRecurringBusy=true;aiRecurringControls();
+ try{
+  const result=await request("/api/read-only-ai-safety-acknowledge",{
+   acknowledge:"ALL_MODEL_OUTCOMES_REVIEWED",current_password});
+  status("ai-recurring-status",result.status+
+    ". Previously uncertain tasks remain paused. Resume separately only after reviewing task history.");
+ }catch(e){
+  status("ai-recurring-status","Safety acknowledgement not confirmed: "+e.message,true);
+ }finally{
+  aiRecurringBusy=false;aiRecurringControls();
+  if(csrf)loadAIRecurring();
+ }
 });
 aiCadenceRender();
 aiProviderRender();

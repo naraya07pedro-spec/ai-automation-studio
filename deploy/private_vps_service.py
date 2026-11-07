@@ -52,9 +52,11 @@ def render_unit(*, username, checkout, home, python, mode,
         raise PrivateVPSDeploymentError("signed_webhook_requires_outbound_webhook")
     if managed_autopilot and not encrypted_webhooks:
         raise PrivateVPSDeploymentError("managed_autopilot_requires_encrypted_webhooks")
-    if scheduled_local_ai and mode == "offline":
+    if scheduled_local_ai and mode not in ("local-ai", "full"):
         raise PrivateVPSDeploymentError("scheduled_local_ai_requires_local_ai_mode")
-    if scheduled_openai and not scheduled_local_ai:
+    if mode == "cloud-only" and not scheduled_openai:
+        raise PrivateVPSDeploymentError("cloud_only_requires_scheduled_openai")
+    if scheduled_openai and not scheduled_local_ai and mode != "cloud-only":
         raise PrivateVPSDeploymentError("scheduled_openai_requires_scheduled_ai")
     extra = ()
     credentials = ""
@@ -225,11 +227,11 @@ def main(argv=None):
                         help="Existing non-root Linux user who owns the checkout and operator.json")
     parser.add_argument("--checkout", required=True,
                         help="Absolute directory of the existing Git checkout")
-    parser.add_argument("--mode", choices=("offline", "local-ai", "full"), default="offline")
+    parser.add_argument("--mode", choices=("offline", "local-ai", "full", "cloud-only"), default="offline")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
                         help="Opt into billed owner-approved remote text inference; requires local scheduler + separate root-only API credential.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
-                        help="Opt in to bounded read-only Ollama schedules in local-ai or full mode.")
+                        help="Opt in to bounded read-only Ollama schedules in local-ai or full mode; not required by cloud-only.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
                         help="Allow bounded owner-armed scheduling for encrypted managed webhook targets.")
     parser.add_argument("--enable-encrypted-managed-webhooks", action="store_true",

@@ -1,5 +1,7 @@
 # Bounded remote AI scheduling · OpenAI Responses V1 · 7 Nov 2026
 
+**Stage #108 update:** A true `cloud-only` profile now runs the same owner-approved OpenAI scheduler **without Ollama**, and the server requires explicit Boolean `paid_api_consent=true` on newly created remote tasks, in addition to owner authentication and CSRF. The older `local-ai` mixed-profile commands below remain valid, but are no longer required for low-RAM deployments. See [cloud-only operator runbook](CLOUD_ONLY_PRIVATE_AI_V1.md) for `--mode cloud-only --enable-scheduled-openai`, safe migration and systemd instructions.
+
 ## Why this is a core capability
 
 PR #103 added genuine bounded local Ollama recurring inference, but small VPS instances may lack CPU/RAM for an installed local model. PR #104–#106 delivered on-host acceptance and reboot provenance checks. This stage adds an **optional real remote text-model inference path** inside the same owner-authorized scheduled AI engine, without giving the model tools or arbitrary external actions. Remote provider integration does not magically deploy the Tencent instance.
