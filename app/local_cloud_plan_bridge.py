@@ -7,8 +7,6 @@ An existing one-shot paid request receipt can be imported after connection loss
 without making a second paid call. The plan's stable 24-hex id derives from the
 paid request's 32-hex id, preventing duplicate plans on repeated imports.
 """
-import hashlib
-import hmac
 import json
 
 from local_agent_task_plans import (
@@ -89,7 +87,7 @@ class CloudPlanBridge:
         self.remote = on_demand_ai
         self.plans = plan_store
 
-    def _materialize(self, request, receipt):
+    def _materialize(self, request, receipt, *, calls_this_action):
         if receipt["status"] != "COMPLETED" or type(receipt["answer"]) is not str:
             raise CloudPlanError("cloud_plan_receipt_not_completed", 409)
         steps = _parse_checked_plan(receipt["answer"])
@@ -113,7 +111,7 @@ class CloudPlanBridge:
                 raise CloudPlanError("cloud_plan_identity_conflict", 409)
             return {
                 "status": "EXISTING_OWNER_REVIEW_PLAN",
-                "provider_calls_this_action": 0,
+                "provider_calls_this_action": calls_this_action,
                 "plan": existing,
                 "request_id": request["request_id"],
                 "owner_approval_required": existing["status"] == "PREPARED",
@@ -134,7 +132,7 @@ class CloudPlanBridge:
         return {
             "status": "OWNER_REVIEW_PLAN_PREPARED",
             # New plan creation itself is deterministic and does not call AI.
-            "provider_calls_this_action": 0,
+            "provider_calls_this_action": calls_this_action,
             "plan": created,
             "request_id": request["request_id"],
             "owner_approval_required": created["status"] == "PREPARED",
@@ -151,7 +149,7 @@ class CloudPlanBridge:
             "prompt": prompt,
             "paid_api_consent": True,
         })
-        return self._materialize(request, receipt)
+        return self._materialize(request, receipt, calls_this_action=1)
 
     def recover(self, request):
         validate_cloud_plan_request(request, recovery=True)
@@ -159,4 +157,4 @@ class CloudPlanBridge:
         receipt = self.remote.bound_receipt(
             request["request_id"], request["model"], prompt)
         # No model calls, no paid consent field or retries in this path.
-        return self._materialize(request, receipt)
+        return self._materialize(request, receipt, calls_this_action=0)
