@@ -225,6 +225,7 @@ class LocalOnDemandRemoteAI:
         started = False
         completed = False
         uncertain = False
+        dispatched = False
         try:
             with self.agent_state_lock:
                 acquired = self.agent_gate.acquire(blocking=False)
@@ -243,6 +244,7 @@ class LocalOnDemandRemoteAI:
             # Durable idempotency claim must complete BEFORE sending the POST.
             self._claim(request)
             try:
+                dispatched = True
                 result = self._validate_result(
                     self.runner(request["prompt"].strip(), request["model"]))
                 self._finalize(rid, "COMPLETED", result["answer"], result["usage"])
@@ -277,7 +279,7 @@ class LocalOnDemandRemoteAI:
         finally:
             if started:
                 try:
-                    if uncertain or not completed:
+                    if uncertain or (dispatched and not completed):
                         self.model_safety.timeout()
                     else:
                         self.model_safety.finish()
