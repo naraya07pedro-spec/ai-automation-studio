@@ -69,6 +69,37 @@ def _valid_rel(name):
     )
 
 
+def _validate_owner_config(payload):
+    """Reject archives with an unreadable owner verifier, not just valid SQLite."""
+    try:
+        obj = json.loads(payload)
+    except (TypeError, ValueError, UnicodeDecodeError):
+        raise BackupError("owner_config_invalid") from None
+    if type(obj) is not dict or type(obj.get("version")) is not int:
+        raise BackupError("owner_config_invalid")
+    fields = {"version", "salt", "scrypt_hash"}
+    if obj["version"] == 2:
+        fields |= {"recovery_salt", "recovery_hash"}
+    elif obj["version"] != 1:
+        raise BackupError("owner_config_invalid")
+    if set(obj) != fields:
+        raise BackupError("owner_config_invalid")
+    for field in fields - {"version"}:
+        value = obj[field]
+        required = 32 if field.endswith("salt") else 64
+        if (type(value) is not str or len(value) != required
+                or any(ch not in "0123456789abcdefABCDEF" for ch in value)):
+            raise BackupError("owner_config_invalid")
+
+
+def _validate_path_conflicts(names):
+    parts = [tuple(PurePosixPath(name).parts) for name in names]
+    indexed = set(parts)
+    for elements in parts:
+        if any(elements[:i] in indexed for i in range(1, len(elements))):
+            raise BackupError("archive_path_collision")
+
+
 def _check_private(path):
     if path.is_symlink():
         raise BackupError("symlink_forbidden")
@@ -171,6 +202,7 @@ def _snapshot(root):
         result[name] = value
     if "operator.json" not in result:
         raise BackupError("operator_configuration_missing")
+    _validate_owner_config(result["operator.json"])
     return result
 
 
@@ -227,6 +259,8 @@ def _unpack(plain):
                 files[name] = content
             if "operator.json" not in files:
                 raise BackupError("operator_configuration_missing")
+            _validate_owner_config(files["operator.json"])
+            _validate_path_conflicts(files)
             return files
     except (zipfile.BadZipFile, KeyError, ValueError, TypeError,
             OSError, RuntimeError) as error:
