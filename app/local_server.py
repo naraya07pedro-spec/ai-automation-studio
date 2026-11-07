@@ -64,6 +64,7 @@ from local_windows_preflight import preflight as check_local_device_preflight
 from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
+from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorHandoffError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -108,7 +109,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
-                   scheduled_ai=None, on_demand_ai=None):
+                   scheduled_ai=None, on_demand_ai=None,
+                   agent_connector_handoff=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -331,6 +333,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                      and scheduled_ai.remote_runner is not None),
                                  "remote_on_demand_ai": on_demand_ai is not None,
                                  "cloud_plan_review": cloud_plan_bridge is not None,
+                                 "agent_connector_handoff": agent_connector_handoff is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -577,6 +580,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     except GmailConnectorError:
                         self._send(503, {"error":"google_grant_invalid_or_locked"})
                 return
+            if route.path == "/api/agent-connector-handoffs":
+                if agent_connector_handoff is None:
+                    self._send(403, {"error":"agent_connector_handoff_disabled"})
+                elif route.query:
+                    self._send(422, {"error":"invalid_handoff_query"})
+                else:
+                    try:
+                        self._send(200, agent_connector_handoff.history())
+                    except AgentConnectorHandoffError as exc:
+                        self._send(exc.status, {"error":str(exc)})
+                return
             if route.path in ("/api/managed-connectors", "/api/managed-connector-history"):
                 if managed_connectors is None:
                     self._send(200 if route.path=="/api/managed-connectors" else 403,
@@ -812,7 +826,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/managed-connector-add",
                                  "/api/managed-connector-revoke",
                                  "/api/managed-webhook-preview",
-                                 "/api/managed-webhook-commit"):
+                                 "/api/managed-webhook-commit",
+                                 "/api/agent-connector-handoff-preview",
+                                 "/api/agent-connector-handoff-commit"):
                 self._send(404, {"error": "not_found"})
                 return
             # Reject cross-origin mutation attempts before reading the body.
@@ -2432,6 +2448,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     autopilot = None
     managed_autopilot = None
     n8n_proofs = None
+    agent_handoff = None
     managed = None
     gmail = None
     try:
@@ -2485,6 +2502,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             autopilot = ScheduledWebhookAutopilot(
                 scheduler,outbound,audit,home / "scheduled-webhook-autopilot.sqlite3")
             scheduler.outbound_autopilot = autopilot
+        if plan_store is not None and managed is not None and managed._vault is not None:
+            agent_handoff = AgentConnectorHandoff(
+                plan_store, core, managed, home / "agent-connector-handoffs.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -2521,6 +2541,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            managed_connectors=managed,
                            managed_autopilot=managed_autopilot,
                            n8n_proofs=n8n_proofs,
+                            agent_connector_handoff=agent_handoff,
                            google_gmail=gmail,
                            local_document_analyzer=(
                                analyze_local_document if enable_local_documents else None),
@@ -2560,6 +2581,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot.close()
         if outbound is not None:
             outbound.close()
+        if agent_handoff is not None:
+            agent_handoff.close()
         if managed is not None:
             managed.close()
         if memory_store is not None:
