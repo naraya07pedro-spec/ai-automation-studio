@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #117 · Official n8n provider execution verification (opt-in read-only)
+
+The private [/handoff](/handoff) workbench can now **independently read n8n's official execution record** with an owner-provisioned API key and ONE password-approved GET, then correlate the signed execution ID, owner-pinned n8n workflow ID and original webhook delivery ID in the exact saved inbound node. This is **execution confirmation only**, never proof of CRM/email/customer outcome. The key stays server-side; 8/day and 100 total checks, crash-aware local ledger, no automatic polling/resend, DNS-pinned TLS, and no Ollama/OpenAI requirement for verification-only startup. See [Stage #117 guide](docs/N8N_READONLY_EXECUTION_VERIFY_V1.md). No live provider access is claimed from CI.
+
+
 ## Stage #116 · Signed n8n handoff outcome reconciliation (owner-imported, no VPS)
 
 The manual agent→encrypted connector handoff now accepts a separately **HMAC-SHA256-signed final-step n8n assertion**, pinned to the exact previously recorded delivery, workflow, connector and payload digest. Import is session/CSRF/password-gated, idempotent and strictly read/write-local: it **never sends another webhook**, resolves a timeout automatically or changes the original dispatch state. The operator's [handoff page](/handoff) includes signed evidence history. **Signed = shared-secret attestation, NOT independently verified n8n/business success.** See [Stage #116 runbook](docs/SIGNED_MANUAL_HANDOFF_OUTCOME_V1.md).
