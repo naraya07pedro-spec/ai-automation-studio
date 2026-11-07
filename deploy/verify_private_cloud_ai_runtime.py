@@ -7,6 +7,7 @@ one short paid-consent task from the authenticated Mission Control UI.
 """
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -107,7 +108,7 @@ def _read_receipt(base: Path) -> dict | None:
         if os.name == "posix" and db_path.stat().st_uid != os.geteuid():
             return None
         # No schema migrations or normal writable connection.
-        with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=3) as db:
+        with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
             rows = db.execute(
                 """SELECT s.task_id,s.max_runs,s.attempted_runs,
                           r.answer,r.tools_json,r.usage_json,r.finished_utc
