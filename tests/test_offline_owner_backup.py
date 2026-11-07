@@ -1,5 +1,5 @@
 """Offline owner backup acceptance with disposable, non-user fixture state."""
-from contextlib import closing
+from contextlib import closing, nullcontext
 import hashlib
 import io
 import json
@@ -23,6 +23,13 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        # A broad legacy test suite also binds the real Studio port. Only
+        # functional fixture tests bypass the socket guard; the production
+        # guard is independently tested below with a failing bind.
+        self.guard_patch = patch.object(backup, "_offline_guard",
+                                        side_effect=lambda: nullcontext())
+        self.guard_patch.start()
+        self.addCleanup(self.guard_patch.stop)
         self.base = Path(self.tmp.name)
         self.owner = self.base / ".ai-automation-studio"
         self.owner.mkdir(mode=0o700)
@@ -143,6 +150,21 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
         self.operator.chmod(0o600)
         with self.assertRaisesRegex(backup.BackupError, "passphrase"):
             backup.create(self.owner, self.archive, "short")
+
+    def test_actual_offline_guard_refuses_busy_port(self):
+        # Preserve real production guard; simulate a busy port without
+        # contending with unrelated HTTP tests on 127.0.0.1:8765.
+        original = backup._offline_guard
+        self.guard_patch.stop()
+        try:
+            with patch.object(backup.socket, "socket") as socket_ctor:
+                socket_ctor.return_value.bind.side_effect = OSError("busy")
+                with self.assertRaisesRegex(backup.BackupError, "stop_local_studio"):
+                    with original():
+                        pass
+                socket_ctor.return_value.close.assert_called_once()
+        finally:
+            self.guard_patch.start()
 
     def test_archive_inside_owner_or_repository_denied_without_writes(self):
         with self.assertRaisesRegex(backup.BackupError, "inside_live_owner"):
