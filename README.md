@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #114 · Completed agent to owner-approved connector handoff (no VPS)
+
+A completed local agent plan can now be explicitly associated by the operator with an already saved deterministic workflow event and an encrypted managed HTTPS connector. The private [handoff workbench](/handoff) (served at `http://127.0.0.1:8765/handoff`) offers a hash-bound exact preview, independent owner-password approval, one durable no-retry dispatch through the existing connector ledger, and read-only status history. The model cannot grant write permission, the plan contents are never posted, and **HTTP 2xx is not downstream success**. See [the operator guide](docs/AGENT_CONNECTOR_HANDOFF_V1.md). No live owner-PC, n8n, OpenAI billing or Tencent proof is claimed by CI.
+
+
 ## Cloud plan-to-local execution · Stage #113 (no VPS)
 
 The private Mission Control now supports an owner-approved **one-shot cloud AI plan** and actual local read-only tool execution. In section **14**, a paid OpenAI Responses model may PROPOSE up to 3 `calculate`/`utc_now` steps, but the human must review, approve and execute each step separately in section **02**. Reuse a saved request receipt to recover a lost response with **zero additional paid model calls**. No unreviewed external writes, arbitrary agent tools or VPS are needed. See [Stage #113 guide](docs/CLOUD_PLAN_HANDOFF_V1.md) and [living roadmap / unresolved product gates](docs/EXECUTION_ROADMAP_PERSONAL_AI_HARNESS.md). Model/provider/PC live integration remains unverified by synthetic CI.
