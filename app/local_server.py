@@ -590,6 +590,31 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (sqlite3.Error,OSError):
                     self._send(503,{"error":"managed_connector_storage_unavailable"})
                 return
+            if route.path == "/api/read-only-ai-safety":
+                if route.query:
+                    self._send(422, {"error": "invalid_ai_safety_query"})
+                elif scheduled_ai is None:
+                    self._send(403, {"error": "scheduled_ai_disabled"})
+                else:
+                    try:
+                        phase = model_safety.phase()
+                        self._send(200, {
+                            "enabled": True,
+                            "checkpoint_state": phase,
+                            "requires_owner_review": phase == "UNCERTAIN",
+                            "provider_billing_verified": False,
+                            "backend_stopped_verified": False,
+                            "automatic_retry_allowed": False,
+                            "next_action": ("Review both any local Ollama activity "
+                                "and remote provider usage/billing before owner "
+                                "acknowledgement; tasks remain paused until "
+                                "separately resumed." if phase == "UNCERTAIN"
+                                else "No unresolved model checkpoint, or another "
+                                     "model operation is active."),
+                        })
+                    except ModelSafetyError:
+                        self._send(503, {"error": "model_safety_storage_unavailable"})
+                return
             if route.path in ("/api/read-only-ai-schedules",
                               "/api/read-only-ai-history"):
                 if scheduled_ai is None:
@@ -733,6 +758,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-export",
                                  "/api/local-agent-action-preview",
                                  "/api/local-agent-action-commit",
+                                 "/api/read-only-ai-safety-acknowledge",
                                  "/api/read-only-ai-schedule-create",
                                  "/api/read-only-ai-schedule-pause",
                                  "/api/read-only-ai-schedule-resume",
@@ -784,6 +810,67 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/read-only-ai-safety-acknowledge":
+                if scheduled_ai is None:
+                    self._send(403, {"error": "scheduled_ai_disabled"})
+                    return
+                action = "AI_MODEL_SAFETY_ACKNOWLEDGE"
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                if (type(data) is not dict
+                        or set(data) != {"acknowledge", "current_password"}
+                        or data["acknowledge"] != "ALL_MODEL_OUTCOMES_REVIEWED"
+                        or type(data["current_password"]) is not str):
+                    self._audit_event(action, "DENIED")
+                    self._send(422, {"error": "explicit_model_outcome_review_required"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action, "DENIED")
+                    self._send(403, {"error": "real_owner_required"})
+                    return
+                verified = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if verified != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(verified, {"error": (
+                        "operator_restart_required" if verified == 503 else
+                        "operator_login_locked" if verified == 429 else
+                        "invalid_operator_credentials")})
+                    return
+                with agent_state_lock:
+                    if not agent_gate.acquire(blocking=False):
+                        self._audit_event(action, "DENIED")
+                        self._send(429, {"error": "model_operation_busy"})
+                        return
+                    try:
+                        try:
+                            phase = model_safety.phase()
+                            if phase != "UNCERTAIN":
+                                self._audit_event(action, "DENIED")
+                                self._send(423 if phase == "IN_FLIGHT" else 409,
+                                           {"error": "model_checkpoint_not_uncertain"})
+                                return
+                            model_safety.acknowledge()
+                        except ModelSafetyError:
+                            self._audit_event(action, "UNCERTAIN")
+                            self._send(503, {"error": "model_safety_storage_unavailable"})
+                            return
+                    finally:
+                        agent_gate.release()
+                if not self._audit_event(action, "SUCCESS"):
+                    self._send(503, {"error": "ai_safety_ack_audit_uncertain"})
+                else:
+                    self._send(200, {
+                        "status": "MODEL_UNCERTAINTY_OWNER_ACKNOWLEDGED",
+                        "checkpoint_state": "IDLE",
+                        "provider_billing_verified": False,
+                        "backend_stopped_verified": False,
+                        "model_calls": 0,
+                        "automatic_retry_triggered": False,
+                        "tasks_remain_paused_until_owner_resumes": True,
+                    })
                 return
             if self.path in ("/api/read-only-ai-schedule-create",
                              "/api/read-only-ai-schedule-pause",
