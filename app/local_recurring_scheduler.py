@@ -14,6 +14,7 @@ Explicit operational semantics:
 import calendar
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -28,6 +29,23 @@ ALLOWED_ZONES = {"UTC": timezone.utc, "Asia/Jakarta": timezone(timedelta(hours=7
 CLOCK_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", re.ASCII)
 SCHEDULE_ID = re.compile(r"^[a-f0-9]{24}$", re.ASCII)
 CADENCES = ("minutes", "hours", "daily", "weekly", "monthly")
+SYSTEMD_INVOCATION = re.compile(r"^[0-9a-f]{32}$", re.ASCII)
+LINUX_BOOT_UUID = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.ASCII)
+
+
+def _systemd_worker_identity():
+    """Observational origin marker, not cryptographic remote attestation."""
+    raw = os.environ.get("INVOCATION_ID", "").strip().lower()
+    if not SYSTEMD_INVOCATION.fullmatch(raw) or os.name != "posix":
+        return None, None
+    try:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text(
+            encoding="ascii").strip().lower()
+    except (OSError, UnicodeError):
+        return None, None
+    if not LINUX_BOOT_UUID.fullmatch(boot):
+        return None, None
+    return raw, boot
 
 
 class ScheduleError(Exception):
@@ -138,6 +156,8 @@ class LocalRecurringScheduler:
         self.thread = None
         self.outbound_autopilot = None
         self.managed_autopilot = None
+        self._worker_origin_token = object()
+        self._systemd_invocation, self._systemd_boot = _systemd_worker_identity()
         if str(database) != ":memory:":
             path = Path(database).expanduser()
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,8 +179,19 @@ class LocalRecurringScheduler:
                 schedule_id TEXT NOT NULL, slot_utc TEXT NOT NULL,
                 status TEXT NOT NULL, snapshot_json TEXT NOT NULL,
                 decision TEXT, reason TEXT, workflow_version INTEGER,
-                finished_utc TEXT, PRIMARY KEY(schedule_id,slot_utc),
+                finished_utc TEXT, completed_by_invocation TEXT,
+                completed_boot_id TEXT, PRIMARY KEY(schedule_id,slot_utc),
                 FOREIGN KEY(schedule_id) REFERENCES recurring_schedules(schedule_id))""")
+            # Upgrade existing owned SQLite files in-place. Old receipts
+            # remain NULL/unattested rather than inventing systemd provenance.
+            columns = {row[1] for row in self.db.execute(
+                "PRAGMA table_info(recurring_schedule_runs)").fetchall()}
+            if "completed_by_invocation" not in columns:
+                self.db.execute("ALTER TABLE recurring_schedule_runs "
+                                "ADD COLUMN completed_by_invocation TEXT")
+            if "completed_boot_id" not in columns:
+                self.db.execute("ALTER TABLE recurring_schedule_runs "
+                                "ADD COLUMN completed_boot_id TEXT")
             self.db.execute("""CREATE INDEX IF NOT EXISTS recurring_due_idx
                 ON recurring_schedules(status,next_due_utc)""")
 
@@ -265,7 +296,7 @@ class LocalRecurringScheduler:
             "history_retention_per_schedule": MAX_HISTORY_PER_SCHEDULE,
             "external_dispatch_count": 0}
 
-    def _finish(self, sid, slot, snapshot):
+    def _finish(self, sid, slot, snapshot, *, worker_identity=None):
         now = _iso(self.clock())
         try:
             if snapshot.get("status") != "ACTIVE":
@@ -282,9 +313,12 @@ class LocalRecurringScheduler:
             outcome, decision, reason, version = "BLOCKED", None, "EVALUATION_INVALID", None
         with self.lock, self.db:
             self.db.execute("""UPDATE recurring_schedule_runs
-                SET status=?,decision=?,reason=?,workflow_version=?,finished_utc=?
+                SET status=?,decision=?,reason=?,workflow_version=?,finished_utc=?,
+                    completed_by_invocation=?,completed_boot_id=?
                 WHERE schedule_id=? AND slot_utc=? AND status='IN_FLIGHT'""",
-                (outcome,decision,reason,version,now,sid,slot))
+                (outcome,decision,reason,version,now,
+                 worker_identity[0] if worker_identity else None,
+                 worker_identity[1] if worker_identity else None,sid,slot))
             changed = self.db.execute("SELECT changes()").fetchone()[0]
             if changed:
                 self.db.execute("""UPDATE recurring_schedules
@@ -300,8 +334,13 @@ class LocalRecurringScheduler:
                     ORDER BY slot_utc DESC LIMIT -1 OFFSET ?)""",
                     (sid, MAX_HISTORY_PER_SCHEDULE))
 
-    def run_due(self):
-        """Called by owner process worker; safe to call manually in isolated tests."""
+    def run_due(self, *, _origin_token=None):
+        """Manual calls have no provenance; the actual worker supplies its token."""
+        identity = ((self._systemd_invocation, self._systemd_boot)
+                    if (_origin_token is self._worker_origin_token
+                        and self._systemd_invocation is not None
+                        and self._systemd_boot is not None)
+                    else None)
         now = _aware(self.clock())
         claims = []
         with self.lock, self.db:
@@ -341,13 +380,13 @@ class LocalRecurringScheduler:
                             SET next_due_utc=? WHERE schedule_id=?""", (next_due,sid))
                         claims.append((sid,slot,snapshot))
         for sid,slot,snapshot in claims:
-            self._finish(sid,slot,snapshot)
+            self._finish(sid,slot,snapshot,worker_identity=identity)
         return len(claims)
 
     def _loop(self):
         while not self.stop_signal.is_set():
             try:
-                self.run_due()
+                self.run_due(_origin_token=self._worker_origin_token)
                 if self.outbound_autopilot is not None:
                     self.outbound_autopilot.dispatch_due()
                 if self.managed_autopilot is not None:

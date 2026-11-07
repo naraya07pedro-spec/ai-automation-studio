@@ -1,0 +1,51 @@
+name: Post-reboot systemd worker rule execution evidence contract
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_recurring_scheduler.py'
+      - 'deploy/verify_post_reboot_rule_run.py'
+      - 'tests/test_post_reboot_rule_execution.py'
+      - 'docs/POST_REBOOT_RULE_EXECUTION_V1.md'
+      - '.github/workflows/post-reboot-rule-execution.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_recurring_scheduler.py'
+      - 'deploy/verify_post_reboot_rule_run.py'
+      - 'tests/test_post_reboot_rule_execution.py'
+      - 'docs/POST_REBOOT_RULE_EXECUTION_V1.md'
+      - '.github/workflows/post-reboot-rule-execution.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  post-reboot-rule-provenance-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test actual SQLite worker origin and negative post-boot scenarios
+        run: python -m unittest discover -s tests -p 'test_post_reboot_rule_execution.py' -v
+      - name: Protect prior schedule, reboot, managed webhook regression
+        run: |
+          python -m unittest discover -s tests -p 'test_recurring_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_reboot_persistence.py' -v
+          python -m unittest discover -s tests -p 'test_scheduled_webhook_autopilot.py' -v
+      - name: Verify Python CLI syntax and no reboot/write option
+        run: |
+          python -m py_compile app/local_recurring_scheduler.py deploy/verify_post_reboot_rule_run.py
+          python deploy/verify_post_reboot_rule_run.py --help
+          if python deploy/verify_post_reboot_rule_run.py --reboot; then
+            echo "Verifier must never reboot a server"
+            exit 1
+          fi
+      - name: Evidence limitation
+        run: echo "All CI receipts use synthetic boot and invocation IDs and disposable SQLite. No actual Tencent instance, systemd service or cloud reboot is observed."
