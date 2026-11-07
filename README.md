@@ -1,5 +1,10 @@
 # AI Automation Studio
 
+## Stage #116 · Signed n8n handoff outcome reconciliation (owner-imported, no VPS)
+
+The manual agent→encrypted connector handoff now accepts a separately **HMAC-SHA256-signed final-step n8n assertion**, pinned to the exact previously recorded delivery, workflow, connector and payload digest. Import is session/CSRF/password-gated, idempotent and strictly read/write-local: it **never sends another webhook**, resolves a timeout automatically or changes the original dispatch state. The operator's [handoff page](/handoff) includes signed evidence history. **Signed = shared-secret attestation, NOT independently verified n8n/business success.** See [Stage #116 runbook](docs/SIGNED_MANUAL_HANDOFF_OUTCOME_V1.md).
+
+
 ## Stage #115 · Durable cross-plan job queue (local-first, no VPS)
 
 The [private job queue](/jobs), served as `http://127.0.0.1:8765/jobs`, coordinates **two to eight separately approved read-only plans** in a dependency-aware DAG. Owner-created jobs persist in a separate SQLite ledger with priority (0–3), fair selection among equal-priority jobs, step claim/receipt digests, pause/resume/cancel, and conservative restart quarantine. Each step requires **fresh owner password + session + CSRF + click**; no background auto-run, arbitrary model tools, external writes, implicit paid calls, or blind retry. See [Stage #115 guide](docs/DURABLE_PLAN_QUEUE_V1.md) and evidence in [progress ledger](docs/PROGRESS.md).

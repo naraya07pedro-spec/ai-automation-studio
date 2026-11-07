@@ -52,6 +52,33 @@ button:disabled{opacity:.4;cursor:not-allowed}.row{display:flex;gap:12px;flex-wr
 <div class="output" id="history">No handoff history loaded.</div>
 </section>
 </div>
+<section class="panel" aria-label="Signed n8n manual outcome receipt" style="margin-top:22px">
+<h2>3 · Import a signed final-step claim from n8n</h2>
+<p class="sub">First inspect the real n8n execution. Then select the same completed plan, managed connector, workflow and event above. Supply a domain-separated HMAC-SHA256 final-step receipt. This import checks the actual local delivery ledger and does NOT send, retry, or resume anything. Possession of the shared secret is not independent verification that n8n actually ran or a business effect happened.</p>
+<div class="grid">
+<div>
+<label for="signed-delivery">Local delivery ID (32 lowercase hex)</label>
+<input id="signed-delivery" maxlength="32" autocomplete="off" placeholder="Exact delivery ID from handoff history">
+<label for="signed-state">Provider-asserted final outcome</label>
+<select id="signed-state"><option value="COMPLETED">COMPLETED (provider claims final step finished)</option><option value="FAILED">FAILED (provider claims final step failed)</option></select>
+<label for="signed-execution">n8n execution ID</label>
+<input id="signed-execution" maxlength="128" autocomplete="off" placeholder="Execution identifier from the n8n final step">
+<label for="signed-hmac">Final-step proof HMAC-SHA256 (64 lowercase hex)</label>
+<input id="signed-hmac" maxlength="64" autocomplete="off" spellcheck="false" placeholder="Signed using connector secret, not entered in this page">
+<label for="signed-password">Current owner password for this import only</label>
+<input id="signed-password" type="password" autocomplete="off">
+<div class="row">
+<button type="button" class="warn" id="signed-import" disabled>Import and validate signed claim (zero sends)</button>
+<button type="button" id="signed-history-btn" disabled>Refresh signed outcomes</button>
+</div>
+<p class="state" id="signed-status" role="status">No signed outcome imported.</p>
+</div>
+<div>
+<div class="notice">Evidence level: <strong>HMAC matched shared secret + exact existing local delivery</strong>. Not an independent remote API verification. This will NEVER change the original dispatch status, verify a CRM/email effect, or grant permission to retry uncertain requests. Conflicting final claims are rejected.</div>
+<div class="output" id="signed-history">No imported claims recorded in this session.</div>
+</div>
+</div>
+</section>
 <p class="muted">Important: HTTP 2xx only shows the endpoint accepted the request, not that n8n or another external system completed the intended business outcome. This workbench uses your private loopback/SSH-tunnel server and does not provide unattended 24/7 execution.</p>
 </main>
 <script>
@@ -117,6 +144,8 @@ async function refresh(){
    api("/api/local-agent-capabilities"),api("/api/local-agent-plans"),
    api("/api/local-workflows"),api("/api/managed-connectors")]);
   enabled=!!caps.agent_connector_handoff&&connectors.storage==="AES_256_GCM_EXTERNAL_MASTER_KEY";
+  signedEnabled=!!caps.signed_handoff_outcome_import;
+  signedControls();
   const completed=(plans.plans||[]).filter(x=>x.status==="COMPLETED");
   const active=(connectors.connectors||[]).filter(x=>x.status==="ACTIVE");
   selectOptions("plan",completed,"plan_id",x=>x.plan_id+" · "+x.goal);
@@ -128,7 +157,7 @@ async function refresh(){
   state("preview-state",completed.length+" completed plan(s), "+active.length+" active encrypted destination(s).");
   clearPreview();
  }catch(e){state("preview-state","Unable to load private state: "+e.message,true);}
- finally{working=false;updateButtons();if(csrf&&enabled)history();}
+ finally{working=false;updateButtons();signedControls();if(csrf&&enabled){history();signedHistory();}}
 }
 for(const id of ["plan","connector","workflow","event"]){
  el(id).addEventListener("change",clearPreview);
@@ -184,6 +213,71 @@ el("send").addEventListener("click",async()=>{
  }catch(e){state("send-state","No verified final outcome: "+e.message+
   ". Inspect both ledgers before taking any new action.",true);}
  finally{working=false;updateButtons();if(csrf)history();}
+});
+
+// Stage 116: importing a signed downstream assertion is a local-only evidence action.
+let signedEnabled=false,signedBusy=false;
+function signedControls(){
+ const active=!!csrf&&enabled&&signedEnabled&&!working&&!signedBusy;
+ el("signed-import").disabled=!active||
+   !el("plan").value||!el("connector").value||
+   !el("workflow").value||!el("event").value.trim()||
+   !/^[0-9a-f]{32}$/.test(el("signed-delivery").value.trim())||
+   !/^[A-Za-z0-9_-]{1,128}$/.test(el("signed-execution").value.trim())||
+   !/^[0-9a-f]{64}$/.test(el("signed-hmac").value.trim())||
+   !el("signed-password").value;
+ el("signed-history-btn").disabled=!active;
+}
+async function signedHistory(){
+ if(!csrf||!signedEnabled)return;
+ try{
+  const data=await api("/api/signed-handoff-outcomes");
+  if(!csrf)return;
+  const rows=data.records||[];
+  el("signed-history").textContent=rows.length?
+    rows.map(x=>"Plan: "+x.plan_id+"\nConnector: "+x.connector_id+
+      "\nWorkflow: "+x.workflow_id+" / "+x.event_id+
+      "\nDelivery: "+x.delivery_id+
+      "\nProvider-asserted: "+x.provider_asserted_outcome+
+      "\nn8n execution: "+x.n8n_execution_id+
+      "\nHMAC matched shared secret; remote/business effects NOT independently verified."+
+      "\nOriginal dispatch: "+x.local_dispatch_status_unchanged).join("\n\n"):
+    "No signed manual handoff outcomes recorded.";
+ }catch(e){if(csrf)state("signed-status","Signed history unavailable: "+e.message,true);}
+}
+for(const id of ["signed-delivery","signed-execution","signed-hmac","signed-password"]){
+ el(id).addEventListener("input",signedControls);
+}
+for(const id of ["plan","connector","workflow","event","signed-state"]){
+ el(id).addEventListener("input",signedControls);
+ el(id).addEventListener("change",signedControls);
+}
+el("signed-history-btn").addEventListener("click",signedHistory);
+el("signed-import").addEventListener("click",async()=>{
+ if(!csrf||working||signedBusy||!signedEnabled)return;
+ const chosen=values();
+ const receipt={
+  ...chosen,
+  delivery_id:el("signed-delivery").value.trim(),
+  outcome:el("signed-state").value,
+  execution_id:el("signed-execution").value.trim(),
+  proof_hmac_sha256:el("signed-hmac").value.trim()
+ };
+ if(!window.confirm("IMPORT SIGNED n8n FINAL-STEP CLAIM FOR THIS EXACT DELIVERY?\n\n"+
+    receipt.delivery_id+"\n"+receipt.outcome+"\n"+receipt.execution_id+
+    "\n\nNo network dispatch/retry will occur. Valid HMAC does not independently prove business success."))return;
+ const current_password=el("signed-password").value;
+ if(!current_password)return;
+ el("signed-password").value="";signedBusy=true;signedControls();
+ try{
+  const result=await api("/api/signed-handoff-outcome-import",
+    {...receipt,current_password});
+  state("signed-status","Claim "+result.result+": "+result.provider_asserted_outcome+
+    ". Shared-secret HMAC matched, but remote/business outcome NOT independently verified.");
+  await signedHistory();
+ }catch(e){if(csrf)state("signed-status","Claim not recorded: "+e.message+
+    ". Inspect original webhook and signed receipt; NEVER retry automatically.",true);}
+ finally{signedBusy=false;signedControls();}
 });
 (async()=>{
  try{

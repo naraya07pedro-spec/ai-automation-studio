@@ -36,6 +36,10 @@ An owner-approved **plan-provenance → deterministic-workflow receipt → encry
 
 The owner-activated **Durable Multi-Plan DAG Queue** at `/jobs` adds 2–8 existing approved plan nodes per job, explicit per-node dependencies, bounded priority with fairness between equal-priority jobs, SQLite step claims and receipt digests, owner-authenticated one-step execution, pause/resume/cancel, and crash quarantine with proven-step-only owner reconciliation. **No automatic background dispatch, no model-granted write permission, no real provider/network success claim.** See `docs/DURABLE_PLAN_QUEUE_V1.md`. PR #115 merged after 18/18 successful workflows on the exact tested head; provider-live and owner-PC acceptance remain unverified.
 
+### Stage #116 · Signed manual handoff outcome receipts (PR verification pending)
+
+Connect the manual owner-approved Stage #114 handoff to a **domain-separated, HMAC-valid n8n final-step claim**, matching the existing immutable per-connector delivery ledger and protecting against swapped delivery IDs, tampered payload/destination, forged or conflicting claims, replay and blind retries. Import and list via the existing private `/handoff` UI and owner-authenticated API. This remains an **owner-imported shared-secret claim**, **not independent provider API attestation** or business success. See `docs/SIGNED_MANUAL_HANDOFF_OUTCOME_V1.md`; merge status, exact CI coverage and live limitations must be confirmed after checks.
+
 ## Next implementation work, in priority order
 
 ### P0 · Actual owner-PC acceptance and continuity (next operator gate)
