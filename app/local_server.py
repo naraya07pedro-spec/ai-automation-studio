@@ -1981,6 +1981,56 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, result)
                 return
+            if self.path in ("/api/agent-connector-handoff-preview",
+                             "/api/agent-connector-handoff-commit"):
+                if agent_connector_handoff is None:
+                    self._send(403, {"error":"agent_connector_handoff_disabled"})
+                    return
+                action="AGENT_CONNECTOR_HANDOFF"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if type(data) is not dict:
+                        raise AgentConnectorHandoffError("invalid_handoff_fields", 422)
+                    values={k:v for k,v in data.items() if k!="current_password"}
+                    if self.path.endswith("-commit"):
+                        if (set(data) != {"plan_id","connector_id",
+                                "workflow_id","event_id","plan_sha256",
+                                "workflow_sha256","payload_sha256",
+                                "preview_token","current_password"} or
+                                type(data["current_password"]) is not str):
+                            raise AgentConnectorHandoffError(
+                                "owner_password_required",422)
+                        if operator_auth is None:
+                            raise AgentConnectorHandoffError("real_owner_required",403)
+                        verified=operator_auth.confirm_current_password(
+                            data["current_password"])
+                        if verified != 200:
+                            self._audit_event(action,"DENIED")
+                            self._send(verified,{"error":(
+                                "operator_restart_required" if verified==503
+                                else "operator_login_locked" if verified==429
+                                else "invalid_operator_credentials")})
+                            return
+                        result=agent_connector_handoff.commit(values)
+                    else:
+                        result=agent_connector_handoff.preview(values)
+                except AgentConnectorHandoffError as exc:
+                    self._audit_event(action,"DENIED")
+                    self._send(exc.status, {"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503, {"error":"handoff_state_uncertain_inspect_ledgers"})
+                    return
+                outcome=("UNCERTAIN" if result["status"] in (
+                    "OUTCOME_UNCERTAIN","REVIEW_REQUIRED") else "SUCCESS")
+                if not self._audit_event(action,outcome):
+                    self._send(503, {"error":"handoff_audit_uncertain_inspect_ledgers"})
+                else:
+                    self._send(200,result)
+                return
             if self.path in ("/api/managed-connector-add",
                              "/api/managed-connector-revoke",
                              "/api/managed-webhook-preview",
