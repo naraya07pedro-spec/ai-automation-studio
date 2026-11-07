@@ -64,6 +64,23 @@ def _owner_status(home: Path, uid: int) -> tuple[bool, bool]:
     return valid, False
 
 
+def _trusted_python_for_sudo() -> bool:
+    """Require a root-owned, not group/world-writable interpreter for sudo."""
+    try:
+        configured = Path(sys.executable)
+        resolved = configured.resolve(strict=True)
+        return (
+            configured.is_absolute()
+            and resolved.is_file()
+            and resolved.stat().st_uid == 0
+            and resolved.stat().st_mode & 0o022 == 0
+            and configured.parent.stat().st_uid == 0
+            and configured.parent.stat().st_mode & 0o022 == 0
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def inspect() -> dict:
     """No reads of provider key bytes, credential directory or owner password."""
     uid = os.geteuid() if hasattr(os, "geteuid") else -1
@@ -72,6 +89,7 @@ def inspect() -> dict:
                          and Path("/run/systemd/system").is_dir(),
         "nonroot_service_user": uid > 0,
         "python_3_11_plus": sys.version_info >= (3, 11),
+        "system_python_safe_for_sudo": _trusted_python_for_sudo(),
         "checkout_owned_and_not_symlink": False,
         "reviewed_main_checkout_clean": False,
         "includes_stage_109": False,
