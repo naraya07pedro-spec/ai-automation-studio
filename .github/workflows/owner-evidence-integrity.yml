@@ -1,0 +1,57 @@
+name: Stage 118 offline owner evidence integrity gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/owner_acceptance_audit.py'
+      - 'tests/test_owner_acceptance_audit.py'
+      - 'tools/offline_owner_backup.py'
+      - 'app/local_n8n_execution_verifier.py'
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_handoff_outcome_proof.py'
+      - 'docs/OWNER_LIVE_ACCEPTANCE_GATE_V1.md'
+      - '.github/workflows/owner-evidence-integrity.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/owner_acceptance_audit.py'
+      - 'tests/test_owner_acceptance_audit.py'
+      - 'tools/offline_owner_backup.py'
+      - 'app/local_n8n_execution_verifier.py'
+      - 'app/local_agent_connector_handoff.py'
+      - 'app/local_handoff_outcome_proof.py'
+      - 'docs/OWNER_LIVE_ACCEPTANCE_GATE_V1.md'
+      - '.github/workflows/owner-evidence-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-118-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned AES-GCM dependency (focused suite must not skip)
+        run: python -m pip install -r requirements-vault.txt
+      - name: Six-ledger cross-digest, tamper and encrypted restore acceptance
+        run: python -m unittest discover -s tests -p 'test_owner_acceptance_audit.py' -v
+      - name: Existing owner recovery and n8n signed/prover regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_offline_owner_backup.py' -v
+          python -m unittest discover -s tests -p 'test_n8n_execution_verifier.py' -v
+          python -m unittest discover -s tests -p 'test_signed_manual_handoff_outcome.py' -v
+          python -m unittest discover -s tests -p 'test_agent_connector_handoff.py' -v
+      - name: Static Python parse / compile
+        run: |
+          python -m py_compile tools/owner_acceptance_audit.py tests/test_owner_acceptance_audit.py
