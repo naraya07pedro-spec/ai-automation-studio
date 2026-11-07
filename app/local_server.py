@@ -2262,9 +2262,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._audit_event(action,"UNCERTAIN")
                     self._send(503,{"error":"n8n_execution_check_uncertain_read_ledger"})
                     return
-                audit_result=("UNCERTAIN" if result["status"] in
-                    ("LOOKUP_UNCERTAIN","LOOKUP_NETWORK_OR_RESPONSE_UNCERTAIN")
-                    else "SUCCESS")
+                audit_result=(
+                    "SUCCESS" if result["status"] in (
+                        "EXECUTION_SUCCESS_CORRELATED",
+                        "EXECUTION_FAILED_CORRELATED")
+                    else "UNCERTAIN" if result["status"] in (
+                        "LOOKUP_UNCERTAIN",
+                        "LOOKUP_NETWORK_OR_RESPONSE_UNCERTAIN")
+                    else "FAILED")
                 if not self._audit_event(action,audit_result):
                     self._send(503,{"error":"n8n_check_audit_uncertain_read_ledger"})
                 else:
