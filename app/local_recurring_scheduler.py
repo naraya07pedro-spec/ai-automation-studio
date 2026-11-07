@@ -14,6 +14,7 @@ Explicit operational semantics:
 import calendar
 from datetime import datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -28,6 +29,23 @@ ALLOWED_ZONES = {"UTC": timezone.utc, "Asia/Jakarta": timezone(timedelta(hours=7
 CLOCK_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", re.ASCII)
 SCHEDULE_ID = re.compile(r"^[a-f0-9]{24}$", re.ASCII)
 CADENCES = ("minutes", "hours", "daily", "weekly", "monthly")
+SYSTEMD_INVOCATION = re.compile(r"^[0-9a-f]{32}$", re.ASCII)
+LINUX_BOOT_UUID = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.ASCII)
+
+
+def _systemd_worker_identity():
+    """Observational origin marker, not cryptographic remote attestation."""
+    raw = os.environ.get("INVOCATION_ID", "").strip().lower()
+    if not SYSTEMD_INVOCATION.fullmatch(raw) or os.name != "posix":
+        return None, None
+    try:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text(
+            encoding="ascii").strip().lower()
+    except (OSError, UnicodeError):
+        return None, None
+    if not LINUX_BOOT_UUID.fullmatch(boot):
+        return None, None
+    return raw, boot
 
 
 class ScheduleError(Exception):
@@ -138,6 +156,8 @@ class LocalRecurringScheduler:
         self.thread = None
         self.outbound_autopilot = None
         self.managed_autopilot = None
+        self._worker_origin_token = object()
+        self._systemd_invocation, self._systemd_boot = _systemd_worker_identity()
         if str(database) != ":memory:":
             path = Path(database).expanduser()
             path.parent.mkdir(parents=True, exist_ok=True)
