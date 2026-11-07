@@ -54,6 +54,12 @@ py -3 tools/owner_acceptance_audit.py --owner-root "D:\\private-restore-test-001
 
 The important distinction is **actual recovered six-ledger integrity**, not just a green encryption test.
 
+## Security repairs shipped with this acceptance gate
+
+The acceptance suite discovered a real interaction between SQLite WAL snapshots and the older offline encrypted backup: a SQLite in-memory `serialize()` image could retain source WAL header bytes and fail to reopen as a standalone restored database. Stage #118 repairs this by normalizing standalone journal flags after an atomic SQLite backup and checking the resulting SQLite image before encryption. Snapshot source connections use immutable read-only mode after clean shutdown to avoid creating WAL/SHM sidecars.
+
+The suite also found that some Stage #114-supporting database constructors inherited permissive file permissions on POSIX. A new shared private-path guard creates 0600 files in 0700 directories, refuses unsafe symlinks or owners, and narrows existing owner-owned legacy files. On Windows, OS ACL inheritance is different; verify independently with the shipped local ACL diagnostic. These fixes improve backup reliability and privacy but do not constitute a live owner-PC validation.
+
 ## Tested properties and acceptance gates
 
 `tests/test_owner_acceptance_audit.py` creates a real but fully synthetic completed plan → deterministic local workflow → AES-256-GCM managed connector → one fake network send → signed final-step claim → mocked n8n provider-execution read. After clean shutdown it runs the **actual offline CLI auditor** and tests changing the plan goal, workflow receipt, sender delivery, payload hash, signed execution ID, provider correlation, owner-pinned host/workflow/node, missing records, symlinks and stale WAL. It also creates a **real encrypted backup, authenticates it, restores into a new plaintext directory and verifies the exact six-ledger chain again**.
