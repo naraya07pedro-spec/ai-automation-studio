@@ -40,7 +40,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_private_cloud_runtime_acceptance.py' -v
       - name: Existing private-VPS and cloud scheduler regression
         run: |
-          python -m unittest discover -s tests -p 'test_private_vps_credential_readiness.py' -v
+          python -m unittest discover -s tests -p 'test_private_vps_credentials_and_probe.py' -v
           python -m unittest discover -s tests -p 'test_cloud_only_scheduler.py' -v
       - name: Compile verifier without starting service or spending API credits
         run: python -m py_compile deploy/verify_private_cloud_ai_runtime.py
