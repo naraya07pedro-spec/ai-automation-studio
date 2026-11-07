@@ -1,0 +1,59 @@
+name: Stage 113 cloud plan to approved local tools (no real provider)
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_cloud_plan_bridge.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_on_demand_remote_ai.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'tests/test_cloud_plan_bridge.py'
+      - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
+      - '.github/workflows/cloud-plan-handoff.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_cloud_plan_bridge.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_on_demand_remote_ai.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'web/mission.html'
+      - 'tests/test_cloud_plan_bridge.py'
+      - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
+      - '.github/workflows/cloud-plan-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud-to-owner-approved-local-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run true authenticated loopback HTTP and deterministic local tool tests
+        run: python -m unittest discover -s tests -p 'test_cloud_plan_bridge.py' -v
+      - name: Regress existing plans, paid one-shot and cloud-only startup
+        run: |
+          python -m unittest discover -s tests -p 'test_on_demand_remote_ai.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_only_scheduler.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans_http.py' -v
+      - name: Static Python syntax
+        run: python -m py_compile app/local_cloud_plan_bridge.py app/local_on_demand_remote_ai.py app/local_agent_task_plans.py app/local_server.py
+      - name: Mission Control JavaScript syntax
+        run: |
+          node -e 'const fs=require("fs"),s=fs.readFileSync("web/mission.html","utf8");const m=s.match(/<script>([\s\S]*?)<\/script>/);if(!m)process.exit(3);new Function(m[1])'
