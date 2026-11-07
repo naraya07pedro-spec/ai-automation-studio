@@ -63,6 +63,7 @@ from local_multi_doc_smoke import smoke as run_local_device_acceptance
 from local_windows_preflight import preflight as check_local_device_preflight
 from local_model_safety import LocalModelSafetyState, ModelSafetyError
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
+from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -132,6 +133,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
         scheduled_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     if on_demand_ai is not None:
         on_demand_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
+    cloud_plan_bridge = (CloudPlanBridge(on_demand_ai, local_agent_plan_store)
+                         if on_demand_ai is not None and local_agent_plan_store is not None
+                         else None)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
                     if local_agent_plan_store is not None else None)
@@ -326,6 +330,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                      scheduled_ai is not None
                                      and scheduled_ai.remote_runner is not None),
                                  "remote_on_demand_ai": on_demand_ai is not None,
+                                 "cloud_plan_review": cloud_plan_bridge is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -410,7 +415,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                and local_agent_probe is not None)})
                 return
             if route.path in ("/api/local-agent-plans", "/api/local-agent-plan"):
-                if local_agent_planner is None or local_agent_plan_store is None:
+                if local_agent_plan_store is None:
                     self._send(403, {"error": "agent_planning_disabled"})
                     return
                 try:
@@ -783,6 +788,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-export",
                                  "/api/local-agent-action-preview",
                                  "/api/local-agent-action-commit",
+                                 "/api/cloud-ai-plan-create",
+                                 "/api/cloud-ai-plan-recover",
                                  "/api/read-only-ai-ask",
                                  "/api/read-only-ai-safety-acknowledge",
                                  "/api/read-only-ai-schedule-create",
@@ -836,6 +843,53 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/cloud-ai-plan-create", "/api/cloud-ai-plan-recover"):
+                if cloud_plan_bridge is None:
+                    self._send(403, {"error": "cloud_planning_disabled"})
+                    return
+                action = "CLOUD_AI_PLAN_PROPOSAL"
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                if (type(data) is not dict
+                        or type(data.get("current_password")) is not str
+                        or operator_auth is None):
+                    self._audit_event(action, "DENIED")
+                    self._send(422, {"error": "cloud_plan_owner_password_required"})
+                    return
+                verified = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if verified != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(verified, {"error": (
+                        "operator_restart_required" if verified == 503 else
+                        "operator_login_locked" if verified == 429 else
+                        "invalid_operator_credentials")})
+                    return
+                values = {k:v for k,v in data.items()
+                          if k != "current_password"}
+                try:
+                    result = (cloud_plan_bridge.recover(values)
+                              if self.path.endswith("-recover")
+                              else cloud_plan_bridge.propose(values))
+                except (CloudPlanError, OnDemandRemoteAIError) as exc:
+                    status = exc.status
+                    outcome = ("UNCERTAIN" if "uncertain" in str(exc)
+                               or "check_usage" in str(exc)
+                               else "DENIED" if status in (403, 404, 409, 422, 423, 429)
+                               else "FAILED")
+                    self._audit_event(action, outcome)
+                    self._send(status, {"error": str(exc)})
+                    return
+                except (PlanError, OSError, sqlite3.Error):
+                    self._audit_event(action, "UNCERTAIN")
+                    self._send(503, {"error": "cloud_plan_persistence_uncertain_recover_receipt"})
+                    return
+                if not self._audit_event(action, "SUCCESS"):
+                    self._send(503, {"error": "cloud_plan_audit_uncertain_check_plan"})
+                else:
+                    self._send(200, result)
                 return
             if self.path == "/api/read-only-ai-ask":
                 if on_demand_ai is None:
@@ -1227,7 +1281,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(503, {"error": "local_action_unavailable"})
                 return
             if self.path.startswith("/api/local-agent-plan-"):
-                if local_agent_planner is None or local_agent_plan_store is None:
+                if local_agent_plan_store is None or (
+                        self.path in ("/api/local-agent-plan-create",
+                                      "/api/local-agent-plan-report")
+                        and local_agent_planner is None):
                     self._send(403, {"error": "agent_planning_disabled"})
                     return
                 creating = self.path == "/api/local-agent-plan-create"
@@ -2349,7 +2406,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
-    if enable_agent_plans:
+    if enable_agent_plans or enable_scheduled_openai:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None
