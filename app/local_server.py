@@ -2017,6 +2017,67 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(200, result)
                 return
+            if self.path in ("/api/durable-job-create","/api/durable-job-arm",
+                             "/api/durable-job-pause","/api/durable-job-resume",
+                             "/api/durable-job-cancel","/api/durable-job-run-one",
+                             "/api/durable-job-reconcile"):
+                if durable_jobs is None:
+                    self._send(403, {"error":"durable_job_queue_disabled"})
+                    return
+                action=("DURABLE_JOB_STEP" if self.path.endswith("run-one")
+                        else "DURABLE_JOB_CONTROL")
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                try:
+                    if type(data) is not dict or type(data.get("current_password")) is not str:
+                        raise DurableQueueError("owner_password_required",422)
+                    if operator_auth is None:
+                        raise DurableQueueError("real_owner_required",403)
+                    verified=operator_auth.confirm_current_password(data["current_password"])
+                    if verified!=200:
+                        self._audit_event(action,"DENIED")
+                        self._send(verified,{"error":(
+                            "operator_restart_required" if verified==503 else
+                            "operator_login_locked" if verified==429 else
+                            "invalid_operator_credentials")})
+                        return
+                    values={k:v for k,v in data.items() if k!="current_password"}
+                    if self.path.endswith("create"):
+                        outcome=durable_jobs.create(values)
+                    elif self.path.endswith("reconcile"):
+                        if set(values)!={"job_id","plan_id"}:
+                            raise DurableQueueError("invalid_job_fields",422)
+                        outcome=durable_jobs.reconcile_recorded(
+                            values["job_id"],values["plan_id"])
+                    elif self.path.endswith("run-one"):
+                        if not set(values).issubset({"job_id"}):
+                            raise DurableQueueError("invalid_job_fields",422)
+                        outcome=durable_jobs.run_one(values.get("job_id"))
+                    else:
+                        if set(values)!={"job_id"}:
+                            raise DurableQueueError("invalid_job_fields",422)
+                        method={
+                            "/api/durable-job-arm":durable_jobs.arm,
+                            "/api/durable-job-pause":durable_jobs.pause,
+                            "/api/durable-job-resume":durable_jobs.resume,
+                            "/api/durable-job-cancel":durable_jobs.cancel,
+                        }[self.path]
+                        outcome=method(values["job_id"])
+                except DurableQueueError as exc:
+                    uncertain=("uncertain" in str(exc) or "checkpoint" in str(exc))
+                    self._audit_event(action,"UNCERTAIN" if uncertain else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                except (sqlite3.Error,OSError):
+                    self._audit_event(action,"UNCERTAIN")
+                    self._send(503,{"error":"job_state_uncertain_check_history"})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"job_audit_uncertain_check_history"})
+                else:
+                    self._send(200,outcome)
+                return
             if self.path in ("/api/agent-connector-handoff-preview",
                              "/api/agent-connector-handoff-commit"):
                 if agent_connector_handoff is None:
