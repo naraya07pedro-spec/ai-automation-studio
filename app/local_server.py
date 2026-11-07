@@ -62,6 +62,7 @@ from local_ollama_readiness import installed_models, probe_model
 from local_multi_doc_smoke import smoke as run_local_device_acceptance
 from local_windows_preflight import preflight as check_local_device_preflight
 from local_model_safety import LocalModelSafetyState, ModelSafetyError
+from local_on_demand_remote_ai import LocalOnDemandRemoteAI, OnDemandRemoteAIError
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -106,7 +107,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    local_scheduler=None, outbound_webhook=None,
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, managed_autopilot=None, n8n_proofs=None,
-                   scheduled_ai=None):
+                   scheduled_ai=None, on_demand_ai=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
     start_local_server() never runs with None; missing owner config is fatal.
@@ -129,6 +130,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     agent_state_lock = threading.Lock()
     if scheduled_ai is not None:
         scheduled_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
+    if on_demand_ai is not None:
+        on_demand_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
                     if local_agent_plan_store is not None else None)
@@ -322,6 +325,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "remote_scheduled_ai": bool(
                                      scheduled_ai is not None
                                      and scheduled_ai.remote_runner is not None),
+                                 "remote_on_demand_ai": on_demand_ai is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -590,6 +594,27 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (sqlite3.Error,OSError):
                     self._send(503,{"error":"managed_connector_storage_unavailable"})
                 return
+            if route.path in ("/api/read-only-ai-ask-history",
+                              "/api/read-only-ai-ask-receipt"):
+                if on_demand_ai is None:
+                    self._send(403, {"error": "on_demand_remote_ai_disabled"})
+                    return
+                try:
+                    if route.path == "/api/read-only-ai-ask-history" and not route.query:
+                        self._send(200, on_demand_ai.recent())
+                    elif route.path == "/api/read-only-ai-ask-receipt":
+                        args = parse_qs(route.query, keep_blank_values=True)
+                        if set(args) != {"request_id"} or len(args["request_id"]) != 1:
+                            self._send(422, {"error": "invalid_remote_ask_query"})
+                        else:
+                            self._send(200, on_demand_ai.receipt(args["request_id"][0]))
+                    else:
+                        self._send(422, {"error": "invalid_remote_ask_query"})
+                except OnDemandRemoteAIError as exc:
+                    self._send(exc.status, {"error": str(exc)})
+                except (sqlite3.Error, OSError):
+                    self._send(503, {"error": "remote_ask_storage_unavailable"})
+                return
             if route.path == "/api/read-only-ai-safety":
                 if route.query:
                     self._send(422, {"error": "invalid_ai_safety_query"})
@@ -758,6 +783,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-plan-export",
                                  "/api/local-agent-action-preview",
                                  "/api/local-agent-action-commit",
+                                 "/api/read-only-ai-ask",
                                  "/api/read-only-ai-safety-acknowledge",
                                  "/api/read-only-ai-schedule-create",
                                  "/api/read-only-ai-schedule-pause",
@@ -810,6 +836,53 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path == "/api/read-only-ai-ask":
+                if on_demand_ai is None:
+                    self._send(403, {"error": "on_demand_remote_ai_disabled"})
+                    return
+                action = "ON_DEMAND_REMOTE_AI"
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                if (type(data) is not dict
+                        or set(data) != {"request_id", "model", "prompt",
+                                        "paid_api_consent", "current_password"}
+                        or type(data["current_password"]) is not str):
+                    self._audit_event(action, "DENIED")
+                    self._send(422, {"error": "invalid_remote_ask_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action, "DENIED")
+                    self._send(403, {"error": "real_owner_required"})
+                    return
+                checked = operator_auth.confirm_current_password(data["current_password"])
+                if checked != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(checked, {"error": (
+                        "operator_restart_required" if checked == 503 else
+                        "operator_login_locked" if checked == 429 else
+                        "invalid_operator_credentials")})
+                    return
+                request = {k: v for k,v in data.items() if k != "current_password"}
+                try:
+                    result = on_demand_ai.run(request)
+                except OnDemandRemoteAIError as exc:
+                    outcome = ("UNCERTAIN" if "uncertain" in str(exc)
+                               or "check_receipt" in str(exc)
+                               else "DENIED" if exc.status in (403, 409, 422, 423, 429)
+                               else "FAILED")
+                    self._audit_event(action, outcome)
+                    self._send(exc.status, {"error": str(exc)})
+                    return
+                except (sqlite3.Error, OSError):
+                    self._audit_event(action, "UNCERTAIN")
+                    self._send(503, {"error": "remote_ask_storage_uncertain_check_receipt"})
+                    return
+                if not self._audit_event(action, "SUCCESS"):
+                    self._send(503, {"error": "remote_ask_audit_uncertain_check_receipt"})
+                else:
+                    self._send(200, result)
                 return
             if self.path == "/api/read-only-ai-safety-acknowledge":
                 if scheduled_ai is None:
@@ -2295,6 +2368,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                     if (enable_local_agent or enable_scheduled_openai) else None)
     scheduler = None
     scheduled_ai = None
+    on_demand_ai = None
     outbound = None
     autopilot = None
     managed_autopilot = None
@@ -2340,6 +2414,9 @@ def start_local_server(port=8765, enable_local_agent=False,
                 home / "readonly-ai-schedules.sqlite3",
                 remote_runner=openai_runner,
                 local_enabled=enable_local_agent)
+            if openai_runner is not None:
+                on_demand_ai = LocalOnDemandRemoteAI(
+                    home / "on-demand-remote-ai.sqlite3", runner=openai_runner)
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -2379,6 +2456,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_plan_store=plan_store,
                            local_scheduler=scheduler,
                            scheduled_ai=scheduled_ai,
+                           on_demand_ai=on_demand_ai,
                            outbound_webhook=outbound,
                            scheduled_autopilot=autopilot,
                            managed_connectors=managed,
@@ -2413,6 +2491,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     finally:
         if scheduled_ai is not None:
             scheduled_ai.close()
+        if on_demand_ai is not None:
+            on_demand_ai.close()
         if scheduler is not None:
             scheduler.close()
         if autopilot is not None:
