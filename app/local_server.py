@@ -2659,8 +2659,6 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
     if enable_n8n_execution_verify and not enable_encrypted_managed_webhooks:
         raise ValueError("n8n_execution_verify_requires_encrypted_managed_webhooks")
-    if enable_n8n_execution_verify and not (enable_agent_plans or enable_scheduled_openai):
-        raise ValueError("n8n_execution_verify_requires_agent_plan_store")
     if enable_managed_webhooks and enable_encrypted_managed_webhooks:
         raise ValueError("select_only_one_managed_connector_storage_mode")
     if enable_agent_memory and not enable_local_agent:
@@ -2694,7 +2692,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
-    if enable_agent_plans or enable_scheduled_openai:
+    if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None
@@ -2951,7 +2949,7 @@ def main(argv=None):
     parser.add_argument("--enable-hn-story-read", action="store_true",
                         help="Opt in to per-story owner-approved public Hacker News story/job thread reads (max 2 comments).")
     parser.add_argument("--enable-n8n-execution-verify", action="store_true",
-                        help="Explicitly opt into an owner-clicked GET-only official n8n execution check; requires encrypted managed webhooks, agent plan store, and external AAS_N8N_API_KEY/origin/workflow/node configuration.")
+                        help="Explicitly opt into owner-clicked GET-only official n8n execution checks; reuses existing private plan store without enabling OpenAI or Ollama. Requires encrypted managed webhooks and externally provisioned n8n API config.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
                         help="Explicitly enable bounded owner-approved schedules for encrypted managed HTTPS connectors; requires --enable-encrypted-managed-webhooks.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -2973,8 +2971,6 @@ def main(argv=None):
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
     if args.enable_n8n_execution_verify and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-n8n-execution-verify requires --enable-encrypted-managed-webhooks")
-    if args.enable_n8n_execution_verify and not (args.enable_agent_plans or args.enable_scheduled_openai):
-        parser.error("--enable-n8n-execution-verify requires --enable-agent-plans or --enable-scheduled-openai")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
         parser.error("choose encrypted or legacy plaintext managed-webhooks, not both")
     if args.enable_agent_memory and not args.enable_local_agent:
