@@ -449,10 +449,13 @@ async function loadCapabilities(){
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
   chatEnabled=enabled;planningEnabled=!!info.planning;
-  $("model-badge").textContent=enabled?"Ollama optional":"AI disabled in server";
+  $("model-badge").textContent=enabled?"Ollama optional":
+    (info.remote_scheduled_ai?"Scheduled OpenAI enabled":"AI disabled in server");
   $("scope").textContent=enabled?
    "Live local AI is enabled. Plans use a strict tool allowlist and explicit review. Real email sending, arbitrary websites, CRM mutation and shell execution are not enabled.":
-   "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.";
+   (info.remote_scheduled_ai?
+    "Cloud-only scheduled OpenAI tasks are available in section 12 after owner approval. Interactive Ollama chat and local model listing are disabled; no Ollama installation is required.":
+    "Server is in offline mode. Deterministic workflow features remain available in Advanced workbench; restart with local AI flags to use chat and plans.");
   setBusy(false);
  }catch(error){status("chat-status","Cannot load agent capabilities: "+error.message,true);}
 }
@@ -986,9 +989,9 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
  $("gmail-refresh").addEventListener("click",googleGmailRefresh);
  $("gmail-owner").addEventListener("input",googleGmailControls);
 
-let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false;
+let aiRecurringEnabled=false,aiRecurringBusy=false,aiRemoteEnabled=false,aiRecurringLocalEnabled=false;
 function aiRecurringClear(){
- aiRecurringEnabled=false;aiRemoteEnabled=false;
+ aiRecurringEnabled=false;aiRemoteEnabled=false;aiRecurringLocalEnabled=false;
  $("ai-recurring-provider").value="local_ollama";
  $("ai-recurring-provider-consent").checked=false;
  aiProviderRender();
@@ -1002,6 +1005,7 @@ function aiRecurringControls(){
  $("ai-recurring-create").disabled=!csrf||busy||aiRecurringBusy||!aiRecurringEnabled||
    !$("ai-recurring-owner").value||!$("ai-recurring-prompt").value.trim()||
    !$("ai-recurring-model").value.trim()||
+   ($("ai-recurring-provider").value==="local_ollama"&&!aiRecurringLocalEnabled)||
    ($("ai-recurring-provider").value==="openai_responses"&&
     (!aiRemoteEnabled||!$("ai-recurring-provider-consent").checked));
  $("ai-recurring-refresh").disabled=!csrf||busy||aiRecurringBusy;
@@ -1046,13 +1050,19 @@ async function loadAIRecurring(){
   if(!csrf)return;
   aiRecurringEnabled=!!data.enabled;
   aiRemoteEnabled=!!data.remote_openai_enabled;
-  $("ai-recurring-provider").querySelector('option[value="openai_responses"]').disabled=!aiRemoteEnabled;
-  if(!aiRemoteEnabled&&$("ai-recurring-provider").value==="openai_responses"){
-    $("ai-recurring-provider").value="local_ollama";aiProviderRender();
+  aiRecurringLocalEnabled=!!data.local_ollama_enabled;
+  const providerSelect=$("ai-recurring-provider");
+  providerSelect.querySelector('option[value="local_ollama"]').disabled=!aiRecurringLocalEnabled;
+  providerSelect.querySelector('option[value="openai_responses"]').disabled=!aiRemoteEnabled;
+  if((providerSelect.value==="local_ollama"&&!aiRecurringLocalEnabled)||
+     (providerSelect.value==="openai_responses"&&!aiRemoteEnabled)){
+    providerSelect.value=aiRemoteEnabled?"openai_responses":"local_ollama";
+    $("ai-recurring-provider-consent").checked=false;
+    aiProviderRender();
   }
   $("ai-recurring-badge").textContent=aiRecurringEnabled?
-    (data.worker_running?"Local AI worker running":"Enabled · worker not running"):
-    "Disabled by default · enable local AI and scheduling";
+    (data.worker_running?"Scheduled AI worker running":"Enabled · worker not running"):
+    "Disabled by default · enable an AI scheduler explicitly";
   const list=$("ai-recurring-list");list.replaceChildren();
   const tasks=Array.isArray(data.tasks)?data.tasks:[];
   if(!tasks.length)list.textContent="No bounded AI schedules configured.";
