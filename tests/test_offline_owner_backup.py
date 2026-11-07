@@ -16,11 +16,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import offline_owner_backup as backup
 
+REAL_OFFLINE_GUARD = backup._offline_guard
+
 PASSWORD = "fixture strong passphrase never published in production"
 
 
 class EncryptedOfflineRecoveryTests(unittest.TestCase):
     def setUp(self):
+        try:
+            backup._crypto()
+        except backup.BackupError:
+            self.skipTest("optional pinned cryptography dependency required")
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         # A broad legacy test suite also binds the real Studio port. Only
@@ -154,7 +160,7 @@ class EncryptedOfflineRecoveryTests(unittest.TestCase):
     def test_actual_offline_guard_refuses_busy_port(self):
         # Preserve real production guard; simulate a busy port without
         # contending with unrelated HTTP tests on 127.0.0.1:8765.
-        original = backup._offline_guard
+        original = REAL_OFFLINE_GUARD
         self.guard_patch.stop()
         try:
             with patch.object(backup.socket, "socket") as socket_ctor:
