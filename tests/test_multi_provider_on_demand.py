@@ -429,6 +429,9 @@ class OwnerAuthenticatedProviderHTTP(unittest.TestCase):
         self.assertEqual(self.calls, [])
         info = self.request("GET", "/api/local-agent-capabilities")[1]
         self.assertEqual(info["remote_on_demand_providers"], ["gemini_generate_content"])
+        self.assertFalse(info["remote_model_allowlist_enforced"])
+        self.assertIsNone(info["remote_approved_models"])
+        self.assertEqual(info["remote_daily_attempt_limit"],5)
         self.assertFalse(info["cloud_plan_review"])
         status, receipt = self.request("POST", "/api/read-only-ai-ask", request)
         self.assertEqual(status, 200)
