@@ -182,7 +182,7 @@ class Stage122WitnessTests(unittest.TestCase):
                                   gmail_node_name="Incoming Webhook")
         with self.assertRaisesRegex(N8NGmailOutputError,"pinned_gmail_send_node_required"):
             N8NGmailOutputWitness(self.prior.previous.verifier,self.prior.binding,
-                                  gmail_node_name="../oops")
+                                  gmail_node_name="bad\\nname")
 
     def test_http_auth_csrf_password_consent_one_read_and_history(self):
         with tempfile.TemporaryDirectory() as td:
