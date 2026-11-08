@@ -7,12 +7,14 @@ filesystem journals, SQLite free pages or process memory.
 import argparse
 import getpass
 from pathlib import Path
+from datetime import datetime
 import socket
 import sqlite3
 
 from local_operator_auth import LocalOperatorAuth
 from local_private_sqlite_path import prepare_private_sqlite
-from local_scoped_agent_memory import _text_valid, LocalScopedAgentMemory
+from local_scoped_agent_memory import (_text_valid, _scope, _note_id,
+    HEX32, SOURCE_KINDS, LocalScopedAgentMemory)
 from local_scoped_memory_crypto import ScopedMemoryCipher
 from local_service_credentials import read_runtime_secret
 from local_security_audit import LocalSecurityAudit
@@ -50,6 +52,24 @@ def migrate_encrypted_notes(database, master_key, *, acknowledged=False):
                 raise MigrationBlocked("already_encrypted_or_mixed_database")
             if any(not _text_valid(row[3]) for row in records):
                 raise MigrationBlocked("scoped_memory_invalid_plaintext")
+            # Preflight every source row including authenticated metadata,
+            # BEFORE any potentially irreversible conversion.
+            for project,agent,note,text,rev,gen,kind,label,expiry in records:
+                try:
+                    _scope(project,agent)
+                    _note_id(note)
+                    if (type(rev) is not int or rev < 1
+                            or type(gen) is not str or HEX32.fullmatch(gen) is None
+                            or type(kind) is not str or kind not in SOURCE_KINDS
+                            or type(label) is not str or len(label) > 96
+                            or any(ord(c) < 32 or ord(c) == 127 for c in label)
+                            or type(expiry) is not str):
+                        raise ValueError
+                    expiration=datetime.fromisoformat(expiry)
+                    if expiration.tzinfo is None or expiration.utcoffset() is None:
+                        raise ValueError
+                except (ValueError, TypeError):
+                    raise MigrationBlocked("scoped_memory_invalid_provenance") from None
             for project,agent,note,text,rev,gen,kind,label,expiry in records:
                 envelope = cipher.seal(text,project,agent,note,rev,gen,kind,label,expiry)
                 changed = db.execute("""UPDATE scoped_agent_memory SET text=?
