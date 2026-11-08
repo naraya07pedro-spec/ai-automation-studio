@@ -65,12 +65,14 @@ def _single_to(value):
 class GmailSentEvidence:
     """Uses the EXISTING private handoff SQLite ledger, no independent DB."""
 
-    def __init__(self, n8n_verifier, gmail, *, signed_artifact_binding=None):
+    def __init__(self, n8n_verifier, gmail, *, signed_artifact_binding=None,
+                 official_n8n_output_witness=None):
         if n8n_verifier is None or gmail is None:
             raise GmailSentEvidenceError("n8n_and_gmail_required", 403)
         self.n8n = n8n_verifier
         self.gmail = gmail
         self.signed_artifact_binding = signed_artifact_binding
+        self.official_n8n_output_witness = official_n8n_output_witness
         self.handoff = n8n_verifier.handoff
         self.lock = self.handoff.lock
         self.db = self.handoff.db
@@ -137,6 +139,13 @@ class GmailSentEvidence:
                             plan, message_id, to, subject)
                     except SignedGmailArtifactError as exc:
                         raise GmailSentEvidenceError(str(exc), exc.status) from None
+                if self.official_n8n_output_witness is not None:
+                    from local_n8n_gmail_output_witness import N8NGmailOutputError
+                    try:
+                        self.official_n8n_output_witness.require_match(
+                            plan,message_id)
+                    except N8NGmailOutputError as exc:
+                        raise GmailSentEvidenceError(str(exc),exc.status) from None
                 with self.db:
                     if self.db.execute(
                             "SELECT 1 FROM gmail_sent_evidence WHERE plan_id=?",

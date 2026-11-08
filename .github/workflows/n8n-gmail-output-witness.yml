@@ -1,0 +1,59 @@
+name: Stage 122 official n8n Gmail Send output witness
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_n8n_gmail_output_witness.py'
+      - 'app/local_gmail_sent_evidence.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tools/owner_n8n_gmail_output_acceptance.py'
+      - 'tools/owner_gmail_sent_acceptance.py'
+      - 'tools/owner_live_n8n_acceptance.py'
+      - 'tests/test_n8n_gmail_output_witness.py'
+      - 'docs/N8N_GMAIL_SEND_OUTPUT_WITNESS_V1.md'
+      - '.github/workflows/n8n-gmail-output-witness.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_n8n_gmail_output_witness.py'
+      - 'app/local_gmail_sent_evidence.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tools/owner_n8n_gmail_output_acceptance.py'
+      - 'tools/owner_gmail_sent_acceptance.py'
+      - 'tools/owner_live_n8n_acceptance.py'
+      - 'tests/test_n8n_gmail_output_witness.py'
+      - 'docs/N8N_GMAIL_SEND_OUTPUT_WITNESS_V1.md'
+      - '.github/workflows/n8n-gmail-output-witness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-122-official-output:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned optional cryptography
+        run: python -m pip install -r requirements-vault.txt
+      - name: Test official pinned Gmail node identity, provider read, negative paths and authenticated HTTP
+        run: python -m unittest discover -s tests -p 'test_n8n_gmail_output_witness.py' -v
+      - name: Regression for n8n verification, HMAC, independent Gmail evidence and owner clients
+        run: |
+          python -m unittest discover -s tests -p 'test_n8n_execution_verifier.py' -v
+          python -m unittest discover -s tests -p 'test_signed_gmail_artifact.py' -v
+          python -m unittest discover -s tests -p 'test_gmail_sent_evidence.py' -v
+      - name: Strict Python syntax
+        run: python -m py_compile app/local_n8n_gmail_output_witness.py app/local_gmail_sent_evidence.py app/local_server.py app/local_security_audit.py tools/owner_n8n_gmail_output_acceptance.py tools/owner_gmail_sent_acceptance.py tools/owner_live_n8n_acceptance.py tests/test_n8n_gmail_output_witness.py

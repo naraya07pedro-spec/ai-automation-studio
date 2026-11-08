@@ -59,6 +59,15 @@ class OwnerGmailSentClient(OwnerLiveClient):
                     raise OwnerLiveAcceptanceError("signed_gmail_binding_preflight_required")
             elif caps.get("signed_gmail_artifact_binding_required") is not False:
                 raise OwnerLiveAcceptanceError("gmail_binding_policy_unknown")
+            if caps.get("official_n8n_gmail_output_required") is True:
+                output=self._request("/api/n8n-gmail-output-witness-history")
+                rows=output.get("records")
+                if (type(rows) is not list or
+                        sum(type(x) is dict and x.get("plan_id")==plan_id
+                            and x.get("status")=="PROVIDER_SEND_NODE_ID_CORRELATED"
+                            for x in rows)!=1):
+                    raise OwnerLiveAcceptanceError(
+                        "official_n8n_gmail_output_witness_required")
             previous=self._request("/api/gmail-sent-evidence-history")
             if type(previous.get("records")) is not list:
                 raise OwnerLiveAcceptanceError("gmail_history_missing")
