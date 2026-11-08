@@ -1579,7 +1579,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     (creating and (
                         not {"goal", "model"}.issubset(set(data))
                         or not set(data).issubset(
-                            {"goal", "model", "memory_ids", "document", "documents", "csv", "agent_id"})
+                            {"goal", "model", "memory_ids", "document", "documents", "csv", "agent_id", "project_id", "scoped_memory_ids"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
@@ -1589,6 +1589,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if creating and "agent_id" in data and agent_profiles is None:
                     self._send(403, {"error": "agent_profiles_disabled"})
                     return
+                if creating and "agent_id" in data and "memory_ids" in data:
+                    # Global legacy memory must NEVER cross into a named Agent.
+                    self._send(422, {"error":"global_memory_not_allowed_for_agent"})
+                    return
+                if creating and ("project_id" in data or "scoped_memory_ids" in data):
+                    if (not {"project_id","scoped_memory_ids","agent_id"}.issubset(data)
+                            or scoped_memory_store is None):
+                        self._send(403 if scoped_memory_store is None else 422,
+                                   {"error": "agent_scoped_memory_disabled"
+                                    if scoped_memory_store is None else
+                                    "invalid_scoped_memory_selection"})
+                        return
                 selected_memory_ids = data.get("memory_ids") if creating else None
                 if creating and "memory_ids" in data:
                     if not valid_selection(selected_memory_ids):
@@ -1713,6 +1725,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 raise PlanError("plan_capacity_reached")
                             kwargs = {}
                             refs = None
+                            scoped_refs = None
                             agent_profile = None
                             if "agent_id" in data:
                                 try:
@@ -1720,6 +1733,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 except AgentProfileError as exc:
                                     raise PlanError(str(exc)) from None
                                 kwargs["agent_context"] = agent_profile["planning"]
+                            if "scoped_memory_ids" in data:
+                                try:
+                                    scoped_context, scoped_refs = scoped_memory_store.select(
+                                        data["project_id"], data["agent_id"],
+                                        data["scoped_memory_ids"])
+                                except ScopedMemoryError as exc:
+                                    raise PlanError(str(exc)) from None
+                                kwargs["memory_context"] = scoped_context
                             if selected_memory_ids is not None:
                                 cards = agent_memory_store.selected_with_revisions(
                                     selected_memory_ids)
@@ -1753,7 +1774,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 csv_snapshot=(data["csv"] if csv_snapshot is not None
                                               else None),
                                 agent_binding=(agent_profile["binding"]
-                                               if agent_profile is not None else None))
+                                               if agent_profile is not None else None),
+                                scoped_memory_refs=scoped_refs)
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
