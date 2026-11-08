@@ -22,6 +22,9 @@ from local_workflow_core import LocalWorkflowCore
 from local_agent_conversation import LocalAgentConversation
 from local_agent_memory import LocalAgentMemory
 from local_agent_task_plans import LocalAgentPlanStore
+from local_agent_profiles import LocalAgentProfiles
+from local_scoped_agent_memory import LocalScopedAgentMemory
+from local_on_demand_remote_ai import LocalOnDemandRemoteAI
 from local_csv_profile import profile_selected_csv
 from local_plan_artifacts import LocalPlanArtifactExporter
 from local_tool_action_gate import LocalCSVProfileActionGate
@@ -67,6 +70,13 @@ def main():
     core = LocalWorkflowCore(":memory:")
     conversation = LocalAgentConversation(":memory:")
     memory_cards = LocalAgentMemory(":memory:")
+    profiles = LocalAgentProfiles(":memory:")
+    scoped_notes = LocalScopedAgentMemory(":memory:")
+    remote_asks = LocalOnDemandRemoteAI(":memory:", runner=lambda prompt, model: {
+        "mode": "REMOTE_OPENAI_READ_ONLY", "answer": "Synthetic cloud response for "+model,
+        "tools_used": [], "external_dispatch_count": 0,
+        "usage": {"input_tokens": 15, "output_tokens": 6}
+    })
     def fixture_github_fetch(repo):
         if repo != "Octocat/Hello-World":
             raise AssertionError("unexpected repository")
@@ -99,16 +109,19 @@ def main():
                                 hn_reader=hn_reader,
                                 issue_analyzer=fixture_issue_analyzer,
                                 memory_store=memory_cards,
+                                agent_profiles=profiles,
+                                scoped_memory_store=scoped_notes,
                                 report_generator=fixture_final_report,
                                 csv_profiler=profile_selected_csv)
     def fixture_planner(goal, model, memory_context=None, document_context=None,
                         document_set_context=None, csv_context=None,
-                        hn_allowed_ids=None):
+                        hn_allowed_ids=None, agent_context=None):
         # The fixture does not run Ollama. It verifies selected cards reach the
         # proposal callback, without allowing a note to select privileged tools.
         if memory_context:
             assert all(set(c)=={"id","text"} for c in memory_context)
-            assert all(c["id"].startswith("fixture_") for c in memory_context)
+            if agent_context is None:
+                assert all(c["id"].startswith("fixture_") for c in memory_context)
         if "hacker news" in goal.lower():
             selected=77712301 if "77712301" in goal else 8863
             assert selected in hn_allowed_ids
@@ -241,6 +254,9 @@ def main():
                        local_agent_runner=fixture_local_agent,
                        agent_conversation=conversation,
                        agent_memory_store=memory_cards,
+                       agent_profiles=profiles,
+                       scoped_memory_store=scoped_notes,
+                       on_demand_ai=remote_asks,
                        local_agent_models=fixture_models,
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
@@ -266,6 +282,9 @@ def main():
         conversation.close()
         memory_cards.close()
         plans.close()
+        profiles.close()
+        scoped_notes.close()
+        remote_asks.close()
         audit.close()
         home.cleanup()
 
