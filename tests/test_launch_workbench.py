@@ -77,6 +77,39 @@ class QuickstartTests(unittest.TestCase):
                 self.assertIn("--enable-gemini-on-demand",flags)
                 self.assertNotIn("--enable-anthropic-on-demand",flags)
 
+    def test_owner_paid_model_allowlist_forwarded_only_on_explicit_provider_launch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=pathlib.Path(tmp)/"operator.json"
+            owner.write_text("synthetic owner marker",encoding="utf-8")
+            with patch.object(quickstart,"_operator_path",return_value=owner), \
+                 patch.object(quickstart,"_port_free",return_value=True), \
+                 patch.object(quickstart,"_serve") as serve:
+                self.assertEqual(quickstart.main(["--mode","cloud-only",
+                    "--enable-gemini-on-demand",
+                    "--allow-remote-model","gemini_generate_content:gemini-2.5-flash",
+                    "--remote-max-daily-attempts","1",
+                    "--no-browser"]),0)
+                flags=serve.call_args.args[0]
+                self.assertIn("--enable-gemini-on-demand",flags)
+                self.assertIn("--allow-remote-model",flags)
+                ix=flags.index("--allow-remote-model")
+                self.assertEqual(flags[ix+1],"gemini_generate_content:gemini-2.5-flash")
+                ix=flags.index("--remote-max-daily-attempts")
+                self.assertEqual(flags[ix+1],"1")
+                self.assertNotIn("--enable-local-agent",flags)
+
+    def test_invalid_paid_policy_flags_rejected_before_server_start(self):
+        with patch.object(quickstart,"_serve") as serve:
+            self.assertEqual(quickstart.main(["--mode","offline",
+                "--allow-remote-model","gemini_generate_content:gemini-2.5-flash",
+                "--no-browser"]),2)
+            self.assertEqual(quickstart.main(["--mode","cloud-only",
+                "--enable-gemini-on-demand","--remote-max-daily-attempts","0",
+                "--no-browser"]),2)
+            self.assertEqual(quickstart.main(["--mode","full",
+                "--remote-max-daily-attempts","2","--no-browser"]),2)
+            serve.assert_not_called()
+
     def test_missing_owner_setup_failure_never_starts_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = pathlib.Path(tmp) / "operator.json"

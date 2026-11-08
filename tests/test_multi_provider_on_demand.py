@@ -287,6 +287,88 @@ class PersistentProviderLedger(unittest.TestCase):
         self.assertEqual(len(self.calls), 5)
 
 
+    def test_owner_allowlist_prevents_any_unreviewed_model_dispatch(self):
+        self.store.close()
+        self.store = LocalOnDemandRemoteAI(
+            self.file, runner=self.openai,
+            additional_runners={"gemini_generate_content":self.gemini},
+            model_allowlist=["gemini_generate_content:gemini-2.5-flash"],
+            daily_attempt_limit=1)
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.assertEqual(self.store.enabled_providers(),["gemini_generate_content"])
+        self.assertEqual(self.store.approved_models(),
+                         [{"provider":"gemini_generate_content",
+                           "model":"gemini-2.5-flash"}])
+        self.assertTrue(self.store.recent()["remote_model_allowlist_enforced"])
+        self.assertEqual(self.store.recent()["maximum_attempts_per_utc_day"],1)
+        for request in [
+            payload("a"*32,"openai_responses","gpt-5"),
+            payload("b"*32,"gemini_generate_content","gemini-2.5-pro"),
+        ]:
+            with self.assertRaisesRegex(OnDemandRemoteAIError,"not_owner_allowlisted"):
+                self.store.run(request)
+        self.assertEqual(self.calls,[])
+        self.assertEqual(self.store.recent()["receipts"],[])
+        self.assertEqual(self.safety.phase(),"IDLE")
+        first=self.store.run(payload("c"*32,"gemini_generate_content","gemini-2.5-flash"))
+        self.assertEqual(first["status"],"COMPLETED")
+        with self.assertRaisesRegex(OnDemandRemoteAIError,"daily_cap_reached"):
+            self.store.run(payload("d"*32,"gemini_generate_content","gemini-2.5-flash"))
+        self.assertEqual(len(self.calls),1)
+        self.store.close()
+        # Omission of CLI policy flags on restart MUST NOT restore unlimited models.
+        self.store=LocalOnDemandRemoteAI(self.file,additional_runners={
+            "gemini_generate_content":self.gemini})
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.assertEqual(self.store.daily_attempt_limit,1)
+        self.assertEqual(self.store.approved_models(),[{
+            "provider":"gemini_generate_content","model":"gemini-2.5-flash"}])
+        with self.assertRaisesRegex(OnDemandRemoteAIError,"daily_cap_reached"):
+            self.store.run(payload("e"*32,"gemini_generate_content","gemini-2.5-flash"))
+        self.assertEqual(len(self.calls),1)
+
+    def test_restart_will_not_silently_change_saved_models_or_daily_cap(self):
+        self.store.close()
+        self.store=LocalOnDemandRemoteAI(self.file,runner=self.openai,
+            model_allowlist=["openai_responses:gpt-5"],daily_attempt_limit=2)
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.store.close()
+        for extra in [
+            {"runner":self.openai,"model_allowlist":["openai_responses:gpt-4"]},
+            {"runner":self.openai,"model_allowlist":["openai_responses:gpt-5"],
+             "daily_attempt_limit":3},
+        ]:
+            with self.subTest(extra=extra),self.assertRaisesRegex(
+                   OnDemandRemoteAIError,"offline_owner_review"):
+                LocalOnDemandRemoteAI(self.file,**extra)
+        # Match/no-op flags, or no flags, honor identical persisted policy.
+        self.store=LocalOnDemandRemoteAI(self.file,runner=self.openai)
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.assertEqual(self.store.daily_attempt_limit,2)
+        self.assertEqual(self.store.approved_models(),[{
+            "provider":"openai_responses","model":"gpt-5"}])
+
+    def test_invalid_model_policy_configuration_fails_closed(self):
+        for allowlist in [
+            [],["auto:gpt-5"],["gemini_generate_content:a/b"],
+            ["anthropic_messages:a:b"],["openai_responses:gpt-5"]*2,
+            ["openai_responses:gpt-5","openai_responses:gpt-5"],
+            [True],
+        ]:
+            with self.subTest(allowlist=allowlist),self.assertRaisesRegex(
+                    OnDemandRemoteAIError,"invalid_remote_model_allowlist"):
+                LocalOnDemandRemoteAI(":memory:",runner=self.openai,
+                                     model_allowlist=allowlist)
+        for cap in [0,-1,6,True,1.25,"2"]:
+            with self.subTest(cap=cap),self.assertRaisesRegex(
+                    OnDemandRemoteAIError,"invalid_remote_daily_attempt_limit"):
+                LocalOnDemandRemoteAI(":memory:",runner=self.openai,
+                                     daily_attempt_limit=cap)
+        with self.assertRaisesRegex(OnDemandRemoteAIError,"no_enabled_provider"):
+            LocalOnDemandRemoteAI(":memory:",runner=self.openai,
+                 model_allowlist=["gemini_generate_content:gemini-2.5-flash"])
+
+
 class OwnerAuthenticatedProviderHTTP(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -347,6 +429,9 @@ class OwnerAuthenticatedProviderHTTP(unittest.TestCase):
         self.assertEqual(self.calls, [])
         info = self.request("GET", "/api/local-agent-capabilities")[1]
         self.assertEqual(info["remote_on_demand_providers"], ["gemini_generate_content"])
+        self.assertFalse(info["remote_model_allowlist_enforced"])
+        self.assertIsNone(info["remote_approved_models"])
+        self.assertEqual(info["remote_daily_attempt_limit"],5)
         self.assertFalse(info["cloud_plan_review"])
         status, receipt = self.request("POST", "/api/read-only-ai-ask", request)
         self.assertEqual(status, 200)
