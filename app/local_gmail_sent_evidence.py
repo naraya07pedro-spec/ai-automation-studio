@@ -91,15 +91,18 @@ class GmailSentEvidence:
 
     def _authorized_chain(self, plan):
         row = self.db.execute("""SELECT p.delivery_id,p.execution_id,
-                 p.claimed_outcome,n.delivery_id,n.execution_id,n.status,
-                 n.provider_finished,n.inbound_delivery_correlated
+                 p.claimed_outcome,p.connector_id,p.signed_message_sha256,
+                 n.delivery_id,n.execution_id,n.connector_id,
+                 n.signed_message_sha256,n.status,n.provider_finished,
+                 n.inbound_delivery_correlated
             FROM signed_manual_handoff_outcomes p
             JOIN n8n_provider_execution_checks n ON n.plan_id=p.plan_id
             WHERE p.plan_id=?""", (plan,)).fetchone()
-        if (row is None or row[2] != "COMPLETED" or row[0] != row[3]
-                or row[1] != row[4]
-                or row[5] != "EXECUTION_SUCCESS_CORRELATED"
-                or row[6] != 1 or row[7] != 1):
+        if (row is None or row[2] != "COMPLETED" or row[0] != row[5]
+                or row[1] != row[6] or row[3] != row[7]
+                or row[4] != row[8]
+                or row[9] != "EXECUTION_SUCCESS_CORRELATED"
+                or row[10] != 1 or row[11] != 1):
             raise GmailSentEvidenceError("verified_n8n_success_chain_required")
         return _hash(row[1] + ":" + row[0])
 
