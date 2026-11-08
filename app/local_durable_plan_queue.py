@@ -194,6 +194,12 @@ class LocalDurablePlanQueue:
         except sqlite3.Error:
             raise DurableQueueError("job_storage_unavailable", 503) from None
 
+    def _check_delegation(self, delegation, nodes):
+        try:
+            return validate_delegation(delegation, nodes, self.plans)
+        except DelegationError as exc:
+            raise DurableQueueError(str(exc), exc.status) from None
+
     def _event(self, job_id, plan_id, event, evidence):
         if self.db.execute("SELECT COUNT(*) FROM durable_job_events").fetchone()[0] >= MAX_EVENTS:
             raise DurableQueueError("job_history_capacity_reached", 409)
@@ -324,7 +330,7 @@ class LocalDurablePlanQueue:
                 p = self._plan(n["plan_id"])
                 checked.append((n, _fingerprint(p), _security_fingerprint(p)))
             if delegation is not None:
-                validate_delegation(delegation, nodes, self.plans)
+                self._check_delegation(delegation, nodes)
             try:
                 with self.db:
                     if self.db.execute("SELECT count(*) FROM durable_jobs").fetchone()[0] >= MAX_JOBS:
@@ -368,7 +374,7 @@ class LocalDurablePlanQueue:
                         raise DurableQueueError("job_step_in_flight", 409)
                     if action in ("arm","resume"):
                         if old["delegation"] is not None:
-                            validate_delegation(old["delegation"],old["nodes"],self.plans)
+                            self._check_delegation(old["delegation"],old["nodes"])
                         for node in old["nodes"]:
                             if node["status"]=="COMPLETED":
                                 continue
@@ -441,7 +447,7 @@ class LocalDurablePlanQueue:
                         job,node = self._choose(job_id)
                         jid,pid = job["job_id"],node["plan_id"]
                         if job["delegation"] is not None:
-                            validate_delegation(job["delegation"],job["nodes"],self.plans)
+                            self._check_delegation(job["delegation"],job["nodes"])
                         self._plan(pid,index=node["next_index"],
                                    original=node["plan_sha256"],
                                    security=node["security_sha256"])
