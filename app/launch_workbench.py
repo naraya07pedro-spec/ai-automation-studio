@@ -99,13 +99,13 @@ def _serve(flags):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full", "cloud-only"), default="full",
-                        help="offline=rules only; local-ai=Ollama; full=Ollama + opt-in source reads; cloud-only=OpenAI recurring text AI without Ollama")
+                        help="offline=rules only; local-ai=Ollama; full=Ollama + opt-in source reads; cloud-only=explicitly enabled paid text provider(s), no Ollama")
     parser.add_argument("--enable-anthropic-on-demand", action="store_true",
                         help="Opt in to billed one-shot Anthropic Messages; requires AAS_ANTHROPIC_API_KEY at private process startup.")
     parser.add_argument("--enable-gemini-on-demand", action="store_true",
                         help="Opt in to billed one-shot Gemini generateContent; requires AAS_GEMINI_API_KEY at private process startup.")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
-                        help="Explicitly opt in to paid OpenAI Responses API scheduled inference; requires --enable-scheduled-local-ai and a separate API key.")
+                        help="Explicitly opt in to billed OpenAI Responses text; cloud-only on-demand is supported, recurring local AI needs its own flag and private API key.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
                         help="Owner-armed recurring local AI inference, requires local-ai or full profile.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -190,7 +190,7 @@ def main(argv=None):
         print("Local AI needs independently installed Ollama and an installed model.")
         print("No automatic model download, compatibility test, or inference is started.")
     if args.mode == "cloud-only":
-        print("Cloud-only mode: no local Ollama model or interactive Ollama chat required. OpenAI API is owner-approved and separately billed.")
+        print("Cloud-only mode: no local Ollama required; configured paid provider text calls require one-request consent, owner password and independent billing.")
     if args.enable_history:
         print("WARNING: local chat history is saved as plaintext.")
     if args.mode == "full":
