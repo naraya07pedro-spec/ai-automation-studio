@@ -147,6 +147,27 @@ class Stage121SignedBindingTests(unittest.TestCase):
             self.binding.import_claim(self.claim())
         self.assertEqual(self.gmail.calls,[])
 
+    def test_n8n_provider_pin_and_success_metadata_swaps_block_import(self):
+        values=[("provider_workflow_id","different-workflow"),
+                ("pinned_node_sha256","0"*64),
+                ("provider_hostname","attacker.example.org"),
+                ("provider_execution_status","error")]
+        for field, tampered in values:
+            original=self.db.execute(
+                "SELECT "+field+" FROM n8n_provider_execution_checks WHERE plan_id=?",
+                (PLAN,)).fetchone()[0]
+            self.db.execute(
+                "UPDATE n8n_provider_execution_checks SET "+field+"=? WHERE plan_id=?",
+                (tampered,PLAN))
+            with self.subTest(field=field), self.assertRaisesRegex(
+                    SignedGmailArtifactError,"verified_n8n_chain_required"):
+                self.binding.import_claim(self.claim())
+            self.db.execute(
+                "UPDATE n8n_provider_execution_checks SET "+field+"=? WHERE plan_id=?",
+                (original,PLAN))
+        self.assertEqual(self.binding.history()["records"],[])
+        self.assertEqual(self.gmail.calls,[])
+
     def test_signature_scope_domain_and_immutable_reimport(self):
         data=self.claim()
         self.assertEqual(self.binding.import_claim(data)["result"],"RECORDED")
