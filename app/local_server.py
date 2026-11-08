@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import sqlite3
@@ -355,7 +356,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "signed_gmail_artifact_binding_required": signed_gmail_binding is not None,
                                   "official_n8n_gmail_output_required": n8n_gmail_output_witness is not None,
                                   "pinned_n8n_gmail_node_sha256": (
-                                      __import__("hashlib").sha256(n8n_gmail_output_witness.node_name.encode()).hexdigest()
+                                      hashlib.sha256(n8n_gmail_output_witness.node_name.encode()).hexdigest()
                                       if n8n_gmail_output_witness is not None else None),
                                   "n8n_execution_hostname": (n8n_execution_verifier.host if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
