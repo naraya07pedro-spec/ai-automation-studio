@@ -52,6 +52,22 @@ class AgentWorkspaceSurfaceTests(unittest.TestCase):
         self.assertEqual(self.get("/api/local-agent-plans")[0], 401)
         self.assertEqual(self.get("/api/agent-scoped-memory?project_id=sample&agent_id=agent")[0], 401)
 
+    def test_delegations_page_is_accessible_only_as_a_login_shell(self):
+        code, headers, html = self.get("/delegations")
+        self.assertEqual(code, 200)
+        self.assertIn("text/html", headers.get("Content-Type", ""))
+        self.assertIn("<title>Delegations | Personal AI Harness</title>", html)
+        self.assertIn('id="login-form"', html)
+        self.assertIn('id="handoff-preview-form"', html)
+        self.assertIn('id="reconcile-plan"', html)
+        self.assertIn("/api/durable-job-create", html)
+        self.assertIn("/api/agent-typed-handoff-preview", html)
+        self.assertIn("current_password", html)
+        self.assertNotIn("innerHTML", html)
+        self.assertNotIn("localStorage", html)
+        self.assertEqual(self.get("/api/durable-jobs")[0], 401)
+        self.assertEqual(self.get("/api/agent-typed-handoff-receipt?preview_id="+"a"*32)[0], 401)
+
     def test_existing_mission_unchanged_and_no_unreviewed_action(self):
         old_status, _, old_html = self.get("/mission")
         self.assertEqual(old_status, 200)
