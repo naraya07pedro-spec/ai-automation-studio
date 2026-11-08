@@ -15,6 +15,7 @@ import stat
 import threading
 
 from local_model_safety import ModelSafetyError
+from multi_provider_readonly import ANTHROPIC_MODEL, GEMINI_MODEL
 from local_ollama_agent import MAX_PROMPT
 from openai_readonly_responses import valid_remote_model_name, RemoteInferenceError, MAX_OUTPUT_TOKENS
 
@@ -103,7 +104,6 @@ class LocalOnDemandRemoteAI:
                 or set(request) not in (
                     {"request_id", "model", "prompt", "paid_api_consent"},
                     {"request_id", "model", "prompt", "paid_api_consent", "provider"})):
-
             raise OnDemandRemoteAIError("invalid_remote_ask_fields")
         if request.get("provider", "openai_responses") not in (
                 "openai_responses", "anthropic_messages", "gemini_generate_content"):
@@ -112,7 +112,11 @@ class LocalOnDemandRemoteAI:
             raise OnDemandRemoteAIError("paid_api_consent_required", 403)
         if type(request["request_id"]) is not str or not REQUEST_ID.fullmatch(request["request_id"]):
             raise OnDemandRemoteAIError("invalid_remote_ask_id")
-        if not valid_remote_model_name(request["model"]):
+        if (not valid_remote_model_name(request["model"])
+                or (request.get("provider") == "anthropic_messages"
+                    and ANTHROPIC_MODEL.fullmatch(request["model"]) is None)
+                or (request.get("provider") == "gemini_generate_content"
+                    and GEMINI_MODEL.fullmatch(request["model"]) is None)):
             raise OnDemandRemoteAIError("invalid_remote_model_name")
         prompt = request["prompt"]
         if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
