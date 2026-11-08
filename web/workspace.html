@@ -139,7 +139,12 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
       <hr class="divider">
       <label for="project">Project scope (optional)</label><input id="project" maxlength="60" value="personal_workspace" autocomplete="off" spellcheck="false">
       <p class="hint">Project scope is used only when selecting scoped memory notes for a named Agent.</p>
-      <div class="mem-tools"><label style="margin:0">Context notes <span class="quiet">(select up to 3)</span></label><button id="new-note" class="note-control" type="button" disabled>New note</button></div><div id="memories" class="state">Choose an Agent to inspect its notes.</div><p class="hint" id="scoped-storage-hint">Agent/project notes require a private local store. At-rest encryption depends on server mode. Editing or deleting a note invalidates plans bound to its previous revision.</p>
+      <div class="mem-tools"><label style="margin:0">Context notes <span class="quiet">(select up to 3)</span></label><button id="new-note" class="note-control" type="button" disabled>New note</button></div><div id="memories" class="state">Choose an Agent to inspect its notes.</div>
+      <div class="mem-tools" id="purge-controls" hidden>
+       <label for="purge-owner-password" class="hint" style="margin:0">Owner password to purge expired notes in this scope</label>
+       <input id="purge-owner-password" type="password" autocomplete="off" placeholder="Current password" style="max-width:190px">
+       <button id="purge-expired" class="note-control" type="button">Purge expired notes</button>
+      </div><p class="hint" id="scoped-storage-hint">Agent/project notes require a private local store. At-rest encryption depends on server mode. Editing or deleting a note invalidates plans bound to its previous revision.</p>
       <div class="capability" id="capabilities">Checking real capabilities. No simulated providers, connectors or background agents.</div>
      </aside>
     </div>
@@ -193,7 +198,7 @@ function addMessage(author,message){
 function lock(message){
  csrf="";authEpoch++;memoryEpoch++;agents=[];currentPlan=null;caps={};memoryNotes=[];memoryScope="";editingAgent=null;editingNote=null;scopeEditing=null;cloudAttemptId="";
  for(const id of ["agent-dialog","note-dialog"]){const d=el(id);if(d.open)d.close()}
- for(const id of ["cloud-owner","new-password","note-password","cloud-receipt-id"]){el(id).value=""}
+ for(const id of ["cloud-owner","new-password","note-password","purge-owner-password","cloud-receipt-id"]){el(id).value=""}
  el("cloud-consent").checked=false;el("cloud-result").textContent="No cloud request in this session.";el("cloud-provider").replaceChildren();
  el("gate").hidden=false;el("logout").hidden=true;
  el("session-label").textContent="Locked";el("session-dot").classList.remove("good");
@@ -324,7 +329,7 @@ async function loadMemories(){
  const wrap=el("memories"),aid=el("agent-select").value,project=el("project").value.trim();
  const key=aid+"|"+project,epoch=++memoryEpoch;
  const prior=memoryScope===key?new Set([...wrap.querySelectorAll("input:checked")].map(x=>x.value)):new Set();
- memoryScope=key;memoryNotes=[];wrap.replaceChildren();refreshComposer();
+ memoryScope=key;memoryNotes=[];wrap.replaceChildren();el("purge-controls").hidden=true;el("purge-owner-password").value="";refreshComposer();
  if(!caps.scoped_agent_memory){wrap.textContent="Scoped memory is not enabled here.";return}
  if(!aid){wrap.textContent="Select an Agent to see its project notes.";return}
  if(!/^[a-z][a-z0-9_-]{2,39}$/.test(project)){wrap.textContent="Use a lowercase project ID, 3–40 characters.";return}
@@ -334,6 +339,7 @@ async function loadMemories(){
   if(!csrf||epoch!==memoryEpoch||key!==el("agent-select").value+"|"+el("project").value.trim())return;
   memoryNotes=Array.isArray(d.notes)?d.notes:[];
   wrap.replaceChildren();
+  el("purge-controls").hidden=!memoryNotes.some(n=>n.expired);
   if(!memoryNotes.length){wrap.textContent="No notes in this scope. Create a note or continue without memory.";return}
   for(const note of memoryNotes){
    const row=document.createElement("div");row.className="note-row";
@@ -578,6 +584,30 @@ el("disable-agent").addEventListener("click",async()=>{
   setStatus("Agent disabled. Existing bound plans cannot execute.");
  }catch(error){el("agent-save-status").textContent="Disable not confirmed: "+error.message}
  finally{el("new-password").value="";el("disable-agent").disabled=false;busy=false;refreshComposer()}
+});
+el("purge-expired").addEventListener("click",async()=>{
+ if(!csrf||busy||!caps.scoped_agent_memory)return;
+ const project=el("project").value.trim(),agent=el("agent-select").value;
+ const password=el("purge-owner-password").value;
+ if(!agent||!/^[a-z][a-z0-9_-]{2,39}$/.test(project)||!password){
+  setStatus("Select a valid Agent/project scope and enter current owner password.",true);return;
+ }
+ const expired=memoryNotes.filter(x=>x.expired);
+ if(!expired.length){setStatus("No known expired notes in this scope.");return}
+ if(!confirm("Permanently remove "+expired.length+" expired LIVE note(s) from "+
+  project+"/"+agent+"?\\n\\nNo active notes will be touched. Historical backups may retain these values."))return;
+ busy=true;refreshComposer();
+ try{
+  const result=await api("/api/agent-scoped-memory-purge-expired",{
+   project_id:project,agent_id:agent,
+   confirm_expired_purge:"PURGE_EXPIRED_SCOPED_NOTES",
+   current_password:password});
+  if(el("project").value.trim()===project&&el("agent-select").value===agent){
+   await loadMemories();
+   setStatus(result.deleted_count+" expired notes removed from live scoped ledger. Backup copies may remain.");
+  }
+ }catch(e){setStatus("Purge result not confirmed: "+e.message+". Inspect the scope before retry.",true)}
+ finally{el("purge-owner-password").value="";busy=false;refreshComposer()}
 });
 el("new-note").addEventListener("click",()=>openNoteEditor());
 el("close-note").addEventListener("click",()=>el("note-dialog").close());
