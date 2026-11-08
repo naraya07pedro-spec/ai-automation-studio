@@ -1,0 +1,53 @@
+name: Stage 128 scoped Agent memory enforcement
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_scoped_agent_memory.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_scoped_agent_memory.py'
+      - 'docs/SCOPED_AGENT_MEMORY_V1.md'
+      - '.github/workflows/scoped-agent-memory.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_scoped_agent_memory.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_scoped_agent_memory.py'
+      - 'docs/SCOPED_AGENT_MEMORY_V1.md'
+      - '.github/workflows/scoped-agent-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Syntax-verify new backend and tests
+        run: python -m py_compile app/local_scoped_agent_memory.py app/local_agent_task_plans.py app/local_server.py app/local_security_audit.py tests/test_scoped_agent_memory.py
+      - name: Scoped memory SQLite and actual localhost API integration
+        run: python -m unittest discover -s tests -p 'test_scoped_agent_memory.py' -v
+      - name: Legacy Agent Profiles, memory cards and durable plan regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_profiles.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_memory.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_memory_plans.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans_http.py' -v
+          python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
