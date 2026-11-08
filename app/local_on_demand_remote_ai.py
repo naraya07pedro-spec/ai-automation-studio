@@ -1,4 +1,4 @@
-"""One-shot paid OpenAI text inference through the private owner workbench.
+"""One-shot owner-selected paid cloud text inference through the private workbench.
 
 Explicit per-request paid consent. Durable request-idempotency ledger and the
 same model-safety gate used by scheduled AI. No model tools, retries, external
@@ -15,6 +15,7 @@ import stat
 import threading
 
 from local_model_safety import ModelSafetyError
+from multi_provider_readonly import ANTHROPIC_MODEL, GEMINI_MODEL
 from local_ollama_agent import MAX_PROMPT
 from openai_readonly_responses import valid_remote_model_name, RemoteInferenceError, MAX_OUTPUT_TOKENS
 
@@ -31,10 +32,17 @@ class OnDemandRemoteAIError(RuntimeError):
 
 
 class LocalOnDemandRemoteAI:
-    def __init__(self, database, *, runner):
-        if not callable(runner):
+    def __init__(self, database, *, runner=None, additional_runners=None):
+        if additional_runners is None:
+            additional_runners = {}
+        if (type(additional_runners) is not dict
+                or any(k not in ("anthropic_messages", "gemini_generate_content")
+                       or not callable(v) for k, v in additional_runners.items())
+                or (runner is not None and not callable(runner))
+                or (runner is None and not additional_runners)):
             raise OnDemandRemoteAIError("remote_runner_required", 503)
         self.runner = runner
+        self.additional_runners = dict(additional_runners)
         self.model_safety = None
         self.agent_gate = None
         self.agent_state_lock = None
@@ -68,8 +76,15 @@ class LocalOnDemandRemoteAI:
                 answer TEXT,
                 usage_json TEXT,
                 created_utc TEXT NOT NULL,
-                finished_utc TEXT
+                finished_utc TEXT,
+                provider TEXT NOT NULL DEFAULT 'openai_responses'
             )""")
+            cols = {x[1] for x in self.db.execute(
+                "PRAGMA table_info(remote_asks)").fetchall()}
+            if "provider" not in cols:
+                # Historical rows remain OpenAI, never relabel them as Gemini.
+                self.db.execute("""ALTER TABLE remote_asks
+                    ADD COLUMN provider TEXT NOT NULL DEFAULT 'openai_responses'""")
             # A process crash after a paid POST may have reached the provider.
             # Neither a restart nor a fresh HTTP session may replay that id.
             self.db.execute("""UPDATE remote_asks
@@ -86,13 +101,22 @@ class LocalOnDemandRemoteAI:
     @staticmethod
     def validate(request):
         if (type(request) is not dict
-                or set(request) != {"request_id", "model", "prompt", "paid_api_consent"}):
+                or set(request) not in (
+                    {"request_id", "model", "prompt", "paid_api_consent"},
+                    {"request_id", "model", "prompt", "paid_api_consent", "provider"})):
             raise OnDemandRemoteAIError("invalid_remote_ask_fields")
+        if request.get("provider", "openai_responses") not in (
+                "openai_responses", "anthropic_messages", "gemini_generate_content"):
+            raise OnDemandRemoteAIError("invalid_remote_provider")
         if request["paid_api_consent"] is not True:
             raise OnDemandRemoteAIError("paid_api_consent_required", 403)
         if type(request["request_id"]) is not str or not REQUEST_ID.fullmatch(request["request_id"]):
             raise OnDemandRemoteAIError("invalid_remote_ask_id")
-        if not valid_remote_model_name(request["model"]):
+        if (not valid_remote_model_name(request["model"])
+                or (request.get("provider") == "anthropic_messages"
+                    and ANTHROPIC_MODEL.fullmatch(request["model"]) is None)
+                or (request.get("provider") == "gemini_generate_content"
+                    and GEMINI_MODEL.fullmatch(request["model"]) is None)):
             raise OnDemandRemoteAIError("invalid_remote_model_name")
         prompt = request["prompt"]
         if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
@@ -104,10 +128,11 @@ class LocalOnDemandRemoteAI:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def _public_receipt(self, row):
-        rid, model, status, answer, usage_json, created, finished = row
+        rid, model, status, answer, usage_json, created, finished, provider = row
         return {
             "request_id": rid,
             "model": model,
+            "provider": provider,
             "status": status,
             "answer": answer if status == "COMPLETED" else None,
             "usage_tokens": json.loads(usage_json) if usage_json else None,
@@ -124,7 +149,7 @@ class LocalOnDemandRemoteAI:
         with self.lock:
             row = self.db.execute(
                 """SELECT request_id,model,status,answer,usage_json,
-                          created_utc,finished_utc
+                          created_utc,finished_utc,provider
                    FROM remote_asks WHERE request_id=?""",
                 (request_id,)).fetchone()
         if row is None:
@@ -147,12 +172,13 @@ class LocalOnDemandRemoteAI:
         digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         with self.lock:
             row = self.db.execute(
-                """SELECT prompt_sha256,model FROM remote_asks
+                """SELECT prompt_sha256,model,provider FROM remote_asks
                    WHERE request_id=?""", (request_id,)
             ).fetchone()
             if row is None:
                 raise OnDemandRemoteAIError("remote_ask_not_found", 404)
-            if row[1] != model or not compare_digest(row[0], digest):
+            if (row[1] != model or row[2] != "openai_responses"
+                    or not compare_digest(row[0], digest)):
                 raise OnDemandRemoteAIError("remote_ask_binding_mismatch", 409)
             # Keep the database lock until the entire receipt is read.
             return self.receipt(request_id)
@@ -161,11 +187,12 @@ class LocalOnDemandRemoteAI:
         with self.lock:
             rows = self.db.execute(
                 """SELECT request_id,model,status,answer,usage_json,
-                          created_utc,finished_utc
+                          created_utc,finished_utc,provider
                    FROM remote_asks ORDER BY created_utc DESC,request_id DESC LIMIT 15"""
             ).fetchall()
         return {
             "enabled": True,
+            "enabled_providers": self.enabled_providers(),
             "maximum_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
             "maximum_persisted_attempts": MAX_ROWS,
             # Never reveal stored response text in a summary list. An owner
@@ -175,6 +202,10 @@ class LocalOnDemandRemoteAI:
                 for row in rows
             ],
         }
+
+    def enabled_providers(self):
+        return (["openai_responses"] if self.runner is not None else []) + sorted(
+            self.additional_runners)
 
     def _claim(self, request):
         now = self._utcnow()
@@ -194,10 +225,12 @@ class LocalOnDemandRemoteAI:
                     raise OnDemandRemoteAIError("remote_ask_daily_cap_reached", 429)
                 self.db.execute(
                     """INSERT INTO remote_asks(request_id,prompt_sha256,model,
-                       status,created_utc) VALUES(?,?,?,'IN_FLIGHT',?)""",
+                       provider,status,created_utc)
+                       VALUES(?,?,?, ?,'IN_FLIGHT',?)""",
                     (request["request_id"],
                      hashlib.sha256(request["prompt"].encode("utf-8")).hexdigest(),
-                     request["model"], now))
+                     request["model"], request.get("provider", "openai_responses"),
+                     now))
                 self.db.commit()
             except BaseException:
                 self.db.rollback()
@@ -216,9 +249,13 @@ class LocalOnDemandRemoteAI:
                 raise OnDemandRemoteAIError("remote_ask_ledger_uncertain", 503)
 
     @staticmethod
-    def _validate_result(result):
+    def _validate_result(result, provider="openai_responses"):
         if (type(result) is not dict
-                or result.get("mode") != "REMOTE_OPENAI_READ_ONLY"
+                or result.get("mode") != {
+                    "openai_responses": "REMOTE_OPENAI_READ_ONLY",
+                    "anthropic_messages": "REMOTE_ANTHROPIC_READ_ONLY",
+                    "gemini_generate_content": "REMOTE_GEMINI_READ_ONLY",
+                }.get(provider)
                 or result.get("external_dispatch_count") != 0
                 or result.get("tools_used") != []
                 or type(result.get("answer")) is not str
@@ -239,6 +276,11 @@ class LocalOnDemandRemoteAI:
         if self.model_safety is None or self.agent_gate is None:
             raise OnDemandRemoteAIError("model_safety_gate_required", 503)
         rid = request["request_id"]
+        provider = request.get("provider", "openai_responses")
+        runner = (self.runner if provider == "openai_responses"
+                  else self.additional_runners.get(provider))
+        if runner is None:
+            raise OnDemandRemoteAIError("remote_provider_not_enabled", 403)
         # Checking before acquiring the model gate gives duplicate callers a
         # clear receipt lookup path even if the first POST is still running.
         with self.lock:
@@ -272,7 +314,7 @@ class LocalOnDemandRemoteAI:
             try:
                 dispatched = True
                 result = self._validate_result(
-                    self.runner(request["prompt"].strip(), request["model"]))
+                    runner(request["prompt"].strip(), request["model"]), provider)
                 self._finalize(rid, "COMPLETED", result["answer"], result["usage"])
                 completed = True
             except RemoteInferenceError as exc:

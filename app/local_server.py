@@ -32,6 +32,7 @@ from local_n8n_delivery_proof import SignedN8NDeliveryProof, N8NProofError
 from local_recurring_scheduler import LocalRecurringScheduler, ScheduleError
 from local_readonly_agent_scheduler import LocalReadOnlyAgentSchedules, AgentScheduleError
 from openai_readonly_responses import create_openai_runner, RemoteInferenceError
+from multi_provider_readonly import create_anthropic_runner, create_gemini_runner
 from local_operator_auth import LocalOperatorAuth, OperatorConfigurationError
 from local_source_policy import LocalPublicSourcePolicy, SourcePolicyError
 from local_hn_story_policy import HNStoryPolicy, valid_story_id
@@ -153,7 +154,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     if on_demand_ai is not None:
         on_demand_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     cloud_plan_bridge = (CloudPlanBridge(on_demand_ai, local_agent_plan_store)
-                         if on_demand_ai is not None and local_agent_plan_store is not None
+                         if (on_demand_ai is not None and on_demand_ai.runner is not None)
+                         and local_agent_plan_store is not None
                          else None)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
@@ -361,6 +363,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                      scheduled_ai is not None
                                      and scheduled_ai.remote_runner is not None),
                                  "remote_on_demand_ai": on_demand_ai is not None,
+                                 "remote_on_demand_providers": (
+                                     on_demand_ai.enabled_providers()
+                                     if on_demand_ai is not None else []),
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
                                   "signed_handoff_outcome_import": handoff_outcomes is not None,
@@ -1098,8 +1103,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(503, {"error": "security_audit_restart_required"})
                     return
                 if (type(data) is not dict
-                        or set(data) != {"request_id", "model", "prompt",
-                                        "paid_api_consent", "current_password"}
+                        or set(data) not in (
+                            {"request_id", "model", "prompt",
+                             "paid_api_consent", "current_password"},
+                            {"request_id", "model", "prompt",
+                             "paid_api_consent", "current_password", "provider"})
                         or type(data["current_password"]) is not str):
                     self._audit_event(action, "DENIED")
                     self._send(422, {"error": "invalid_remote_ask_fields"})
@@ -2903,6 +2911,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_managed_autopilot=False,
                        enable_scheduled_local_ai=False,
                        enable_scheduled_openai=False,
+                       enable_anthropic_on_demand=False,
+                       enable_gemini_on_demand=False,
                        enable_n8n_execution_verify=False,
                        enable_gmail_sent_evidence=False,
                        enable_signed_gmail_artifact_binding=False,
@@ -2987,7 +2997,9 @@ def start_local_server(port=8765, enable_local_agent=False,
     # The same durable model checkpoint is REQUIRED for remote-only
     # inference: uncertain network/charge outcomes must survive restart.
     model_safety = (LocalModelSafetyState(home / "ollama-safety.sqlite3")
-                    if (enable_local_agent or enable_scheduled_openai) else None)
+                    if (enable_local_agent or enable_scheduled_openai
+                        or enable_anthropic_on_demand or enable_gemini_on_demand)
+                    else None)
     scheduler = None
     scheduled_ai = None
     on_demand_ai = None
@@ -3034,8 +3046,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                 url=destination,
                 secret=read_runtime_secret("AAS_WEBHOOK_SIGNING_SECRET"))
         scheduler = LocalRecurringScheduler(core, home / "recurring-schedules.sqlite3")
+        openai_runner = None
         if enable_scheduled_local_ai or enable_scheduled_openai:
-            openai_runner = None
             if enable_scheduled_openai:
                 # The key is deliberately absent from owner UI and databases.
                 # A separate root-only systemd LoadCredential is required on VPS.
@@ -3045,9 +3057,17 @@ def start_local_server(port=8765, enable_local_agent=False,
                 home / "readonly-ai-schedules.sqlite3",
                 remote_runner=openai_runner,
                 local_enabled=enable_local_agent)
-            if openai_runner is not None:
-                on_demand_ai = LocalOnDemandRemoteAI(
-                    home / "on-demand-remote-ai.sqlite3", runner=openai_runner)
+        additional_runners = {}
+        if enable_anthropic_on_demand:
+            additional_runners["anthropic_messages"] = create_anthropic_runner(
+                read_runtime_secret("AAS_ANTHROPIC_API_KEY"))
+        if enable_gemini_on_demand:
+            additional_runners["gemini_generate_content"] = create_gemini_runner(
+                read_runtime_secret("AAS_GEMINI_API_KEY"))
+        if openai_runner is not None or additional_runners:
+            on_demand_ai = LocalOnDemandRemoteAI(
+                home / "on-demand-remote-ai.sqlite3",
+                runner=openai_runner, additional_runners=additional_runners)
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -3219,6 +3239,10 @@ def main(argv=None):
                        help="Create/rotate a high-entropy offline recovery code.")
     group.add_argument("--recover-owner", action="store_true",
                        help="Use a one-time code to reset lost owner password offline.")
+    parser.add_argument("--enable-anthropic-on-demand", action="store_true",
+                        help="Explicitly enable paid Anthropic Messages one-shot text with AAS_ANTHROPIC_API_KEY; never auto-fallback.")
+    parser.add_argument("--enable-gemini-on-demand", action="store_true",
+                        help="Explicitly enable paid Gemini generateContent one-shot text with AAS_GEMINI_API_KEY; never auto-fallback.")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
                         help="Opt in to owner-armed billable OpenAI Responses scheduled text tasks; requires --enable-scheduled-local-ai and a separately provisioned AAS_OPENAI_API_KEY.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
@@ -3386,6 +3410,8 @@ def main(argv=None):
                            enable_managed_autopilot=args.enable_managed_autopilot,
                            enable_scheduled_local_ai=args.enable_scheduled_local_ai,
                            enable_scheduled_openai=args.enable_scheduled_openai,
+                           enable_anthropic_on_demand=args.enable_anthropic_on_demand,
+                           enable_gemini_on_demand=args.enable_gemini_on_demand,
                            enable_n8n_execution_verify=args.enable_n8n_execution_verify,
                            enable_gmail_sent_evidence=args.enable_gmail_sent_evidence,
                            enable_signed_gmail_artifact_binding=args.enable_signed_gmail_artifact_binding,
