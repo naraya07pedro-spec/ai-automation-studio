@@ -240,6 +240,104 @@ class LocalTypedAgentHandoff:
                     "no_automatic_retry":True,
                     "external_write_count":0}
 
+    def inspect_recovery(self, preview_id):
+        """Owner-only READ-ONLY cross-ledger evidence inspector.
+
+        A compatible destination is NOT causal proof that this preview wrote
+        it. Neither missing nor compatible data authorizes a second commit.
+        """
+        if type(preview_id) is not str or HEX32.fullmatch(preview_id) is None:
+            raise TypedHandoffError("invalid_handoff_preview_id",422)
+        with self.lock:
+            receipt = self.receipt(preview_id)
+            try:
+                row = self.db.execute("""SELECT request_json FROM agent_typed_handoffs
+                    WHERE preview_id=?""",(preview_id,)).fetchone()
+                request = _validate_preview(json.loads(row[0]))
+            except (sqlite3.Error,TypeError,ValueError,KeyError,TypedHandoffError):
+                raise TypedHandoffError("handoff_recovery_ledger_invalid",503) from None
+            # Lock the original queue and scoped memory for a coherent local
+            # snapshot. Do not update either ledger, dispatch or retry.
+            with self.queue.lock:
+                try:
+                    job = self.queue.get(request["job_id"])
+                    meta = job["delegation"]
+                    nodes = job["nodes"]
+                    if (type(meta) is not dict or len(nodes) != 2 or
+                            meta.get("project_id") is None or
+                            meta.get("target_agent_id") is None):
+                        raise TypedHandoffError("handoff_recovery_delegation_invalid",503)
+                    project = meta["project_id"]
+                    target = meta["target_agent_id"]
+                    source = self.plans.get(nodes[0]["plan_id"])
+                    ix = request["source_step_index"]
+                    valid_source = (
+                        source.get("status") == "COMPLETED" and
+                        nodes[0]["status"] == "COMPLETED" and
+                        ix == len(source["steps"])-1 and
+                        ix < len(source["results"]) and
+                        _fingerprint(source) == nodes[0]["plan_sha256"] and
+                        _security_fingerprint(source) == nodes[0]["security_sha256"] and
+                        nodes[0]["last_receipt_sha256"] == _digest({
+                            "plan_id":source["plan_id"],"index":ix,
+                            "result":source["results"][ix]})
+                    )
+                    expected_digest = None
+                    if valid_source:
+                        try:
+                            typed = _typed(source["results"][ix],source["steps"][ix])
+                            body = ("Owner-reviewed typed result: "+
+                                    typed["kind"]+" = "+typed["value"])
+                            expected_digest=sha256(body.encode("utf-8")).hexdigest()
+                        except TypedHandoffError:
+                            valid_source=False
+                    notes = self.vault.list(project,target)
+                    record = next((n for n in notes
+                        if n["note_id"] == request["target_note_id"]),None)
+                except (DurableQueueError,ScopedMemoryError,KeyError,TypeError,ValueError):
+                    raise TypedHandoffError("handoff_recovery_evidence_unavailable",503) from None
+            exists=record is not None
+            compatible=(bool(record is not None and valid_source and
+                             not record["expired"] and expected_digest is not None and
+                             compare_digest(record["digest"],expected_digest) and
+                             record["source_kind"] == "OWNER_IMPORTED_UNVERIFIED" and
+                             record["source_label"] == "Typed handoff "+request["job_id"])
+                        if valid_source else None)
+            state = (
+                "SOURCE_EVIDENCE_CHANGED_REVIEW" if not valid_source else
+                "NOTE_CONFLICT_REVIEW" if exists and not compatible else
+                "CLAIMED_COMPATIBLE_NOTE_REVIEW_NO_RETRY"
+                  if receipt["status"] == "CLAIMED_REVIEW_REQUIRED" and compatible else
+                "CLAIMED_NOTE_ABSENT_REVIEW_NO_RETRY"
+                  if receipt["status"] == "CLAIMED_REVIEW_REQUIRED" else
+                "COMMITTED_RECEIPT_NOTE_COMPATIBLE"
+                  if receipt["status"] == "COMMITTED" and compatible else
+                "COMMITTED_RECEIPT_NOTE_ABSENT_REVIEW"
+                  if receipt["status"] == "COMMITTED" and not exists else
+                "PREVIEW_NOTE_ALREADY_EXISTS_REVIEW"
+                  if receipt["status"] == "PREVIEW" and exists else
+                "PREVIEW_ONLY_NO_WRITE_EXPECTED"
+                  if receipt["status"] == "PREVIEW" else
+                "UNRECOGNIZED_LEDGER_STATE_REVIEW"
+            )
+            return {
+                "preview_id": preview_id,
+                "handoff_status": receipt["status"],
+                "evidence_classification": state,
+                "source_receipt_current": bool(valid_source),
+                "target_note_exists": exists,
+                "target_note_expired": record["expired"] if record else None,
+                "target_note_revision": record["revision"] if record else None,
+                "target_note_content_compatible": compatible,
+                "note_write_provenance_proven": False,
+                "safe_to_retry_or_auto_repair": False,
+                "additional_provider_or_external_dispatch": 0,
+                "owner_action": (
+                    "Compare the independent target scoped memory ledger, the "+
+                    "source plan receipt and any backups. Preserve the claimed "+
+                    "preview and NEVER automatically retry or override it.")
+            }
+
     def commit(self, request):
         if (type(request) is not dict
                 or set(request) != {"preview_id","payload_sha256"}

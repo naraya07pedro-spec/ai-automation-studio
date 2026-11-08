@@ -237,6 +237,63 @@ class TypedHandoffContract(unittest.TestCase):
             self.handoff.commit({"preview_id":p["preview_id"],"payload_sha256":p["payload_sha256"]})
         self.assertEqual(len(self.vault.list(PROJECT,DST)),2)
 
+    def test_recovery_inspector_distinguishes_compatible_committed_note_from_claim(self):
+        self.complete_source()
+        preview=self.handoff.preview(preview_input())
+        first=self.handoff.inspect_recovery(preview["preview_id"])
+        self.assertEqual(first["evidence_classification"],"PREVIEW_ONLY_NO_WRITE_EXPECTED")
+        self.assertFalse(first["target_note_exists"])
+        self.assertTrue(first["source_receipt_current"])
+        self.assertFalse(first["safe_to_retry_or_auto_repair"])
+        self.handoff.commit({"preview_id":preview["preview_id"],
+                             "payload_sha256":preview["payload_sha256"]})
+        result=self.handoff.inspect_recovery(preview["preview_id"])
+        self.assertEqual(result["evidence_classification"],
+                         "COMMITTED_RECEIPT_NOTE_COMPATIBLE")
+        self.assertTrue(result["target_note_content_compatible"])
+        self.assertFalse(result["note_write_provenance_proven"])
+        self.assertNotIn('"value": "56"',json.dumps(result))
+        self.assertNotIn("Owner-reviewed typed result:",json.dumps(result))
+        changed=self.vault.put({"project_id":PROJECT,"agent_id":DST,
+            "note_id":"imported_result","text":"Different owner-authored result",
+            "source_kind":"OWNER_NOTE","source_label":"owner","retention_days":30,
+            "expected_revision":1})
+        self.assertEqual(changed["revision"],2)
+        report=self.handoff.inspect_recovery(preview["preview_id"])
+        self.assertEqual(report["evidence_classification"],"NOTE_CONFLICT_REVIEW")
+        self.assertFalse(report["target_note_content_compatible"])
+
+    def test_crash_prewrite_and_postwrite_inspection_never_authorizes_retry(self):
+        self.complete_source()
+        first=self.handoff.preview(preview_input())
+        with patch.object(self.vault,"put",side_effect=OSError("crash before note")):
+            with self.assertRaisesRegex(TypedHandoffError,"commit_uncertain"):
+                self.handoff.commit({"preview_id":first["preview_id"],
+                                     "payload_sha256":first["payload_sha256"]})
+        no_note=self.handoff.inspect_recovery(first["preview_id"])
+        self.assertEqual(no_note["handoff_status"],"CLAIMED_REVIEW_REQUIRED")
+        self.assertEqual(no_note["evidence_classification"],
+                         "CLAIMED_NOTE_ABSENT_REVIEW_NO_RETRY")
+        self.assertFalse(no_note["safe_to_retry_or_auto_repair"])
+        second=self.handoff.preview(preview_input())
+        real_put=self.vault.put
+        def crash_after_note(payload):
+            real_put(payload)
+            raise OSError("crash after creating note")
+        with patch.object(self.vault,"put",side_effect=crash_after_note):
+            with self.assertRaisesRegex(TypedHandoffError,"commit_uncertain"):
+                self.handoff.commit({"preview_id":second["preview_id"],
+                                     "payload_sha256":second["payload_sha256"]})
+        present=self.handoff.inspect_recovery(second["preview_id"])
+        self.assertEqual(present["evidence_classification"],
+                         "CLAIMED_COMPATIBLE_NOTE_REVIEW_NO_RETRY")
+        self.assertTrue(present["target_note_content_compatible"])
+        self.assertFalse(present["note_write_provenance_proven"])
+        self.assertFalse(present["safe_to_retry_or_auto_repair"])
+        with self.assertRaisesRegex(TypedHandoffError,"already_claimed_no_retry"):
+            self.handoff.commit({"preview_id":second["preview_id"],
+                                 "payload_sha256":second["payload_sha256"]})
+
     def test_denied_unsafe_typed_outputs_from_model_or_external_tools(self):
         for result,step in [
             ({"tool":"github_public_issues","output":"123"},{"tool":"github_public_issues"}),
@@ -326,6 +383,15 @@ class TypedHandoffContract(unittest.TestCase):
         status,read=call("GET","/api/agent-typed-handoff-receipt?"
                               "preview_id="+preview["preview_id"],cookie=cookie)
         self.assertEqual((status,read["status"]),(200,"COMMITTED"))
+        self.assertEqual(call("GET","/api/agent-typed-handoff-inspect?"
+                           "preview_id="+preview["preview_id"])[0],401)
+        inspected=call("GET","/api/agent-typed-handoff-inspect?"
+                       "preview_id="+preview["preview_id"],cookie=cookie)
+        self.assertEqual(inspected[0],200)
+        self.assertEqual(inspected[1]["evidence_classification"],
+                         "COMMITTED_RECEIPT_NOTE_COMPATIBLE")
+        self.assertFalse(inspected[1]["safe_to_retry_or_auto_repair"])
+        self.assertNotIn('"value": "56"',json.dumps(inspected[1]))
         self.assertNotIn('"value": "56"',json.dumps(read))
         self.assertIn("AGENT_TYPED_HANDOFF",
                       [e["action"] for e in audit.recent(50)])

@@ -386,6 +386,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except (ValueError,TypedHandoffError) as exc:
                     self._send(getattr(exc,"status",422),{"error":str(exc)})
                 return
+            if route.path == "/api/agent-typed-handoff-inspect":
+                if typed_handoff is None:
+                    self._send(403,{"error":"typed_agent_handoff_disabled"})
+                    return
+                try:
+                    query=parse_qs(route.query,strict_parsing=True)
+                    if set(query)!={"preview_id"} or len(query["preview_id"])!=1:
+                        raise TypedHandoffError("invalid_handoff_preview_id",422)
+                    self._send(200,typed_handoff.inspect_recovery(query["preview_id"][0]))
+                except (ValueError,TypedHandoffError) as exc:
+                    self._send(getattr(exc,"status",422),{"error":str(exc)})
+                return
             if route.path == "/api/agent-profiles":
                 if agent_profiles is None:
                     self._send(403, {"error": "agent_profiles_disabled"})

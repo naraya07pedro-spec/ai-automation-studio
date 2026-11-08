@@ -356,9 +356,9 @@ async function inspectHandoffReceipt(){
  const id=$("handoff-receipt-id").value.trim();
  if(!csrf||!/^[0-9a-f]{32}$/.test(id)){state("handoff-status","Enter an exact 32-character receipt ID.",true);return}
  try{
-  const d=await api("/api/agent-typed-handoff-receipt?preview_id="+encodeURIComponent(id));
-  $("handoff-output").textContent="Read-only receipt (no raw value):\n"+JSON.stringify(d,null,2);
-  state("handoff-status","Inspect target memory independently if status is CLAIMED_REVIEW_REQUIRED.");
+  const d=await api("/api/agent-typed-handoff-inspect?preview_id="+encodeURIComponent(id));
+  $("handoff-output").textContent="Read-only cross-ledger inspection (no raw value):\n"+JSON.stringify(d,null,2);
+  state("handoff-status","Cross-ledger status: "+d.evidence_classification+". NO automatic retry or repair. Compare independent evidence.");
  }catch(e){state("handoff-status","Receipt inspection failed: "+e.message,true)}
 }
 async function loadCaps(){
