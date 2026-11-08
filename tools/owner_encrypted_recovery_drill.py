@@ -114,7 +114,8 @@ def _preflight(owner, primary, secondary, restored, plan_id, consent):
 
 def drill(owner_root, primary_archive, secondary_archive, password, *,
           restore_directory=None, plaintext_consent=False, plan_id=None,
-          expected_host=None, expected_workflow=None, expected_node=None):
+          expected_host=None, expected_workflow=None, expected_node=None,
+          require_gmail_sent_chain=False, expected_gmail_node=None):
     """One coordinated owner-initiated recovery rehearsal.
 
     Any failure is terminal and leaves already created encrypted archives
@@ -124,8 +125,17 @@ def drill(owner_root, primary_archive, secondary_archive, password, *,
     owner, primary, secondary, restored = _preflight(
         owner_root, primary_archive, secondary_archive, restore_directory,
         plan_id, plaintext_consent)
-    if any(x is not None for x in (expected_host,expected_workflow,expected_node)) and plan_id is None:
+    if any(x is not None for x in (
+            expected_host,expected_workflow,expected_node,expected_gmail_node)
+            ) and plan_id is None:
         raise RecoveryDrillError("provider_pins_require_semantic_audit_plan")
+    if require_gmail_sent_chain and (
+            plan_id is None or
+            any(v is None for v in (
+                expected_host,expected_workflow,expected_node,expected_gmail_node))):
+        raise RecoveryDrillError("strict_gmail_audit_requires_plan_and_four_pins")
+    if not require_gmail_sent_chain and expected_gmail_node is not None:
+        raise RecoveryDrillError("gmail_node_pin_requires_strict_audit")
     original = create(owner, primary, password)
     first_check = verify(primary, password)
     first_hash, first_size = _sealed_digest(primary)
@@ -174,13 +184,21 @@ def drill(owner_root, primary_archive, secondary_archive, password, *,
         if plan_id is not None:
             report = audit(restored, plan_id, expected_host=expected_host,
                            expected_workflow=expected_workflow,
-                           expected_node=expected_node)
-            if report["status"] != "LOCAL_EVIDENCE_CHAIN_CONSISTENT":
+                           expected_node=expected_node,
+                           require_gmail_sent_chain=require_gmail_sent_chain,
+                           expected_gmail_node=expected_gmail_node)
+            expected_status = ("LOCAL_GMAIL_EVIDENCE_CHAIN_CONSISTENT"
+                               if require_gmail_sent_chain else
+                               "LOCAL_EVIDENCE_CHAIN_CONSISTENT")
+            if report["status"] != expected_status:
                 raise RecoveryDrillError("restored_evidence_chain_not_proven")
             result["semantic_audit_performed"]=True
             result["semantic_six_ledger_audit_passed"]=True
-            result["status"]="RESTORED_SIX_LEDGER_CHAIN_CONSISTENT"
+            result["status"]=("RESTORED_NINE_LAYER_GMAIL_EVIDENCE_CONSISTENT"
+                              if require_gmail_sent_chain else
+                              "RESTORED_SIX_LEDGER_CHAIN_CONSISTENT")
             result["local_ledger_layers_checked"]=len(report["checked_layers"])
+            result["strict_saved_gmail_chain_audited"]=require_gmail_sent_chain
     return result
 
 
@@ -198,6 +216,9 @@ def main(argv=None):
     p.add_argument("--expected-n8n-host")
     p.add_argument("--expected-n8n-workflow")
     p.add_argument("--expected-n8n-node")
+    p.add_argument("--require-gmail-sent-chain",action="store_true",
+                   help="Require Stage 120-122 evidence on restored owner data")
+    p.add_argument("--expected-n8n-gmail-node")
     args=p.parse_args(argv)
     try:
         consent=False
@@ -217,7 +238,9 @@ def main(argv=None):
                      plaintext_consent=consent,plan_id=args.plan_id,
                      expected_host=args.expected_n8n_host,
                      expected_workflow=args.expected_n8n_workflow,
-                     expected_node=args.expected_n8n_node)
+                     expected_node=args.expected_n8n_node,
+                     require_gmail_sent_chain=args.require_gmail_sent_chain,
+                     expected_gmail_node=args.expected_n8n_gmail_node)
         print(json.dumps(result,sort_keys=True))
         return 0
     except (BackupError,RecoveryDrillError,AcceptanceError,OSError) as exc:
