@@ -19,6 +19,7 @@ from urllib.request import Request, ProxyHandler, HTTPCookieProcessor, build_ope
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"app"))
 sys.path.insert(0, str(ROOT/"tests"))
+sys.path.insert(0, str(ROOT/"tools"))
 
 import test_n8n_execution_verifier as stage117
 from local_gmail_sent_evidence import GmailSentEvidence, GmailSentEvidenceError
@@ -233,6 +234,95 @@ class Stage121SignedBindingTests(unittest.TestCase):
                 thread.join(timeout=5)
                 core.close()
                 audit.close()
+
+
+class OwnerSignedGmailImportCLITests(unittest.TestCase):
+    def setUp(self):
+        from owner_signed_gmail_import import SignedGmailImportClient
+        self.client=object.__new__(SignedGmailImportClient)
+        self.calls=[]
+        self.client._login=lambda password:self.calls.append(("login",None))
+        self.client._logout=lambda:self.calls.append(("logout",None))
+        self.stored=False
+        def request(path, values=None):
+            self.calls.append((path,values))
+            if path=="/api/n8n-execution-check-history":
+                return {"records":[{"plan_id":PLAN,"status":"EXECUTION_SUCCESS_CORRELATED",
+                                    "inbound_delivery_correlated":True}]}
+            if path=="/api/signed-gmail-artifact-bindings":
+                return {"records":[{"plan_id":PLAN}] if self.stored else []}
+            if path=="/api/signed-gmail-artifact-import":
+                return {"result":"RECORDED","plan_id":PLAN,
+                        "signature_valid_at_import":True,
+                        "business_effect_verified":False,
+                        "external_write_count":0}
+            raise AssertionError("unexpected endpoint")
+        self.client._request=request
+
+    def fixture(self):
+        data={
+            "plan_id":PLAN, "connector_id":"n8n_manual",
+            "workflow_id":"receipt_flow", "event_id":"receipt_event_001",
+            "delivery_id":"d"*32, "execution_id":"12345",
+            "gmail_id_sha256":"a"*64, "recipient_sha256":"b"*64,
+            "subject_sha256":"c"*64, "proof_hmac_sha256":"e"*64,
+        }
+        return json.dumps(data)
+
+    def test_inspect_only_reads_existing_local_histories(self):
+        report=self.client.execute(mode="inspect",plan_id=PLAN,password="p")
+        self.assertEqual(report["status"],"READY_FOR_OWNER_SIGNED_GMAIL_IMPORT")
+        self.assertFalse(any(path=="/api/signed-gmail-artifact-import"
+                             for path,_ in self.calls))
+
+    def test_import_requires_typed_confirmation_before_post(self):
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        with self.assertRaises(OwnerLiveAcceptanceError):
+            self.client.execute(mode="import",plan_id=PLAN,password="p",
+                confirmation="YES",claim_json=self.fixture())
+        self.assertFalse(any(path=="/api/signed-gmail-artifact-import"
+                             for path,_ in self.calls))
+
+    def test_import_is_exactly_one_local_post_and_no_raw_report(self):
+        result=self.client.execute(
+            mode="import",plan_id=PLAN,password="p",
+            confirmation="IMPORT_SIGNED_GMAIL_ARTIFACT_ONCE",
+            claim_json=self.fixture())
+        self.assertEqual(result["status"],"SIGNED_GMAIL_ARTIFACT_BOUND")
+        self.assertFalse(result["n8n_causation_verified"])
+        self.assertEqual(sum(path=="/api/signed-gmail-artifact-import"
+                             for path,_ in self.calls),1)
+        self.assertNotIn("n8n_manual",json.dumps(result))
+
+    def test_import_lost_local_ack_is_uncertain_no_repeat(self):
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        original=self.client._request
+        def fail(path, values=None):
+            if path=="/api/signed-gmail-artifact-import":
+                self.calls.append((path,values))
+                raise OwnerLiveAcceptanceError("response_missing")
+            return original(path,values)
+        self.client._request=fail
+        result=self.client.execute(
+            mode="import",plan_id=PLAN,password="p",
+            confirmation="IMPORT_SIGNED_GMAIL_ARTIFACT_ONCE",
+            claim_json=self.fixture())
+        self.assertEqual(result["status"],
+                         "LOCAL_IMPORT_RESPONSE_UNCERTAIN_CHECK_HISTORY_NO_RETRY")
+        self.assertEqual(sum(path=="/api/signed-gmail-artifact-import"
+                             for path,_ in self.calls),1)
+
+    def test_import_rejects_extra_fields_before_post(self):
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        data=json.loads(self.fixture());data["secret"]="hidden"
+        with self.assertRaisesRegex(OwnerLiveAcceptanceError,
+                                    "invalid_signed_claim_fields"):
+            self.client.execute(
+                mode="import",plan_id=PLAN,password="p",
+                confirmation="IMPORT_SIGNED_GMAIL_ARTIFACT_ONCE",
+                claim_json=json.dumps(data))
+        self.assertFalse(any(path=="/api/signed-gmail-artifact-import"
+                             for path,_ in self.calls))
 
 
 if __name__ == "__main__":
