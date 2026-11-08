@@ -17,6 +17,7 @@ import threading
 
 from local_agent_task_plans import PlanError, ID_PATTERN as PLAN_ID
 from local_model_safety import ModelSafetyError
+from local_agent_delegation import validate_delegation, DelegationError
 from local_tool_registry import BATCH_READ_TOOLS
 
 JOB_ID = re.compile(r"^[a-z][a-z0-9_-]{2,39}$", re.ASCII)
@@ -48,7 +49,9 @@ def _valid_id(value):
 
 
 def _validate_create(data):
-    if type(data) is not dict or set(data) != {"job_id", "label", "priority", "nodes"}:
+    if (type(data) is not dict or set(data) not in (
+            {"job_id", "label", "priority", "nodes"},
+            {"job_id", "label", "priority", "nodes", "delegation"})):
         raise DurableQueueError("invalid_job_fields", 422)
     jid = _valid_id(data["job_id"])
     label = data["label"]
@@ -91,7 +94,7 @@ def _validate_create(data):
         visited.add(node)
     for key in graph:
         visit(key)
-    return jid, label.strip(), priority, nodes
+    return jid, label.strip(), priority, nodes, data.get("delegation")
 
 
 def _fingerprint(plan):
@@ -100,6 +103,14 @@ def _fingerprint(plan):
         "plan_id", "model", "goal", "steps", "created_utc",
         "approval_epoch", "hn_approval_epoch", "memory_refs",
         "document_source", "document_set_sources", "csv_source")})
+
+
+def _security_fingerprint(plan):
+    """Frozen permission metadata, separate from old intent hashes."""
+    return _digest({k: plan[k] for k in (
+        "agent_binding", "scoped_memory_refs", "memory_refs",
+        "document_source", "document_set_sources", "csv_source"
+    )})
 
 
 class LocalDurablePlanQueue:
@@ -139,13 +150,15 @@ class LocalDurablePlanQueue:
                     priority INTEGER NOT NULL, status TEXT NOT NULL,
                     revision INTEGER NOT NULL DEFAULT 0,
                     created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL,
-                    last_claim_seq INTEGER NOT NULL DEFAULT 0
+                    last_claim_seq INTEGER NOT NULL DEFAULT 0,
+                    delegation_json TEXT NOT NULL DEFAULT ''
                 )""")
                 self.db.execute("""CREATE TABLE IF NOT EXISTS durable_job_nodes(
                     job_id TEXT NOT NULL, plan_id TEXT NOT NULL UNIQUE,
                     deps_json TEXT NOT NULL, plan_sha256 TEXT NOT NULL,
                     node_status TEXT NOT NULL, next_index INTEGER NOT NULL,
                     last_receipt_sha256 TEXT,
+                    security_sha256 TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY(job_id,plan_id),
                     FOREIGN KEY(job_id) REFERENCES durable_jobs(job_id)
                 )""")
@@ -155,6 +168,17 @@ class LocalDurablePlanQueue:
                     event TEXT NOT NULL, evidence_sha256 TEXT,
                     at_utc TEXT NOT NULL
                 )""")
+                # Additive migration preserves existing v1 jobs/hashes.
+                job_cols = {c[1] for c in self.db.execute(
+                    "PRAGMA table_info(durable_jobs)").fetchall()}
+                node_cols = {c[1] for c in self.db.execute(
+                    "PRAGMA table_info(durable_job_nodes)").fetchall()}
+                if "delegation_json" not in job_cols:
+                    self.db.execute("""ALTER TABLE durable_jobs
+                        ADD COLUMN delegation_json TEXT NOT NULL DEFAULT ''""")
+                if "security_sha256" not in node_cols:
+                    self.db.execute("""ALTER TABLE durable_job_nodes
+                        ADD COLUMN security_sha256 TEXT NOT NULL DEFAULT ''""")
                 # A completed tool step may have reached the other SQLite file
                 # before process death. DO NOT infer it was safely dispatched.
                 rows = self.db.execute("""SELECT DISTINCT job_id FROM durable_job_nodes
@@ -178,13 +202,24 @@ class LocalDurablePlanQueue:
             VALUES(?,?,?,?,?)""", (job_id, plan_id, event, evidence, _now()))
         return cur.lastrowid
 
-    def _plan(self, pid, *, index=0, original=None):
+    def _plan(self, pid, *, index=0, original=None, security=None):
         try:
             p = self.plans.get(pid)
         except PlanError:
             raise DurableQueueError("job_plan_missing_or_unavailable", 409) from None
         if original is not None and _fingerprint(p) != original:
             raise DurableQueueError("job_plan_source_changed", 409)
+        if security and _security_fingerprint(p) != security:
+            raise DurableQueueError("job_plan_permission_binding_changed", 409)
+        try:
+            self.plans._verify_agent_binding(p["agent_binding"],p["steps"])
+            self.plans._verify_global_memory_isolation(
+                p["agent_binding"],p["memory_refs"])
+            self.plans._verify_scoped_memory_refs(
+                p["scoped_memory_refs"],p["agent_binding"])
+            self.plans._verify_memory_refs(p["memory_refs"])
+        except PlanError:
+            raise DurableQueueError("job_plan_permission_or_memory_changed",409) from None
         status = "APPROVED" if index == 0 else "NEXT_READY"
         if (p["status"] != status or p["next_index"] != index
                 or p["batch_run_status"] in ("RUNNING", "STOPPING", "INTERRUPTED")
@@ -195,25 +230,26 @@ class LocalDurablePlanQueue:
 
     def _rows(self, job_id):
         return self.db.execute("""SELECT plan_id,deps_json,plan_sha256,
-            node_status,next_index,last_receipt_sha256 FROM durable_job_nodes
+            node_status,next_index,last_receipt_sha256,security_sha256 FROM durable_job_nodes
             WHERE job_id=? ORDER BY rowid""", (job_id,)).fetchall()
 
     def _job(self, job_id):
         _valid_id(job_id)
         row = self.db.execute("""SELECT job_id,label,priority,status,
-            revision,created_utc,updated_utc,last_claim_seq
+            revision,created_utc,updated_utc,last_claim_seq,delegation_json
             FROM durable_jobs WHERE job_id=?""", (job_id,)).fetchone()
         if row is None:
             raise DurableQueueError("job_not_found", 404)
         nodes = []
         completed = set()
-        for pid, deps, digest, state, ix, receipt in self._rows(job_id):
+        for pid, deps, digest, state, ix, receipt, security in self._rows(job_id):
             if state == "COMPLETED":
                 completed.add(pid)
             nodes.append({"plan_id": pid, "depends_on": json.loads(deps),
                           "status": state, "next_index": ix,
                           "plan_sha256": digest,
-                          "last_receipt_sha256": receipt})
+                          "last_receipt_sha256": receipt,
+                          "security_sha256": security})
         for node in nodes:
             node["dependencies_satisfied"] = all(
                 d in completed for d in node["depends_on"])
