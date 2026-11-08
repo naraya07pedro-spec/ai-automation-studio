@@ -229,6 +229,7 @@ class ScopedPlanBindingTests(unittest.TestCase):
         self.assertEqual(self.plans.get(created["plan_id"])["results"],[])
 
     def test_cross_agent_and_legacy_global_refs_fail_closed(self):
+        self.profiles.create({**PROFILE,"agent_id":"other_agent","name":"Other"})
         refs=self.refs()
         with self.assertRaisesRegex(PlanError,"scoped_memory_scope_denied"):
             self.plans.create(PLAN,agent_binding={
