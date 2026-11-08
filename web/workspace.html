@@ -242,7 +242,7 @@ async function loadCapabilities(){
  const available=!!data.enabled,planning=!!data.planning;
  const providers=Array.isArray(data.remote_on_demand_providers)?data.remote_on_demand_providers.filter(p=>["openai_responses","anthropic_messages","gemini_generate_content"].includes(p)):[];
  const selected=el("cloud-provider").value;
- el("cloud-provider").replaceChildren(...providers.map(p=>new Option({openai_responses:"OpenAI Responses",anthropic_messages:"Anthropic Messages",gemini_generate_content:"Gemini generateContent"}[p],p)));
+ el("cloud-provider").replaceChildren(new Option("Select a configured provider",""),...providers.map(p=>new Option({openai_responses:"OpenAI Responses",anthropic_messages:"Anthropic Messages",gemini_generate_content:"Gemini generateContent"}[p],p)));
  if(providers.includes(selected))el("cloud-provider").value=selected;
  el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Paid text providers enabled: "+(providers.length?providers.join(", "):"none")+". Server permissions always apply.";
  refreshComposer();
@@ -424,34 +424,93 @@ async function action(name){
  }catch(e){setStatus("Action was not confirmed: "+e.message+". Inspect the saved plan before retrying.",true)}
  finally{busy=false;refreshComposer()}
 }
+function cloudId(){
+ const bytes=crypto.getRandomValues(new Uint8Array(16));
+ return [...bytes].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function renderCloudReceipt(d){
+ if(!d||typeof d.request_id!=="string")throw Error("invalid_receipt");
+ const id=d.request_id;
+ el("cloud-receipt-id").value=id;cloudAttemptId=id;
+ const summary="Request "+id+" · "+(d.provider||"unknown")+" / "+(d.model||"unknown")+" · "+(d.status||"UNKNOWN");
+ el("cloud-result").textContent=summary+(d.status==="COMPLETED"?" · token usage is not a bill.":" · review provider billing and runtime before any new request.");
+ if(d.status==="COMPLETED"&&typeof d.answer==="string")addMessage("Cloud AI · "+d.provider,d.answer);
+ else addMessage("Studio",summary+". No confirmed final answer. Never resend this request ID.");
+}
+async function inspectCloudReceipt(){
+ if(!csrf)return;
+ const id=el("cloud-receipt-id").value.trim();
+ if(!/^[0-9a-f]{32}$/.test(id)){setStatus("Enter an exact 32-character request ID.",true);return}
+ try{
+  const receipt=await api("/api/read-only-ai-ask-receipt?request_id="+encodeURIComponent(id));
+  renderCloudReceipt(receipt);setStatus("Read-only receipt inspected. No new provider request.");
+ }catch(e){setStatus("Receipt unavailable: "+e.message+". Inspect provider usage before any new request.",true)}
+}
 async function submitTask(e){
  e.preventDefault();if(!csrf||busy)return;
- let model;try{model=validModel()}catch(e){setStatus(e.message,true);return}
  const text=el("task").value.trim();if(!text)return;
+ const isCloud=mode==="cloud";
+ let model="",provider="";
+ if(isCloud){
+  provider=el("cloud-provider").value;model=el("cloud-model").value.trim();
+  if(!caps.remote_on_demand_ai||!caps.remote_on_demand_providers?.includes(provider)||!model||
+      !el("cloud-owner").value||!el("cloud-consent").checked){
+   setStatus("Choose an enabled provider and model, re-enter owner password and authorize one paid call.",true);return;
+  }
+  if(!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(model)){setStatus("Invalid provider model identifier.",true);return}
+  if(!confirm("Authorize exactly ONE potentially billable text request?\n\nProvider: "+provider+
+              "\nModel: "+model+"\n\nNo tools, no retry, no automatic fallback. Provider billing is not verified."))return;
+ }else{try{model=validModel()}catch(error){setStatus(error.message,true);return}}
  let payload={goal:text,model};
  if(mode==="plan"){
-  const agent=el("agent-select").value;const checked=[...el("memories").querySelectorAll("input:checked")].map(x=>x.value);
+  const agent=el("agent-select").value;
+  const checked=[...el("memories").querySelectorAll("input:checked")].map(x=>x.value);
   if(agent)payload.agent_id=agent;
   if(checked.length){
    const project=el("project").value.trim();
-   if(!agent||!/^[a-z][a-z0-9_-]{2,59}$/.test(project)){setStatus("Select a named Agent and valid project to use scoped notes.",true);return}
+   if(!agent||!/^[a-z][a-z0-9_-]{2,39}$/.test(project)){setStatus("Select a named Agent and a valid project ID for scoped notes.",true);return}
    payload.project_id=project;payload.scoped_memory_ids=checked;
   }
  }
- busy=true;refreshComposer();setStatus(mode==="plan"?"Requesting a bounded plan from the local model…":"Waiting for an actual local response…");
- addMessage("You",text);el("task").value="";
+ let cloudPayload=null;
+ if(isCloud){
+  const id=cloudId();
+  cloudAttemptId=id;el("cloud-receipt-id").value=id;
+  cloudPayload={request_id:id,provider,model,prompt:text,paid_api_consent:true,current_password:el("cloud-owner").value};
+  el("cloud-owner").value="";el("cloud-consent").checked=false;
+  el("cloud-result").textContent="Request "+id+" prepared. Never retry automatically if the response is uncertain.";
+ }
+ busy=true;refreshComposer();setStatus(isCloud?"Sending one owner-authorized cloud request…":
+   mode==="plan"?"Requesting bounded plan from local model…":"Waiting for local response…");
+ addMessage("You",text);
+ if(!isCloud)el("task").value="";
+ const epoch=authEpoch;
  try{
-  if(mode==="plan"){
+  if(isCloud){
+   const d=await api("/api/read-only-ai-ask",cloudPayload);
+   if(!csrf||epoch!==authEpoch)return;
+   renderCloudReceipt(d);setStatus("Provider response recorded. Independently verify accuracy and billing.");
+   el("task").value="";
+  }else if(mode==="plan"){
    const data=await api("/api/local-agent-plan-create",payload);
-   renderPlan(data);addMessage("Studio","Proposed "+(data.steps||[]).length+" steps. Review all tools and arguments below before approval.");
-   setStatus("Review required. Nothing has executed.");await loadPlans();
+   if(!csrf||epoch!==authEpoch)return;
+   renderPlan(data);addMessage("Studio","Proposed "+(data.steps||[]).length+" steps. Review tools and arguments before approval.");
+   setStatus("Review required. No steps executed.");await loadPlans();
   }else{
    const d=await api("/api/local-agent-run",{model,prompt:text});
+   if(!csrf||epoch!==authEpoch)return;
    addMessage("Local AI",typeof d.answer==="string"?d.answer:JSON.stringify(d));
    setStatus("Local model responded. Verify important claims.");
   }
- }catch(e){addMessage("Studio","No confirmed result: "+e.message);setStatus("Request failed: "+e.message,true)}
- finally{busy=false;refreshComposer()}
+ }catch(error){
+  if(!csrf||epoch!==authEpoch)return;
+  if(isCloud){
+   addMessage("Studio","Provider result not confirmed. Keep request ID "+cloudAttemptId+
+    " and use Inspect receipt. Check provider billing. DO NOT retry automatically. Error: "+error.message);
+   el("cloud-result").textContent="Uncertain or rejected outcome · request ID "+cloudAttemptId;
+  }else addMessage("Studio","No confirmed result: "+error.message);
+  setStatus("Request not confirmed: "+error.message+(isCloud?". Inspect receipt before any new attempt.":""),true);
+ }finally{cloudPayload=null;busy=false;refreshComposer()}
 }
 async function unlock(){
  el("gate").hidden=true;el("logout").hidden=false;el("session-dot").classList.add("good");el("session-label").textContent="Private session";setStatus("Connected to local server.");
