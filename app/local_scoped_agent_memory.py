@@ -234,9 +234,15 @@ class LocalScopedAgentMemory:
                    (project_id, agent_id, MAX_PER_SCOPE + 1)).fetchall()
                 if len(rows) > MAX_PER_SCOPE:
                     raise ScopedMemoryError("scoped_memory_storage_invalid", 503)
-                return [self._output(project_id, agent_id, note_id,
+                output = [self._output(project_id, agent_id, note_id,
                                      self._row(project_id,agent_id,note_id),
                                      now) for (note_id,) in rows]
+                # Expiry is a retrieval boundary too: never reveal expired
+                # owner text through listing, even before deliberate purging.
+                for item in output:
+                    if item["expired"]:
+                        item.pop("text", None)
+                return output
         except sqlite3.Error:
             raise ScopedMemoryError("scoped_memory_storage_unavailable", 503) from None
 
@@ -309,6 +315,43 @@ class LocalScopedAgentMemory:
                     "backup_copies_may_remain":True}
         except sqlite3.Error:
             raise ScopedMemoryError("scoped_memory_storage_unavailable", 503) from None
+
+    def purge_expired(self, project_id, agent_id):
+        """Owner-authorized narrow deletion of expired notes in one scope.
+
+        No background purge or erasure claim. Revisions are checked during
+        the same SQLite write transaction; live plans already reject expiry.
+        """
+        _scope(project_id, agent_id)
+        try:
+            with self.lock, self.db:
+                now = _now(self.clock)
+                rows = self.db.execute("""SELECT note_id FROM scoped_agent_memory
+                    WHERE project_id=? AND agent_id=? ORDER BY note_id LIMIT ?""",
+                    (project_id, agent_id, MAX_PER_SCOPE + 1)).fetchall()
+                if len(rows) > MAX_PER_SCOPE:
+                    raise ScopedMemoryError("scoped_memory_storage_invalid", 503)
+                expired = []
+                for (note_id,) in rows:
+                    item = self._output(project_id,agent_id,note_id,
+                            self._row(project_id,agent_id,note_id),now,
+                            include_text=False)
+                    if item["expired"]:
+                        expired.append((note_id,item["revision"]))
+                for note_id,revision in expired:
+                    changed = self.db.execute("""DELETE FROM scoped_agent_memory
+                        WHERE project_id=? AND agent_id=? AND note_id=?
+                        AND revision=?""",
+                        (project_id,agent_id,note_id,revision)).rowcount
+                    if changed != 1:
+                        raise ScopedMemoryError("scoped_memory_revision_conflict",409)
+                return {"status":"PURGED_EXPIRED_FROM_LIVE_LEDGER",
+                        "project_id":project_id,"agent_id":agent_id,
+                        "deleted_count":len(expired),"external_write_count":0,
+                        "backup_copies_may_remain":True,
+                        "physical_erasure_verified":False}
+        except sqlite3.Error:
+            raise ScopedMemoryError("scoped_memory_storage_unavailable",503) from None
 
     def select(self, project_id, agent_id, ids):
         _scope(project_id, agent_id)
