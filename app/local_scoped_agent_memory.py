@@ -2,7 +2,7 @@
 
 Explicit selection only. No automatic ingestion, retrieval, provider writes or
 model mutation. Expiry/revocation is checked at EACH owner-approved plan step.
-Plaintext owner-private SQLite is NOT disk encryption or secure backup erasure.
+Default mode remains owner-private plaintext SQLite. Owner-explicit encrypted\nmode protects text fields only, not metadata or historical backup copies.
 """
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -14,6 +14,7 @@ import threading
 
 from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 from local_agent_profiles import AGENT_ID
+from local_scoped_memory_crypto import ScopedMemoryCipher, ScopedMemoryCryptoError
 
 PROJECT_ID = re.compile(r"[a-z][a-z0-9_-]{2,39}\Z", re.ASCII)
 NOTE_ID = re.compile(r"[a-z][a-z0-9_-]{2,31}\Z", re.ASCII)
@@ -123,8 +124,14 @@ def _validate_refs(refs):
 
 class LocalScopedAgentMemory:
     """Versioned, explicit project+Agent memory with deterministic expiry."""
-    def __init__(self, database=":memory:", *, clock=None):
+    def __init__(self, database=":memory:", *, clock=None, encryption_key=None):
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        try:
+            self._cipher = (ScopedMemoryCipher(encryption_key)
+                            if encryption_key is not None else None)
+        except ScopedMemoryCryptoError as exc:
+            raise ScopedMemoryError(str(exc), 503) from None
+        self.at_rest_encrypted = self._cipher is not None
         self.lock = threading.RLock()
         try:
             location = prepare_private_sqlite(database)
@@ -150,7 +157,31 @@ class LocalScopedAgentMemory:
                     created_utc TEXT NOT NULL,
                     updated_utc TEXT NOT NULL,
                     PRIMARY KEY(project_id,agent_id,note_id))""")
+                # Before serving a SINGLE note, verify every existing record
+                # under the intended mode. Never mix plaintext and ciphertext.
+                for project, agent, note, stored, rev, gen, kind, label, expiry in (
+                    self.db.execute("""SELECT project_id,agent_id,note_id,text,
+                           revision,generation,source_kind,source_label,expires_utc
+                           FROM scoped_agent_memory""").fetchall()):
+                    if self._cipher is None:
+                        if ScopedMemoryCipher.is_sealed(stored):
+                            raise ScopedMemoryError(
+                                "scoped_memory_encryption_key_required", 503)
+                    else:
+                        if not ScopedMemoryCipher.is_sealed(stored):
+                            raise ScopedMemoryError(
+                                "scoped_memory_requires_offline_migration", 503)
+                        try:
+                            self._cipher.unseal(
+                                stored,project,agent,note,rev,gen,kind,label,expiry)
+                        except ScopedMemoryCryptoError:
+                            raise ScopedMemoryError(
+                                "scoped_memory_unlock_failed", 503) from None
+        except ScopedMemoryError:
+            self.db.close()
+            raise
         except sqlite3.Error:
+            self.db.close()
             raise ScopedMemoryError("scoped_memory_storage_unavailable", 503) from None
 
     def _row(self, project_id, agent_id, note_id):
@@ -160,9 +191,18 @@ class LocalScopedAgentMemory:
                 WHERE project_id=? AND agent_id=? AND note_id=?""",
                 (project_id, agent_id, note_id)).fetchone()
 
-    @staticmethod
-    def _output(project_id, agent_id, note_id, row, now, *, include_text=True):
+    def _output(self, project_id, agent_id, note_id, row, now, *, include_text=True):
         text,revision,generation,source_kind,source_label,expiry,created,updated = row
+        if ScopedMemoryCipher.is_sealed(text):
+            if self._cipher is None:
+                raise ScopedMemoryError("scoped_memory_encryption_key_required", 503)
+            try:
+                text = self._cipher.unseal(text,project_id,agent_id,note_id,
+                    revision,generation,source_kind,source_label,expiry)
+            except ScopedMemoryCryptoError:
+                raise ScopedMemoryError("scoped_memory_unlock_failed", 503) from None
+        elif self._cipher is not None:
+            raise ScopedMemoryError("scoped_memory_requires_offline_migration", 503)
         try:
             ex = datetime.fromisoformat(expiry)
             if (ex.tzinfo is None or ex.utcoffset() is None
@@ -220,22 +260,31 @@ class LocalScopedAgentMemory:
                         raise ScopedMemoryError("scoped_memory_capacity_reached", 409)
                     generation = secrets.token_hex(16)
                     stamp = now.isoformat()
+                    stored_text = (self._cipher.seal(
+                        value["text"],project_id,agent_id,note_id,1,
+                        generation,value["source_kind"],value["source_label"],expires)
+                        if self._cipher is not None else value["text"])
                     self.db.execute("""INSERT INTO scoped_agent_memory (
                        project_id,agent_id,note_id,text,revision,generation,
                        source_kind,source_label,expires_utc,created_utc,updated_utc)
                        VALUES(?,?,?,?,1,?,?,?,?,?,?)""",
-                       (project_id,agent_id,note_id,value["text"],generation,
+                       (project_id,agent_id,note_id,stored_text,generation,
                         value["source_kind"],value["source_label"],
                         expires,stamp,stamp))
                 else:
                     old = self._output(project_id,agent_id,note_id,previous,now)
                     if old["expired"] or old["revision"] != value["expected_revision"]:
                         raise ScopedMemoryError("scoped_memory_revision_conflict", 409)
+                    stored_text = (self._cipher.seal(
+                        value["text"],project_id,agent_id,note_id,
+                        old["revision"]+1,old["generation"],value["source_kind"],
+                        value["source_label"],expires)
+                        if self._cipher is not None else value["text"])
                     self.db.execute("""UPDATE scoped_agent_memory
                        SET text=?,revision=revision+1,source_kind=?,
                            source_label=?,expires_utc=?,updated_utc=?
                        WHERE project_id=? AND agent_id=? AND note_id=?""",
-                       (value["text"],value["source_kind"],value["source_label"],
+                       (stored_text,value["source_kind"],value["source_label"],
                         expires,now.isoformat(),project_id,agent_id,note_id))
                 return self._output(project_id,agent_id,note_id,
                                     self._row(project_id,agent_id,note_id),now)

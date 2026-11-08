@@ -139,7 +139,7 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
       <hr class="divider">
       <label for="project">Project scope (optional)</label><input id="project" maxlength="60" value="personal_workspace" autocomplete="off" spellcheck="false">
       <p class="hint">Project scope is used only when selecting scoped memory notes for a named Agent.</p>
-      <div class="mem-tools"><label style="margin:0">Context notes <span class="quiet">(select up to 3)</span></label><button id="new-note" class="note-control" type="button" disabled>New note</button></div><div id="memories" class="state">Choose an Agent to inspect its notes.</div><p class="hint">Notes are private plaintext SQLite data, not verified evidence. Editing one invalidates any plan bound to its previous revision.</p>
+      <div class="mem-tools"><label style="margin:0">Context notes <span class="quiet">(select up to 3)</span></label><button id="new-note" class="note-control" type="button" disabled>New note</button></div><div id="memories" class="state">Choose an Agent to inspect its notes.</div><p class="hint" id="scoped-storage-hint">Agent/project notes require a private local store. At-rest encryption depends on server mode. Editing or deleting a note invalidates plans bound to its previous revision.</p>
       <div class="capability" id="capabilities">Checking real capabilities. No simulated providers, connectors or background agents.</div>
      </aside>
     </div>
@@ -245,6 +245,7 @@ async function loadCapabilities(){
  const selected=el("cloud-provider").value;
  el("cloud-provider").replaceChildren(new Option("Select a configured provider",""),...providers.map(p=>new Option({openai_responses:"OpenAI Responses",anthropic_messages:"Anthropic Messages",gemini_generate_content:"Gemini generateContent"}[p],p)));
  if(providers.includes(selected))el("cloud-provider").value=selected;
+ el("scoped-storage-hint").textContent=data.scoped_memory_at_rest_encrypted?"Agent/project note TEXT is AES-256-GCM encrypted at rest. Scope metadata, prompts, legacy global memory and backups are NOT protected by this flag.":"Agent/project notes use plaintext SQLite on this server. Enable the separately keyed encrypted scoped-memory mode after offline migration. Previously saved backups may retain plaintext.";
  el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Paid text providers enabled: "+(providers.length?providers.join(", "):"none")+". Server permissions always apply.";
  refreshComposer();
 }
