@@ -72,6 +72,7 @@ class OwnerLiveClient:
             "/api/local-agent-capabilities", "/api/signed-handoff-outcomes",
             "/api/n8n-execution-check-history", "/api/n8n-execution-check",
             "/api/gmail-sent-evidence-history", "/api/gmail-sent-evidence",
+            "/api/signed-gmail-artifact-bindings", "/api/signed-gmail-artifact-import",
         ):
             raise OwnerLiveAcceptanceError("local_endpoint_not_allowed")
         headers = {"Accept":"application/json"}

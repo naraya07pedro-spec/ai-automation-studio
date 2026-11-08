@@ -65,11 +65,12 @@ def _single_to(value):
 class GmailSentEvidence:
     """Uses the EXISTING private handoff SQLite ledger, no independent DB."""
 
-    def __init__(self, n8n_verifier, gmail):
+    def __init__(self, n8n_verifier, gmail, *, signed_artifact_binding=None):
         if n8n_verifier is None or gmail is None:
             raise GmailSentEvidenceError("n8n_and_gmail_required", 403)
         self.n8n = n8n_verifier
         self.gmail = gmail
+        self.signed_artifact_binding = signed_artifact_binding
         self.handoff = n8n_verifier.handoff
         self.lock = self.handoff.lock
         self.db = self.handoff.db
@@ -127,6 +128,15 @@ class GmailSentEvidence:
         with self.lock:
             try:
                 witness = self._authorized_chain(plan)
+                if self.signed_artifact_binding is not None:
+                    # Stage 121 strict opt-in: unsigned owner-chosen Gmail IDs
+                    # must never reach a Google token refresh or provider GET.
+                    from local_signed_gmail_artifact import SignedGmailArtifactError
+                    try:
+                        self.signed_artifact_binding.require_match(
+                            plan, message_id, to, subject)
+                    except SignedGmailArtifactError as exc:
+                        raise GmailSentEvidenceError(str(exc), exc.status) from None
                 with self.db:
                     if self.db.execute(
                             "SELECT 1 FROM gmail_sent_evidence WHERE plan_id=?",

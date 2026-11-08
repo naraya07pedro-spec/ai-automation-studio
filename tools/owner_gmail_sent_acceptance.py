@@ -47,6 +47,18 @@ class OwnerGmailSentClient(OwnerLiveClient):
             if (len(found)!=1 or found[0].get("status") != "EXECUTION_SUCCESS_CORRELATED"
                     or found[0].get("inbound_delivery_correlated") is not True):
                 raise OwnerLiveAcceptanceError("correlated_n8n_success_required")
+            caps=self._request("/api/local-agent-capabilities")
+            if caps.get("gmail_sent_artifact_verification") is not True:
+                raise OwnerLiveAcceptanceError("gmail_evidence_feature_disabled")
+            if caps.get("signed_gmail_artifact_binding_required") is True:
+                bound=self._request("/api/signed-gmail-artifact-bindings")
+                claims=bound.get("records")
+                if (type(claims) is not list
+                        or sum(type(x) is dict and x.get("plan_id")==plan_id
+                               for x in claims) != 1):
+                    raise OwnerLiveAcceptanceError("signed_gmail_binding_preflight_required")
+            elif caps.get("signed_gmail_artifact_binding_required") is not False:
+                raise OwnerLiveAcceptanceError("gmail_binding_policy_unknown")
             previous=self._request("/api/gmail-sent-evidence-history")
             if type(previous.get("records")) is not list:
                 raise OwnerLiveAcceptanceError("gmail_history_missing")
