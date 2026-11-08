@@ -118,6 +118,8 @@ def main(argv=None):
                         help="Owner-managed multiple n8n/webhook connections; private OS-protected credentials, no automated sends.")
     parser.add_argument("--enable-webhook", action="store_true",
                         help="Explicitly permit owner-confirmed n8n HTTPS webhook, requires AAS_WEBHOOK_URL environment.")
+    parser.add_argument("--enable-encrypted-scoped-memory", action="store_true",
+                        help="Encrypt project/Agent notes using separately provisioned AAS_SCOPED_MEMORY_KEY and PyCA cryptography; legacy plaintext database will not auto-migrate.")
     parser.add_argument("--enable-history", action="store_true",
                         help="Explicitly persist local chat transcript in plaintext SQLite.")
     parser.add_argument("--no-browser", action="store_true",
@@ -138,6 +140,10 @@ def main(argv=None):
             flags += ("--enable-anthropic-on-demand",)
         if args.enable_gemini_on_demand:
             flags += ("--enable-gemini-on-demand",)
+        if args.enable_encrypted_scoped_memory:
+            if args.mode not in ("local-ai", "full"):
+                raise ValueError("encrypted scoped memory requires local-ai or full")
+            flags += ("--enable-encrypted-scoped-memory",)
         if args.enable_scheduled_local_ai:
             if args.mode in ("offline", "cloud-only"):
                 raise ValueError("scheduled local AI requires local-ai or full mode")
