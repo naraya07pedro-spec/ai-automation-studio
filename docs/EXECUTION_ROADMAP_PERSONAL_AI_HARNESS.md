@@ -98,3 +98,9 @@ Review visual workflow editor and guided template onboarding, installer/desktop 
 These gates must be satisfied by evidence, not by passing synthetic tests alone. The project **is not yet complete** as of this record. Continue each subsequent stage by choosing the highest-impact gap, creating an exact GitHub PR, passing required CI, merging, and appending verified SHA/results to `docs/PROGRESS.md`.
 
 **Next development direction absent actual owner-PC connection:** P1's genuinely useful approved-connector task with existing deterministic workflow and verifiable receipts. Avoid gratuitous stages devoted only to more mock tests.
+
+
+
+### Stage #120 · Independent downstream Gmail SENT evidence witness (review branch)
+
+A separately opted-in Gmail metadata-only verification is being implemented for a user-selected message ID **after** a Stage #116 signed receipt and a Stage #117 independently correlated successful n8n execution. Distinct actual Gmail SENT metadata corroborates the existence of one matching artifact in the owner's Gmail account. It does **not** prove message delivery, an n8n→Gmail causal relationship, customer/CRM outcomes, or a complete personal AI agent. Gmail OAuth remains separate from ChatGPT, unconnected by default and subject to the real owner's consent. Owner instructions and limits: `docs/GMAIL_SENT_ARTIFACT_EVIDENCE_V1.md`. **PR / CI status must be verified before calling this merged.**
