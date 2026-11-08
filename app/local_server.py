@@ -24,6 +24,7 @@ from local_service_credentials import read_runtime_secret, ServiceCredentialErro
 from local_google_gmail import GoogleGmailMetadata, GmailConnectorError
 from local_gmail_sent_evidence import GmailSentEvidence, GmailSentEvidenceError
 from local_signed_gmail_artifact import SignedGmailArtifactBinding, SignedGmailArtifactError
+from local_n8n_gmail_output_witness import N8NGmailOutputWitness, N8NGmailOutputError
 from local_scheduled_webhook import ScheduledWebhookAutopilot, AutopilotError
 from local_managed_scheduled_webhook import ManagedScheduledWebhookAutopilot
 from local_n8n_delivery_proof import SignedN8NDeliveryProof, N8NProofError
@@ -117,6 +118,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    scheduled_autopilot=None, managed_connectors=None,
                    google_gmail=None, gmail_sent_evidence=None,
                    signed_gmail_binding=None,
+                   n8n_gmail_output_witness=None,
                    managed_autopilot=None, n8n_proofs=None,
                    scheduled_ai=None, on_demand_ai=None,
                    agent_connector_handoff=None, handoff_outcomes=None,
@@ -351,6 +353,10 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "n8n_execution_readonly_verify": n8n_execution_verifier is not None,
                                   "gmail_sent_artifact_verification": gmail_sent_evidence is not None,
                                   "signed_gmail_artifact_binding_required": signed_gmail_binding is not None,
+                                  "official_n8n_gmail_output_required": n8n_gmail_output_witness is not None,
+                                  "pinned_n8n_gmail_node_sha256": (
+                                      __import__("hashlib").sha256(n8n_gmail_output_witness.node_name.encode()).hexdigest()
+                                      if n8n_gmail_output_witness is not None else None),
                                   "n8n_execution_hostname": (n8n_execution_verifier.host if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
@@ -617,6 +623,17 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(422,{"error":"invalid_job_query"})
                 except DurableQueueError as exc:
                     self._send(exc.status,{"error":str(exc)})
+                return
+            if route.path == "/api/n8n-gmail-output-witness-history":
+                if n8n_gmail_output_witness is None:
+                    self._send(403,{"error":"n8n_gmail_output_witness_disabled"})
+                elif route.query:
+                    self._send(422,{"error":"invalid_n8n_gmail_witness_history_query"})
+                else:
+                    try:
+                        self._send(200,n8n_gmail_output_witness.history())
+                    except N8NGmailOutputError as exc:
+                        self._send(exc.status,{"error":str(exc)})
                 return
             if route.path == "/api/signed-gmail-artifact-bindings":
                 if signed_gmail_binding is None:
@@ -913,6 +930,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/google-gmail-inbox",
                                  "/api/gmail-sent-evidence",
                                  "/api/signed-gmail-artifact-import",
+                                 "/api/n8n-gmail-output-witness",
                                  "/api/managed-connector-add",
                                  "/api/managed-connector-revoke",
                                  "/api/managed-webhook-preview",
@@ -2255,6 +2273,48 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 else:
                     self._send(code,result)
                 return
+            if self.path == "/api/n8n-gmail-output-witness":
+                if n8n_gmail_output_witness is None:
+                    self._send(403,{"error":"n8n_gmail_output_witness_disabled"})
+                    return
+                action="N8N_GMAIL_SEND_OUTPUT_VERIFY"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                if (type(data) is not dict or
+                        set(data)!={"plan_id","current_password","consent"} or
+                        type(data.get("current_password")) is not str or
+                        data.get("consent")!="VERIFY_ONE_N8N_GMAIL_SEND_NODE_GET"):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"invalid_n8n_gmail_witness_consent_or_fields"})
+                    return
+                if operator_auth is None:
+                    self._audit_event(action,"DENIED")
+                    self._send(403,{"error":"real_owner_required"})
+                    return
+                verified=operator_auth.confirm_current_password(data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                try:
+                    result=n8n_gmail_output_witness.verify_one(
+                        {"plan_id":data["plan_id"]})
+                except N8NGmailOutputError as exc:
+                    self._audit_event(action,"UNCERTAIN" if exc.status==503 else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                outcome=("SUCCESS" if result["status"]=="PROVIDER_SEND_NODE_ID_CORRELATED"
+                         else "UNCERTAIN" if result["status"]=="LOOKUP_UNCERTAIN"
+                         else "FAILED")
+                if not self._audit_event(action,outcome):
+                    self._send(503,{"error":"n8n_gmail_witness_audit_uncertain_check_history"})
+                else:
+                    self._send(200,result)
+                return
             if self.path == "/api/signed-gmail-artifact-import":
                 if signed_gmail_binding is None:
                     self._send(403, {"error":"signed_gmail_binding_disabled"})
@@ -2765,7 +2825,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_scheduled_openai=False,
                        enable_n8n_execution_verify=False,
                        enable_gmail_sent_evidence=False,
-                       enable_signed_gmail_artifact_binding=False):
+                       enable_signed_gmail_artifact_binding=False,
+                       enable_official_n8n_gmail_output=False):
     """Refuse to bind until one offline owner verifier is provisioned."""
     home = Path.home() / ".ai-automation-studio"
     operator = LocalOperatorAuth.load(home / "operator.json")
@@ -2782,6 +2843,8 @@ def start_local_server(port=8765, enable_local_agent=False,
     # The local-Ollama flag still requires interactive local agent enablement.
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
         raise ValueError("managed_autopilot_requires_encrypted_managed_webhooks")
+    if enable_official_n8n_gmail_output and not enable_signed_gmail_artifact_binding:
+        raise ValueError("n8n_gmail_output_requires_signed_gmail_binding")
     if enable_signed_gmail_artifact_binding and not enable_gmail_sent_evidence:
         raise ValueError("signed_gmail_binding_requires_evidence")
     if enable_gmail_sent_evidence and not (
@@ -2853,6 +2916,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     n8n_execution_verifier = None
     gmail_evidence = None
     signed_gmail_binding = None
+    n8n_gmail_witness = None
     durable_queue = None
     shared_gate = threading.BoundedSemaphore(1)
     shared_gate_lock = threading.Lock()
@@ -2926,10 +2990,15 @@ def start_local_server(port=8765, enable_local_agent=False,
         if enable_signed_gmail_artifact_binding:
             signed_gmail_binding = SignedGmailArtifactBinding(
                 n8n_execution_verifier, managed)
+        if enable_official_n8n_gmail_output:
+            n8n_gmail_witness = N8NGmailOutputWitness(
+                n8n_execution_verifier, signed_gmail_binding,
+                gmail_node_name=read_runtime_secret("AAS_N8N_GMAIL_SEND_NODE_NAME"))
         if enable_gmail_sent_evidence:
             gmail_evidence = GmailSentEvidence(
                 n8n_execution_verifier, gmail,
-                signed_artifact_binding=signed_gmail_binding)
+                signed_artifact_binding=signed_gmail_binding,
+                official_n8n_output_witness=n8n_gmail_witness)
         if plan_store is not None and model_safety is not None:
             durable_queue = LocalDurablePlanQueue(
                 plan_store, model_safety, shared_gate, shared_gate_lock,
@@ -2975,6 +3044,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                             n8n_execution_verifier=n8n_execution_verifier,
                             gmail_sent_evidence=gmail_evidence,
                             signed_gmail_binding=signed_gmail_binding,
+                            n8n_gmail_output_witness=n8n_gmail_witness,
                             durable_jobs=durable_queue,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
@@ -3093,6 +3163,8 @@ def main(argv=None):
                         help="Explicitly opt into owner-clicked GET-only official n8n execution checks; reuses existing private plan store without enabling OpenAI or Ollama. Requires encrypted managed webhooks and externally provisioned n8n API config.")
     parser.add_argument("--enable-managed-autopilot", action="store_true",
                         help="Explicitly enable bounded owner-approved schedules for encrypted managed HTTPS connectors; requires --enable-encrypted-managed-webhooks.")
+    parser.add_argument("--enable-official-n8n-gmail-output", action="store_true",
+                        help="Require an owner-approved second read-only official n8n execution GET to validate pinned Gmail Send node message output before Stage120 Gmail read. Requires Stage121 signed binding.")
     parser.add_argument("--enable-signed-gmail-artifact-binding", action="store_true",
                         help="Require an owner-imported HMAC-bound Gmail message identity for Stage 120; fail closed without signed proof.")
     parser.add_argument("--enable-gmail-sent-evidence", action="store_true",
@@ -3228,8 +3300,9 @@ def main(argv=None):
                            enable_scheduled_openai=args.enable_scheduled_openai,
                            enable_n8n_execution_verify=args.enable_n8n_execution_verify,
                            enable_gmail_sent_evidence=args.enable_gmail_sent_evidence,
-                           enable_signed_gmail_artifact_binding=args.enable_signed_gmail_artifact_binding)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError) as exc:
+                           enable_signed_gmail_artifact_binding=args.enable_signed_gmail_artifact_binding,
+                           enable_official_n8n_gmail_output=args.enable_official_n8n_gmail_output)
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError, N8NGmailOutputError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
