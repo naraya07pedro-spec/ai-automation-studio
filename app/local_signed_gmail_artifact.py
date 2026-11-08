@@ -166,6 +166,14 @@ class SignedGmailArtifactBinding:
                         if old[:9] != identity:
                             raise SignedGmailArtifactError("gmail_binding_conflict")
                         return {"result":"ALREADY_RECORDED", **self._public(old)}
+                    # Never let a later signer retroactively certify a
+                    # previously checked, unsigned Stage 120 Gmail result.
+                    if self.db.execute("""SELECT 1 FROM sqlite_master
+                            WHERE type='table' AND name='gmail_sent_evidence'""").fetchone():
+                        if self.db.execute("""SELECT 1 FROM gmail_sent_evidence
+                                WHERE plan_id=?""", (data["plan_id"],)).fetchone():
+                            raise SignedGmailArtifactError(
+                                "prior_gmail_check_cannot_be_retroactively_bound")
                     self.db.execute("""INSERT INTO signed_gmail_artifact_bindings
                         (plan_id,connector_id,delivery_id,execution_id,
                          signed_message_sha256,gmail_id_sha256,
