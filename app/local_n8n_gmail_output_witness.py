@@ -13,7 +13,7 @@ import sqlite3
 
 from local_agent_task_plans import ID_PATTERN as PLAN_ID
 from local_gmail_sent_evidence import MESSAGE_ID
-from local_n8n_execution_verifier import NODE, WORKFLOW
+from local_n8n_execution_verifier import NODE, _inbound_binding
 from local_signed_gmail_artifact import SignedGmailArtifactError
 
 MAX_TOTAL = 100
@@ -182,6 +182,9 @@ class N8NGmailOutputWitness:
             response=self.n8n._fetcher(self.n8n.host,signed[5],self.n8n._key)
             if (type(response) is not dict or "_api_error" in response):
                 uncertain=True
+                got=None
+            elif not _inbound_binding(response,self.n8n.node_name,
+                                      signed[2],signed[3],signed[4]):
                 got=None
             else:
                 got=extract_send_node_message_id(
