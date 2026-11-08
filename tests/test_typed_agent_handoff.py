@@ -252,7 +252,8 @@ class TypedHandoffContract(unittest.TestCase):
                          "COMMITTED_RECEIPT_NOTE_COMPATIBLE")
         self.assertTrue(result["target_note_content_compatible"])
         self.assertFalse(result["note_write_provenance_proven"])
-        self.assertNotIn("56",json.dumps(result))
+        self.assertNotIn('"value": "56"',json.dumps(result))
+        self.assertNotIn("Owner-reviewed typed result:",json.dumps(result))
         changed=self.vault.put({"project_id":PROJECT,"agent_id":DST,
             "note_id":"imported_result","text":"Different owner-authored result",
             "source_kind":"OWNER_NOTE","source_label":"owner","retention_days":30,
