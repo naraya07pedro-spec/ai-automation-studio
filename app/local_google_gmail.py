@@ -38,9 +38,13 @@ def _official_json(url, form=None, bearer=None):
         re.escape(GMAIL_BASE) +
         r"/messages/[A-Za-z0-9_-]{1,128}\?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date",
         url) is not None
+    sent_message_detail = re.fullmatch(
+        re.escape(GMAIL_BASE) +
+        r"/messages/[A-Za-z0-9_-]{1,128}\?format=metadata&metadataHeaders=To&metadataHeaders=Subject",
+        url) is not None
     if not (url == TOKEN_ENDPOINT or url == GMAIL_BASE + "/profile"
             or url == GMAIL_BASE + "/messages?maxResults=5&labelIds=INBOX"
-            or message_detail):
+            or message_detail or sent_message_detail):
         raise GmailConnectorError("google_endpoint_not_allowed", 422)
     if not url.startswith("https://"):
         raise GmailConnectorError("google_https_required", 422)
@@ -218,6 +222,46 @@ class GoogleGmailMetadata:
         return {"messages": result, "count": len(result),
                 "read_only": True, "source": "google_gmail_api"}
 
+
+
+    def sent_message_metadata(self, message_id):
+        """Fixed official Gmail metadata GET for one owner-supplied ID.
+
+        Returns To/Subject only in-process, never the message body. The caller
+        must not print, store or return the raw headers to a browser.
+        """
+        if (type(message_id) is not str or
+                re.fullmatch(r"[A-Za-z0-9_-]{1,128}", message_id, re.ASCII) is None):
+            raise GmailConnectorError("google_message_id_invalid", 422)
+        access = self._access_token()
+        doc = self._get(
+            GMAIL_BASE + "/messages/" + message_id +
+            "?format=metadata&metadataHeaders=To&metadataHeaders=Subject", access)
+        if doc.get("id") != message_id:
+            raise GmailConnectorError("google_message_identity_mismatch")
+        labels = doc.get("labelIds")
+        payload = doc.get("payload")
+        if (type(labels) is not list or len(labels) > 100
+                or type(payload) is not dict):
+            raise GmailConnectorError("google_gmail_response_invalid")
+        headers = payload.get("headers")
+        if type(headers) is not list or len(headers) > 100:
+            raise GmailConnectorError("google_gmail_response_invalid")
+        fields = {}
+        for item in headers:
+            if type(item) is not dict:
+                raise GmailConnectorError("google_gmail_response_invalid")
+            name, value = item.get("name"), item.get("value")
+            if type(name) is not str or type(value) is not str:
+                raise GmailConnectorError("google_gmail_response_invalid")
+            key = name.lower()
+            if key in ("to", "subject"):
+                if key in fields or len(value) > 1024:
+                    raise GmailConnectorError("google_gmail_response_invalid")
+                fields[key] = value
+        return {"id": message_id, "sent": "SENT" in labels
+                and "TRASH" not in labels,
+                "to": fields.get("to"), "subject": fields.get("subject")}
 
 def _bounded_int(value):
     return value if type(value) is int and 0 <= value <= 10**9 else None

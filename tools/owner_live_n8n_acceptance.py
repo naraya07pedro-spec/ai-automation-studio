@@ -71,6 +71,7 @@ class OwnerLiveClient:
             "/api/operator-login", "/api/operator-logout",
             "/api/local-agent-capabilities", "/api/signed-handoff-outcomes",
             "/api/n8n-execution-check-history", "/api/n8n-execution-check",
+            "/api/gmail-sent-evidence-history", "/api/gmail-sent-evidence",
         ):
             raise OwnerLiveAcceptanceError("local_endpoint_not_allowed")
         headers = {"Accept":"application/json"}
@@ -87,7 +88,8 @@ class OwnerLiveClient:
                           headers=headers,
                           method="POST" if values is not None else "GET")
         try:
-            with self.opener.open(request, timeout=18 if
+            with self.opener.open(request, timeout=30 if
+                                  path=="/api/gmail-sent-evidence" else 18 if
                                   path=="/api/n8n-execution-check" else 5) as response:
                 if response.status != 200:
                     raise OwnerLiveAcceptanceError("local_http_not_successful")
