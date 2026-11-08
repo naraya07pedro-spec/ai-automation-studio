@@ -325,5 +325,55 @@ class OwnerSignedGmailImportCLITests(unittest.TestCase):
                              for path,_ in self.calls))
 
 
+class StrictGmailSentCLIPreflightTests(unittest.TestCase):
+    def test_unsigned_owner_preflight_blocks_before_gmail(self):
+        from owner_gmail_sent_acceptance import OwnerGmailSentClient
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        client=object.__new__(OwnerGmailSentClient)
+        observed=[]
+        client._login=lambda p:None
+        client._logout=lambda:None
+        def request(path,values=None):
+            observed.append(path)
+            if path=="/api/n8n-execution-check-history":
+                return {"records":[{"plan_id":PLAN,"status":"EXECUTION_SUCCESS_CORRELATED",
+                                    "inbound_delivery_correlated":True}]}
+            if path=="/api/local-agent-capabilities":
+                return {"gmail_sent_artifact_verification":True,
+                        "signed_gmail_artifact_binding_required":True}
+            if path=="/api/signed-gmail-artifact-bindings":
+                return {"records":[]}
+            raise AssertionError("should not request "+path)
+        client._request=request
+        with self.assertRaisesRegex(OwnerLiveAcceptanceError,
+                                    "signed_gmail_binding_preflight_required"):
+            client.execute(mode="inspect",plan_id=PLAN,password="p")
+        self.assertNotIn("/api/gmail-sent-evidence",observed)
+
+    def test_signed_owner_preflight_allows_exact_plan_only(self):
+        from owner_gmail_sent_acceptance import OwnerGmailSentClient
+        client=object.__new__(OwnerGmailSentClient)
+        observed=[]
+        client._login=lambda p:None
+        client._logout=lambda:None
+        def request(path,values=None):
+            observed.append(path)
+            if path=="/api/n8n-execution-check-history":
+                return {"records":[{"plan_id":PLAN,"status":"EXECUTION_SUCCESS_CORRELATED",
+                                    "inbound_delivery_correlated":True}]}
+            if path=="/api/local-agent-capabilities":
+                return {"gmail_sent_artifact_verification":True,
+                        "signed_gmail_artifact_binding_required":True}
+            if path=="/api/signed-gmail-artifact-bindings":
+                return {"records":[{"plan_id":PLAN}]}
+            if path=="/api/gmail-sent-evidence-history":
+                return {"records":[]}
+            raise AssertionError(path)
+        client._request=request
+        result=client.execute(mode="inspect",plan_id=PLAN,password="p")
+        self.assertEqual(result["status"],"READY_FOR_ONE_GMAIL_SENT_METADATA_READ")
+        self.assertNotIn("/api/gmail-sent-evidence",observed)
+
+
 if __name__ == "__main__":
     unittest.main()
