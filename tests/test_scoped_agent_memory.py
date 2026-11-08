@@ -146,6 +146,7 @@ class ScopedMemoryStoreTests(unittest.TestCase):
             {**NOTE,"retention_days":True},
             {**NOTE,"retention_days":99999},
             {**NOTE,"expected_revision":False},
+            {**NOTE,"expected_revision":10**100},
             {**NOTE,"source_kind":"VERIFIED_PROVIDER"},
             {**NOTE,"source_label":"line\nbreak"},
             {**NOTE,"another":1},
@@ -154,6 +155,8 @@ class ScopedMemoryStoreTests(unittest.TestCase):
             with self.subTest(value=str(value)[:30]),self.assertRaises(ScopedMemoryError):
                 self.store.put(value)
         self.assertEqual(self.store.list("launch_project","research_agent"),[])
+        with self.assertRaisesRegex(ScopedMemoryError,"invalid_scoped_memory_revision"):
+            self.store.delete("launch_project","research_agent","baseline_note",10**100)
         with self.assertRaisesRegex(ScopedMemoryError,"invalid_scoped_memory_selection"):
             self.store.select("launch_project","research_agent",
                               ["baseline_note","baseline_note"])
