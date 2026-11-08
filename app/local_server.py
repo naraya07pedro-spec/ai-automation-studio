@@ -428,6 +428,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                       and local_agent_plan_store.scoped_memory_store is not None),
                                   "agent_profiles": agent_profiles is not None,
                                   "scoped_agent_memory": scoped_memory_store is not None,
+                                  "scoped_memory_at_rest_encrypted": (
+                                      scoped_memory_store is not None and
+                                      scoped_memory_store.at_rest_encrypted),
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -3075,6 +3078,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_local_documents=False,
                        enable_multi_documents=False,
                        enable_agent_memory=False,
+                       enable_encrypted_scoped_memory=False,
                        enable_plan_artifacts=False,
                        enable_plan_csv=False, enable_plan_actions=False,
                        enable_hn_story_read=False,
@@ -3156,9 +3160,13 @@ def start_local_server(port=8765, enable_local_agent=False,
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     if enable_agent_plans:
         agent_profiles = LocalAgentProfiles(home / "agent-profiles.sqlite3")
+    if enable_encrypted_scoped_memory and not (enable_agent_plans and enable_agent_memory):
+        raise ValueError("encrypted_scoped_memory_requires_plans_and_agent_memory")
     if enable_agent_plans and enable_agent_memory:
         scoped_memory_store = LocalScopedAgentMemory(
-            home / "scoped-agent-memory.sqlite3")
+            home / "scoped-agent-memory.sqlite3",
+            encryption_key=(read_runtime_secret("AAS_SCOPED_MEMORY_KEY")
+                            if enable_encrypted_scoped_memory else None))
     if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
@@ -3441,7 +3449,9 @@ def main(argv=None):
     parser.add_argument("--enable-local-agent", action="store_true",
                         help="Explicitly enable authenticated Ollama calls in browser.")
     parser.add_argument("--enable-agent-memory", action="store_true",
-                        help="Opt in to owner-curated plaintext local memory cards.")
+                        help="Opt in to owner-curated local memory cards; legacy global cards remain plaintext.")
+    parser.add_argument("--enable-encrypted-scoped-memory", action="store_true",
+                        help="Require AES-256-GCM at rest for Agent/project scoped notes. Requires plans, agent memory, cryptography, independent AAS_SCOPED_MEMORY_KEY. Existing plaintext notes need explicit OFFLINE migration.")
     parser.add_argument("--enable-agent-history", action="store_true",
                         help="Explicit opt-in local plaintext transcript storage.")
     parser.add_argument("--enable-agent-plans", action="store_true",
@@ -3495,6 +3505,8 @@ def main(argv=None):
         parser.error("choose encrypted or legacy plaintext managed-webhooks, not both")
     if args.enable_agent_memory and not args.enable_local_agent:
         parser.error("--enable-agent-memory requires --enable-local-agent")
+    if args.enable_encrypted_scoped_memory and not (args.enable_agent_memory and args.enable_agent_plans):
+        parser.error("--enable-encrypted-scoped-memory requires --enable-agent-memory and --enable-agent-plans")
     if args.enable_local_documents and not args.enable_local_agent:
         parser.error("--enable-local-documents requires --enable-local-agent")
     if args.enable_multi_documents and not args.enable_local_agent:
@@ -3584,6 +3596,7 @@ def main(argv=None):
         start_local_server(enable_local_agent=args.enable_local_agent,
                            enable_agent_history=args.enable_agent_history,
                            enable_agent_memory=args.enable_agent_memory,
+                           enable_encrypted_scoped_memory=args.enable_encrypted_scoped_memory,
                            enable_agent_plans=args.enable_agent_plans,
                            enable_agent_github_read=args.enable_agent_github_read,
                            enable_local_documents=args.enable_local_documents,
@@ -3607,7 +3620,7 @@ def main(argv=None):
                            enable_gmail_sent_evidence=args.enable_gmail_sent_evidence,
                            enable_signed_gmail_artifact_binding=args.enable_signed_gmail_artifact_binding,
                            enable_official_n8n_gmail_output=args.enable_official_n8n_gmail_output)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError, N8NGmailOutputError) as exc:
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError, N8NGmailOutputError, ScopedMemoryError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
