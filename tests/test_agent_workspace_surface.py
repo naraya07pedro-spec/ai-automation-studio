@@ -68,6 +68,20 @@ class AgentWorkspaceSurfaceTests(unittest.TestCase):
         self.assertEqual(self.get("/api/durable-jobs")[0], 401)
         self.assertEqual(self.get("/api/agent-typed-handoff-receipt?preview_id="+"a"*32)[0], 401)
 
+    def test_automations_page_login_shell_private_saved_core(self):
+        code, headers, html = self.get("/automations")
+        self.assertEqual(code, 200)
+        self.assertIn("text/html", headers.get("Content-Type", ""))
+        self.assertIn("<title>Automations | Personal AI Harness</title>", html)
+        self.assertIn('id="create-form"', html)
+        self.assertIn('id="run-form"', html)
+        self.assertIn("/api/local-create", html)
+        self.assertIn("/api/local-history", html)
+        self.assertNotIn("localStorage", html)
+        self.assertNotIn("innerHTML", html)
+        self.assertEqual(self.get("/api/local-workflows")[0], 401)
+        self.assertEqual(self.get("/api/local-history?workflow_id=example")[0], 401)
+
     def test_existing_mission_unchanged_and_no_unreviewed_action(self):
         old_status, _, old_html = self.get("/mission")
         self.assertEqual(old_status, 200)

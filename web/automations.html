@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Automations | Personal AI Harness</title>
+<style>
+:root{font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#242d28;background:#f5f5f1;--paper:#fff;--line:#dfe5df;--muted:#647068;--blue:#344f89;--ink:#242d28}
+*{box-sizing:border-box}body{margin:0;min-height:100vh}a{color:var(--blue);text-decoration:none}button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.48;cursor:not-allowed}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #819bc7;outline-offset:2px}[hidden]{display:none!important}
+header{background:#fff;border-bottom:1px solid var(--line);padding:19px clamp(20px,4vw,52px);display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.identity{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:-.025em}.mark{background:#24302a;color:#f0f6ef;width:33px;height:33px;border-radius:9px;display:grid;place-items:center;font-size:12px}nav{display:flex;align-items:center;gap:18px;font-size:12px;flex-wrap:wrap}
+main{max-width:1220px;margin:0 auto;padding:44px clamp(20px,4vw,52px) 80px}.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:750;color:#69796d}h1{font:400 clamp(33px,4.8vw,52px)/1.13 Georgia,serif;letter-spacing:-.05em;margin:8px 0 12px}h2{font-size:15px;margin:0 0 12px;letter-spacing:-.02em}h3{font-size:13px;margin:0}.lede{max-width:720px;color:var(--muted);line-height:1.75;margin:0 0 26px}
+.columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.86fr);gap:19px;align-items:start}.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:23px;margin-bottom:18px;min-width:0}.split{display:flex;justify-content:space-between;align-items:center;gap:13px;flex-wrap:wrap}.muted{color:var(--muted);font-size:11px;line-height:1.7}.status{color:var(--muted);font-size:11px;line-height:1.75;overflow-wrap:anywhere}.status.error{color:#a1433c}.notice{background:#f9f5eb;color:#745c39;border:1px solid #ece3d2;border-radius:9px;padding:11px 13px;font-size:11px;line-height:1.75}
+.field{margin-top:14px}.field label,label.form-label{display:block;font-size:11px;font-weight:670;color:#56625a;margin:0 0 7px}input,select{width:100%;border:1px solid #d0d9d3;background:white;border-radius:8px;padding:10px 12px;color:var(--ink);outline:none}input:focus,select:focus{border-color:#8198bc;box-shadow:0 0 0 3px #9daed226}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.wide{grid-column:1/-1}
+.button{border:1px solid #d0dad3;background:white;padding:10px 14px;border-radius:8px;color:#26342e;font-size:12px;font-weight:650}.button:hover{background:#f4f7f5}.button.primary{background:var(--blue);border-color:var(--blue);color:#fff}.button.primary:hover{background:#293f70}.buttons{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:15px}.filters{display:flex;gap:7px;flex-wrap:wrap;margin:15px 0}.filters button{font-size:11px;border:1px solid #dce3dd;border-radius:20px;padding:7px 11px;color:#56655b;background:white}.filters button.active{background:#25312b;border-color:#25312b;color:white}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:11px}.automation{display:flex;flex-direction:column;gap:9px;text-align:left;padding:17px;border:1px solid #dee5df;border-radius:11px;background:#fff;min-height:143px}.automation:hover,.automation.selected{border-color:#839bb7;background:#f7f9fc}.automation strong{font-size:13px}.automation small{font-size:11px;color:var(--muted)}.automation .meta{margin-top:auto}.tag{display:inline-block;font-size:10px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;background:#eef2f8;color:#516887;border-radius:5px;padding:3px 7px}.tag.draft{background:#f7f2e9;color:#81613e}
+dl{display:grid;grid-template-columns:145px 1fr;gap:8px;margin:14px 0;font-size:11px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+.receipt{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7f4;border:1px solid #e1e8e2;border-radius:9px;max-height:270px;overflow:auto;font:11px/1.75 ui-monospace,Consolas,monospace;padding:14px;color:#40534a}
+.gate{position:fixed;inset:0;background:#172720b5;display:grid;place-items:center;padding:18px;z-index:10}.login{background:#fff;max-width:420px;width:100%;border-radius:17px;padding:31px;box-shadow:0 20px 70px #0004}.login h2{font:400 28px Georgia,serif}.login p{font-size:12px;color:var(--muted)}
+@media(max-width:925px){.columns{grid-template-columns:1fr}}@media(max-width:550px){main{padding:29px 15px 60px}.panel{padding:17px}.fields{grid-template-columns:1fr}.filters{gap:5px}dl{grid-template-columns:1fr;gap:1px}dd{margin-bottom:8px}}
+</style>
+</head>
+<body>
+<header><div class="identity"><span class="mark">A/S</span>Personal AI Harness</div>
+<nav aria-label="Sections"><a href="/workspace">Workspace</a><a href="/delegations">Delegations</a><a href="/mission">Advanced</a><span id="session">Checking session</span><button class="button" id="logout" type="button" hidden>Sign out</button></nav></header>
+<main>
+ <div class="eyebrow">Reliable local execution / saved evidence</div>
+ <h1>Automations, minus the guesswork.</h1>
+ <p class="lede">Create a small rule, activate it deliberately, and evaluate uniquely identified events. These workflows store actual decisions in SQLite. They do not send email, call AI models, write to CRMs, or run external integrations.</p>
+ <div class="notice">Local rules are not autonomous AI Agents. For separately approved schedules, provider connections and outbound delivery, use <a href="/mission">Advanced controls</a>. A network timeout never means it's safe to duplicate an event.</div>
+ <div class="columns" style="margin-top:24px">
+  <div>
+   <section class="panel" aria-label="Saved local workflows">
+    <div class="split"><h2>Saved local workflows</h2><button class="button" id="refresh" type="button">Refresh</button></div>
+    <div class="filters" aria-label="Service filters"><button type="button" class="active" data-filter="all">All</button><button type="button" data-filter="automation">Automation</button><button type="button" data-filter="integration">Integration</button><button type="button" data-filter="consulting">Consulting</button></div>
+    <div class="cards" id="workflows" aria-live="polite"><span class="status">Sign in to load saved workflows.</span></div>
+    <p id="workflow-count" class="status"></p>
+   </section>
+   <section class="panel" aria-label="Create a local rule">
+    <h2>Create local rule</h2>
+    <p class="muted">Rules are simple, deterministic service and budget-tier checks. New workflows are saved as DRAFT; nothing is activated automatically.</p>
+    <form id="create-form" class="fields">
+     <div class="field"><label for="new-id">Unique ID</label><input id="new-id" required maxlength="40" pattern="[a-z][a-z0-9_-]{2,39}" autocomplete="off" spellcheck="false" placeholder="first_local_rule"></div>
+     <div class="field"><label for="new-name">Display name</label><input id="new-name" required maxlength="50" pattern="[A-Za-z0-9][A-Za-z0-9 ]{2,49}" autocomplete="off" placeholder="First Local Rule"></div>
+     <div class="field"><label for="new-filter">Service match</label><select id="new-filter"><option value="any">Any service</option><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+     <div class="field"><label for="new-budget">Minimum budget tier</label><select id="new-budget"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></div>
+     <div class="field wide"><label for="new-policy">Local follow-up policy</label><select id="new-policy"><option value="review_required">Needs human review</option><option value="draft_only">Draft-only decision</option></select></div>
+     <div class="wide buttons"><button class="button primary" id="create" type="submit">Save draft</button></div>
+    </form>
+    <p id="create-status" class="status" role="status" aria-live="polite">Choose exact rule conditions and a unique name.</p>
+   </section>
+  </div>
+  <div>
+   <section class="panel" aria-label="Current rule">
+    <div class="split"><h2>Selected workflow</h2><span id="chosen-status" class="tag">None</span></div>
+    <div id="workflow-details" class="status">Choose a saved rule to inspect its exact settings, version, and run count.</div>
+    <div class="buttons"><button class="button primary" id="activate" type="button" hidden>Activate reviewed rule</button><button class="button" id="refresh-history" type="button" disabled>Inspect run history</button></div>
+    <p class="notice" style="margin-top:15px">Activation changes only this local rule's status. It does not authorize scheduled tasks, external effects or AI execution.</p>
+   </section>
+   <section class="panel" aria-label="Evaluate one event">
+    <h2>Run one local decision</h2>
+    <p class="muted">Use pseudonymous event IDs only. Repeating the exact same event and input returns the saved result, while reusing an ID for different input is rejected.</p>
+    <form id="run-form">
+     <div class="field"><label for="event-id">Unique event ID</label><input id="event-id" required maxlength="60" pattern="[A-Za-z0-9_-]{3,60}" autocomplete="off" spellcheck="false" placeholder="example_event_001"></div>
+     <div class="fields">
+      <div class="field"><label for="service">Service</label><select id="service"><option value="automation">Automation</option><option value="integration">Integration</option><option value="consulting">Consulting</option></select></div>
+      <div class="field"><label for="budget">Budget tier</label><select id="budget"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></div>
+      <div class="field wide"><label for="timeline">Timeline</label><select id="timeline"><option value="urgent">Urgent</option><option value="soon">Soon</option><option value="flexible">Flexible</option></select></div>
+     </div>
+     <div class="buttons"><button class="button primary" id="run" type="submit" disabled>Evaluate and save event</button></div>
+    </form>
+    <p id="run-status" class="status" role="status" aria-live="polite">Select an ACTIVE local workflow to evaluate an event.</p>
+    <pre id="receipt" class="receipt" aria-live="polite">No event evaluated in this session.</pre>
+   </section>
+   <section class="panel" aria-label="Saved evidence">
+    <h2>Saved run history</h2>
+    <p class="muted">Read-only ledger, up to the latest 25 events. An empty visible page is not proof of all-time non-execution.</p>
+    <pre id="history" class="receipt" aria-live="polite">Choose a workflow and inspect history.</pre>
+   </section>
+  </div>
+ </div>
+</main>
+<div id="gate" class="gate"><form id="login-form" class="login"><div class="eyebrow">Single owner / private access</div><h2>Unlock Automations</h2><p>Saved workflow data requires your existing private owner session. No credential is stored in browser storage.</p><label class="form-label" for="password">Owner password</label><input id="password" type="password" autocomplete="current-password" required><div class="buttons"><button class="button primary" id="login" type="submit">Sign in</button></div><p id="login-status" class="status" role="status" aria-live="polite"></p></form></div>
+<script>
+"use strict";
+const el=id=>document.getElementById(id);
+let csrf="",items=[],current=null,filter="all",busy=false,sessionEpoch=0;
+function setStatus(id,value,error=false){const t=el(id);t.textContent=value;t.classList.toggle("error",error)}
+function lock(message){
+ csrf="";sessionEpoch++;items=[];current=null;busy=false;
+ el("gate").hidden=false;el("logout").hidden=true;el("session").textContent="Locked";
+ el("workflows").textContent="Sign in to load saved workflows.";el("workflow-count").textContent="";
+ el("workflow-details").textContent="Locked";el("history").textContent="Locked";
+ el("receipt").textContent="Locked";el("chosen-status").textContent="None";
+ el("password").value="";el("event-id").value="";
+ setStatus("login-status",message||"Sign in to continue.");setControls();
+}
+async function api(path,body){
+ const method=body===undefined?"GET":"POST",headers={};
+ if(method==="POST"){headers["Content-Type"]="application/json";headers["X-AAS-CSRF"]=csrf}
+ let response;try{response=await fetch(path,{method,headers,credentials:"same-origin",cache:"no-store",
+ ...(body===undefined?{}:{body:JSON.stringify(body)})})}catch(e){throw Error("connection_failed")}
+ let data;try{data=await response.json()}catch(e){throw Error("invalid_server_response")}
+ if(!response.ok){if(response.status===401)lock("Session expired. Sign in again.");throw Error(data.error||"request_failed")}
+ return data;
+}
+function setControls(){
+ const usable=!!csrf&&!busy;
+ el("refresh").disabled=!usable;el("create").disabled=!usable;
+ el("run").disabled=!usable||current?.status!=="ACTIVE";
+ el("refresh-history").disabled=!usable||!current;
+ el("activate").hidden=current?.status!=="DRAFT";el("activate").disabled=!usable||current?.status!=="DRAFT";
+}
+function renderItems(){
+ const list=el("workflows");list.replaceChildren();
+ const filtered=items.filter(w=>filter==="all"||w.service_filter===filter);
+ el("workflow-count").textContent=filtered.length+" shown · "+items.length+" saved (maximum 50)";
+ if(!filtered.length){list.textContent=items.length?"No workflows match this category.":"No saved workflows yet. Create a local draft below.";return}
+ for(const w of filtered){
+  const card=document.createElement("button");card.type="button";
+  card.className="automation"+(w.workflow_id===current?.workflow_id?" selected":"");
+  const tag=document.createElement("span");tag.className="tag"+(w.status==="DRAFT"?" draft":"");tag.textContent=w.status;
+  const title=document.createElement("strong");title.textContent=w.display_name;
+  const details=document.createElement("small");details.textContent=(w.service_filter==="any"?"All services":w.service_filter)+
+   " · minimum tier "+w.min_budget_tier;
+  const meta=document.createElement("small");meta.className="meta";meta.textContent="Version "+w.version+" · "+w.run_count+" saved runs";
+  card.append(tag,title,details,meta);
+  card.addEventListener("click",()=>chooseWorkflow(w));list.append(card);
+ }
+}
+function chooseWorkflow(w){
+ if(!w)return;
+ const previous=current?.workflow_id;
+ current=w;el("chosen-status").textContent=w.status;
+ const detail=el("workflow-details");detail.replaceChildren();
+ const caption=document.createElement("p");caption.textContent=w.display_name+" ("+w.workflow_id+")";detail.append(caption);
+ const data=[["Service filter",w.service_filter],["Minimum budget tier",w.min_budget_tier],
+  ["Local policy",w.followup_policy],["Status",w.status],["Version",w.version],
+  ["Recorded run count",w.run_count],["Control epoch",w.control_epoch]];
+ const list=document.createElement("dl");
+ for(const [a,b] of data){const dt=document.createElement("dt"),dd=document.createElement("dd");dt.textContent=a;dd.textContent=String(b);list.append(dt,dd)}
+ detail.append(list);
+ if(previous!==w.workflow_id){el("history").textContent="Choose Inspect run history to load the actual ledger.";
+ el("receipt").textContent="No event evaluated for the newly selected workflow.";
+ setStatus("run-status",w.status==="ACTIVE"?"Ready to evaluate an event once.":"Activate the reviewed draft first.");
+ }
+ renderItems();setControls();
+}
+async function refreshWorkflows(preferred){
+ if(!csrf)return;
+ const epoch=sessionEpoch;
+ try{
+  const data=await api("/api/local-workflows");
+  if(!csrf||sessionEpoch!==epoch)return;
+  if(data.mode!=="LOCAL_RULE_CORE"||!Array.isArray(data.workflows))throw Error("unrecognized_workflow_contract");
+  items=data.workflows;
+  const target=items.find(x=>x.workflow_id===(preferred||current?.workflow_id));
+  if(target)chooseWorkflow(target);
+  else{current=null;el("chosen-status").textContent="None";el("workflow-details").textContent="Select a saved rule.";renderItems();setControls()}
+ }catch(e){el("workflows").textContent="Real local workflow catalog unavailable: "+e.message;setStatus("create-status","Cannot verify local rules.",true)}
+}
+async function loadHistory(){
+ const w=current;if(!csrf||!w||busy)return;
+ const epoch=sessionEpoch;
+ try{
+  const data=await api("/api/local-history?workflow_id="+encodeURIComponent(w.workflow_id));
+  if(!csrf||epoch!==sessionEpoch||current?.workflow_id!==w.workflow_id)return;
+  if(data.status!=="LOCAL_HISTORY"||!Array.isArray(data.runs))throw Error("invalid_history");
+  const lines=["Workflow "+w.workflow_id+" · total "+data.total+" saved runs · latest "+data.runs.length,""];
+  for(const x of data.runs){lines.push(x.event_id+" · "+x.decision+"\nReason: "+x.reason+
+   "\nService: "+x.service_code+" · Tier "+x.budget_tier+" · "+x.timeline+
+   "\nSaved: "+x.created_at+" · workflow version "+x.workflow_version,"")}
+  el("history").textContent=lines.length>2?lines.join("\n"):"No previously saved events.";
+ }catch(e){el("history").textContent="Run history not available: "+e.message}
+}
+async function createWorkflow(event){
+ event.preventDefault();if(!csrf||busy)return;
+ const body={workflow_id:el("new-id").value.trim(),display_name:el("new-name").value.trim(),
+  service_filter:el("new-filter").value,min_budget_tier:Number(el("new-budget").value),
+  followup_policy:el("new-policy").value};
+ busy=true;setControls();setStatus("create-status","Saving new local-only draft…");
+ try{
+  const result=await api("/api/local-create",body);
+  if(result.status!=="CREATED_DRAFT"||result.external_dispatch_count!==0)throw Error("create_outcome_unexpected_check_catalog");
+  setStatus("create-status","Draft "+body.workflow_id+" saved. Review and activate it separately.");
+  el("create-form").reset();await refreshWorkflows(body.workflow_id);
+ }catch(e){setStatus("create-status","Creation not confirmed: "+e.message+". Inspect saved workflows before trying again.",true)}
+ finally{busy=false;setControls()}
+}
+async function activateWorkflow(){
+ const w=current;if(!csrf||busy||w?.status!=="DRAFT")return;
+ if(!confirm("Activate exactly this LOCAL rule?\n\n"+w.display_name+" · "+w.workflow_id+
+  "\nService: "+w.service_filter+"\nMinimum tier: "+w.min_budget_tier+
+  "\nPolicy: "+w.followup_policy+"\n\nNo external requests or autonomous dispatch."))return;
+ busy=true;setControls();
+ try{
+  const result=await api("/api/local-activate",{workflow_id:w.workflow_id,expected_version:w.version});
+  if(result.status!=="ACTIVE_LOCAL"||result.external_dispatch_count!==0)throw Error("activation_outcome_unexpected");
+  setStatus("run-status","Rule activated locally. No event evaluated yet.");
+  await refreshWorkflows(w.workflow_id);
+ }catch(e){setStatus("run-status","Activation outcome not verified: "+e.message+". Inspect the catalog.",true)}
+ finally{busy=false;setControls()}
+}
+async function runEvent(event){
+ event.preventDefault();const w=current;if(!csrf||busy||w?.status!=="ACTIVE")return;
+ const body={workflow_id:w.workflow_id,event_id:el("event-id").value.trim(),service_code:el("service").value,
+  budget_tier:Number(el("budget").value),timeline:el("timeline").value};
+ if(!confirm("Record ONE deterministic LOCAL decision?\n\nWorkflow: "+body.workflow_id+"\nEvent ID: "+body.event_id+
+  "\nService: "+body.service_code+" · tier "+body.budget_tier+" · "+body.timeline+
+  "\n\nNo AI calls, email, external APIs, or automatic retries."))return;
+ busy=true;setControls();setStatus("run-status","Evaluating and recording local rule…");
+ try{
+  const result=await api("/api/local-run",body);
+  if(!["RECORDED_LOCAL","REPLAYED_LOCAL"].includes(result.status)||result.external_dispatch_count!==0)
+   throw Error("run_receipt_unexpected_check_history");
+  el("receipt").textContent="SAVED LOCAL RECEIPT\n"+JSON.stringify(result,null,2);
+  setStatus("run-status",result.status==="REPLAYED_LOCAL"?"Exact event already existed. Returned its original saved decision.":"New local decision stored, with no external action.");
+  await refreshWorkflows(w.workflow_id);
+ }catch(e){
+  setStatus("run-status","No verified new result: "+e.message+". Inspect run history. Do not change IDs just to retry.",true);
+  el("receipt").textContent="Outcome not confirmed. Inspect the server's saved run history.";
+ }finally{busy=false;setControls();if(csrf&&current?.workflow_id===w.workflow_id)await loadHistory()}
+}
+async function unlock(){
+ el("gate").hidden=true;el("logout").hidden=false;el("session").textContent="Private local session";
+ el("password").value="";setControls();await refreshWorkflows();
+}
+el("login-form").addEventListener("submit",async e=>{
+ e.preventDefault();el("login").disabled=true;
+ try{
+  const r=await fetch("/api/operator-login",{method:"POST",credentials:"same-origin",cache:"no-store",
+   headers:{"Content-Type":"application/json"},body:JSON.stringify({password:el("password").value})});
+  const data=await r.json();if(!r.ok)throw Error(data.error||"login_failed");
+  csrf=data.csrf_token;sessionEpoch++;await unlock();
+ }catch(error){setStatus("login-status","Cannot sign in: "+error.message,true)}
+ finally{el("password").value="";el("login").disabled=false}
+});
+el("logout").addEventListener("click",async()=>{try{await api("/api/operator-logout",{})}catch(e){}lock("Signed out.")});
+for(const button of document.querySelectorAll(".filters button")){
+ button.addEventListener("click",()=>{
+  filter=button.dataset.filter;
+  for(const other of document.querySelectorAll(".filters button"))other.classList.toggle("active",other===button);
+  renderItems();
+ });
+}
+el("refresh").addEventListener("click",()=>refreshWorkflows());
+el("refresh-history").addEventListener("click",loadHistory);
+el("create-form").addEventListener("submit",createWorkflow);
+el("activate").addEventListener("click",activateWorkflow);
+el("run-form").addEventListener("submit",runEvent);
+(async()=>{
+ try{
+  const r=await fetch("/api/operator-session",{credentials:"same-origin",cache:"no-store"}),data=await r.json();
+  if(data.authenticated&&data.csrf_token){csrf=data.csrf_token;sessionEpoch++;await unlock()}
+  else lock("Enter the private owner password.");
+ }catch(e){lock("Local server unavailable. Use your private localhost connection or tunnel.")}
+})();
+</script>
+</body>
+</html>
