@@ -231,6 +231,9 @@ class DelegationContract(unittest.TestCase):
         self.assertEqual(status, 200)
         cookie = "aas_session=" + sess["cookie_token"]
         csrf = sess["csrf_token"]
+        status, capabilities = ask("GET", "/api/local-agent-capabilities", cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(capabilities["bounded_agent_delegation"])
         self.assertEqual(ask("POST", "/api/durable-job-create",
                   {**request(), "current_password": PASSWORD},
                   cookie=cookie)[0], 403)
