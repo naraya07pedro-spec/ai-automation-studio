@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 from local_agent_profiles import LocalAgentProfiles
 from local_scoped_agent_memory import LocalScopedAgentMemory, ScopedMemoryError
-from local_agent_task_plans import LocalAgentPlanStore, PlanError
+from local_agent_task_plans import LocalAgentPlanStore, PlanError, propose_readonly_plan
 from local_operator_auth import LocalOperatorAuth
 from local_security_audit import LocalSecurityAudit
 from local_server import create_handler
@@ -194,6 +194,29 @@ class ScopedPlanBindingTests(unittest.TestCase):
     def create(self):
         return self.plans.create(PLAN,agent_binding=self.binding,
                                   scoped_memory_refs=self.refs())
+
+    def test_full_length_scoped_memory_reaches_real_planner_as_untrusted_data(self):
+        self.vault.put({**NOTE,"text":"n"*600,"expected_revision":1})
+        context,refs=self.vault.select("launch_project","research_agent",
+                                       ["baseline_note"])
+        captured=[]
+        def fake_transport(payload):
+            captured.append(payload)
+            return {"message":{"content":json.dumps({"steps":PLAN["steps"]})}}
+        output=propose_readonly_plan(PLAN["goal"],PLAN["model"],
+                 transport=fake_transport,
+                 memory_context=context,
+                 agent_context=self.profiles.context("research_agent")["planning"])
+        self.assertEqual(output["steps"],PLAN["steps"])
+        self.assertEqual(len(captured),1)
+        content=json.dumps(captured[0]["messages"])
+        self.assertIn("OWNER_CURATED_UNVERIFIED",content)
+        self.assertIn("n"*600,content)
+        self.assertNotIn("n"*600,captured[0]["messages"][0]["content"])
+        stored=self.plans.create(output,agent_binding=self.binding,
+                                  scoped_memory_refs=refs)
+        self.assertEqual(stored["status"],"PREPARED")
+        self.assertNotIn("n"*600,json.dumps(stored))
 
     def test_real_approval_next_and_version_change_block_remainder(self):
         created=self.create()
