@@ -23,6 +23,8 @@ REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z", re.ASCII)
 MAX_ROWS = 200
 MAX_DAILY_ATTEMPTS = 5
 MAX_ANSWER = 6000
+MAX_MODEL_ALLOWLIST = 24
+PROVIDERS = frozenset(("openai_responses","anthropic_messages","gemini_generate_content"))
 
 
 class OnDemandRemoteAIError(RuntimeError):
@@ -31,8 +33,31 @@ class OnDemandRemoteAIError(RuntimeError):
         self.status = status
 
 
+def validate_model_allowlist(items):
+    """Owner exact provider/model pairs. None retains legacy choice mode."""
+    if items is None:
+        return None
+    if (type(items) is not list or not 1 <= len(items) <= MAX_MODEL_ALLOWLIST):
+        raise OnDemandRemoteAIError("invalid_remote_model_allowlist", 422)
+    choices = set()
+    for item in items:
+        if type(item) is not str or ":" not in item or len(item) > 160:
+            raise OnDemandRemoteAIError("invalid_remote_model_allowlist", 422)
+        provider, model = item.split(":", 1)
+        if (provider not in PROVIDERS or not valid_remote_model_name(model)
+                or (provider == "anthropic_messages"
+                    and ANTHROPIC_MODEL.fullmatch(model) is None)
+                or (provider == "gemini_generate_content"
+                    and GEMINI_MODEL.fullmatch(model) is None)
+                or (provider, model) in choices):
+            raise OnDemandRemoteAIError("invalid_remote_model_allowlist", 422)
+        choices.add((provider, model))
+    return frozenset(choices)
+
+
 class LocalOnDemandRemoteAI:
-    def __init__(self, database, *, runner=None, additional_runners=None):
+    def __init__(self, database, *, runner=None, additional_runners=None,
+                 model_allowlist=None, daily_attempt_limit=MAX_DAILY_ATTEMPTS):
         if additional_runners is None:
             additional_runners = {}
         if (type(additional_runners) is not dict
@@ -41,8 +66,19 @@ class LocalOnDemandRemoteAI:
                 or (runner is not None and not callable(runner))
                 or (runner is None and not additional_runners)):
             raise OnDemandRemoteAIError("remote_runner_required", 503)
+        if (type(daily_attempt_limit) is not int
+                or not 1 <= daily_attempt_limit <= MAX_DAILY_ATTEMPTS):
+            raise OnDemandRemoteAIError("invalid_remote_daily_attempt_limit", 422)
+        self.model_allowlist = validate_model_allowlist(model_allowlist)
+        self.daily_attempt_limit = daily_attempt_limit
         self.runner = runner
         self.additional_runners = dict(additional_runners)
+        enabled = set((["openai_responses"] if runner is not None else [])
+                      + list(additional_runners))
+        if (self.model_allowlist is not None and not
+                any(provider in enabled for provider, _ in self.model_allowlist)):
+            raise OnDemandRemoteAIError(
+                "remote_model_allowlist_has_no_enabled_provider", 422)
         self.model_safety = None
         self.agent_gate = None
         self.agent_state_lock = None
@@ -193,7 +229,9 @@ class LocalOnDemandRemoteAI:
         return {
             "enabled": True,
             "enabled_providers": self.enabled_providers(),
-            "maximum_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
+            "maximum_attempts_per_utc_day": self.daily_attempt_limit,
+            "remote_model_allowlist_enforced": self.model_allowlist is not None,
+            "approved_models": self.approved_models(),
             "maximum_persisted_attempts": MAX_ROWS,
             # Never reveal stored response text in a summary list. An owner
             # must deliberately select one receipt after authentication.
@@ -203,9 +241,22 @@ class LocalOnDemandRemoteAI:
             ],
         }
 
-    def enabled_providers(self):
-        return (["openai_responses"] if self.runner is not None else []) + sorted(
+    def approved_models(self):
+        if self.model_allowlist is None:
+            return None
+        enabled = (["openai_responses"] if self.runner is not None else []) + list(
             self.additional_runners)
+        return [{"provider": provider, "model": model}
+                for provider, model in sorted(self.model_allowlist)
+                if provider in enabled]
+
+    def enabled_providers(self):
+        providers = (["openai_responses"] if self.runner is not None else []) + sorted(
+            self.additional_runners)
+        if self.model_allowlist is None:
+            return providers
+        return [provider for provider in providers
+                if any(p == provider for p, _ in self.model_allowlist)]
 
     def _claim(self, request):
         now = self._utcnow()
@@ -221,7 +272,7 @@ class LocalOnDemandRemoteAI:
                     raise OnDemandRemoteAIError("remote_ask_capacity_reached", 409)
                 if self.db.execute(
                     "SELECT COUNT(*) FROM remote_asks WHERE substr(created_utc,1,10)=?",
-                    (now[:10],)).fetchone()[0] >= MAX_DAILY_ATTEMPTS:
+                    (now[:10],)).fetchone()[0] >= self.daily_attempt_limit:
                     raise OnDemandRemoteAIError("remote_ask_daily_cap_reached", 429)
                 self.db.execute(
                     """INSERT INTO remote_asks(request_id,prompt_sha256,model,
@@ -281,6 +332,11 @@ class LocalOnDemandRemoteAI:
                   else self.additional_runners.get(provider))
         if runner is None:
             raise OnDemandRemoteAIError("remote_provider_not_enabled", 403)
+        if (self.model_allowlist is not None
+                and (provider, request["model"]) not in self.model_allowlist):
+            # Refuse before model-safety claim, payment dispatch or idempotency
+            # ledger insertion. Never silently select an alternate model.
+            raise OnDemandRemoteAIError("remote_model_not_owner_allowlisted", 403)
         # Checking before acquiring the model gate gives duplicate callers a
         # clear receipt lookup path even if the first POST is still running.
         with self.lock:
