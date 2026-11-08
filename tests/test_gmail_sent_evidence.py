@@ -134,6 +134,7 @@ class GmailSentEvidenceTests(unittest.TestCase):
         self.assertEqual(self.gmail.calls,[MID])
 
     def test_restart_quarantines_in_flight(self):
+        self.db.execute("INSERT INTO agent_connector_handoffs VALUES(?)",("b"*24,))
         self.db.execute("INSERT INTO gmail_sent_evidence(plan_id,gmail_message_sha256,"
                         "expected_to_sha256,expected_subject_sha256,n8n_execution_sha256,"
                         "status,claimed_at_utc) VALUES(?,?,?,?,?,?,?)",
@@ -161,6 +162,7 @@ class GmailSentEvidenceTests(unittest.TestCase):
 
     def test_daily_limit_checks_before_network(self):
         for i in range(5):
+            self.db.execute("INSERT INTO agent_connector_handoffs VALUES(?)",(str(i)*24,))
             self.db.execute("""INSERT INTO gmail_sent_evidence
                 (plan_id,gmail_message_sha256,expected_to_sha256,
                  expected_subject_sha256,n8n_execution_sha256,status,claimed_at_utc)
