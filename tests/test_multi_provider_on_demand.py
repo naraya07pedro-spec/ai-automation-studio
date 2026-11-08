@@ -316,14 +316,37 @@ class PersistentProviderLedger(unittest.TestCase):
             self.store.run(payload("d"*32,"gemini_generate_content","gemini-2.5-flash"))
         self.assertEqual(len(self.calls),1)
         self.store.close()
+        # Omission of CLI policy flags on restart MUST NOT restore unlimited models.
         self.store=LocalOnDemandRemoteAI(self.file,additional_runners={
-            "gemini_generate_content":self.gemini},
-            model_allowlist=["gemini_generate_content:gemini-2.5-flash"],
-            daily_attempt_limit=1)
+            "gemini_generate_content":self.gemini})
         self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.assertEqual(self.store.daily_attempt_limit,1)
+        self.assertEqual(self.store.approved_models(),[{
+            "provider":"gemini_generate_content","model":"gemini-2.5-flash"}])
         with self.assertRaisesRegex(OnDemandRemoteAIError,"daily_cap_reached"):
             self.store.run(payload("e"*32,"gemini_generate_content","gemini-2.5-flash"))
         self.assertEqual(len(self.calls),1)
+
+    def test_restart_will_not_silently_change_saved_models_or_daily_cap(self):
+        self.store.close()
+        self.store=LocalOnDemandRemoteAI(self.file,runner=self.openai,
+            model_allowlist=["openai_responses:gpt-5"],daily_attempt_limit=2)
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.store.close()
+        for extra in [
+            {"runner":self.openai,"model_allowlist":["openai_responses:gpt-4"]},
+            {"runner":self.openai,"model_allowlist":["openai_responses:gpt-5"],
+             "daily_attempt_limit":3},
+        ]:
+            with self.subTest(extra=extra),self.assertRaisesRegex(
+                   OnDemandRemoteAIError,"offline_owner_review"):
+                LocalOnDemandRemoteAI(self.file,**extra)
+        # Match/no-op flags, or no flags, honor identical persisted policy.
+        self.store=LocalOnDemandRemoteAI(self.file,runner=self.openai)
+        self.store.attach_gate(self.safety,self.gate,self.lock)
+        self.assertEqual(self.store.daily_attempt_limit,2)
+        self.assertEqual(self.store.approved_models(),[{
+            "provider":"openai_responses","model":"gpt-5"}])
 
     def test_invalid_model_policy_configuration_fails_closed(self):
         for allowlist in [
