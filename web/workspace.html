@@ -65,7 +65,7 @@ textarea{resize:vertical;min-height:94px;line-height:1.65}textarea:focus,input:f
 .agent-card strong{font-size:14px}.agent-card p{font-size:11px;color:var(--muted);line-height:1.65;margin:0;flex:1}
 .agent-card small{color:#7e8981;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
 .agent-card button{align-self:flex-start}
-.notice{background:#f7f4ee;color:#746551;border:1px solid #ebe2d3;border-radius:9px;padding:10px 13px;font-size:11px;line-height:1.6}
+.mem-tools{display:flex;align-items:center;justify-content:space-between;gap:7px;flex-wrap:wrap;margin-top:12px}.note-control{border:0;background:none;color:var(--blue);font-size:11px;padding:4px;font-weight:650}.note-row{display:flex;align-items:center;gap:5px;margin:8px 0}.note-row .memory-item{flex:1;margin:0}.note-row .note-control{flex:none}.note-details{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.cloud-config{padding:16px 20px;background:#f5f7fa;border:1px solid #d8e1ec;border-radius:11px;margin-top:16px}.cloud-config .hint{font-size:11px;color:#64707b}.cloud-config label{display:block;font-size:11px;font-weight:650;margin:10px 0 6px}.cloud-config .checkbox-line{display:flex;gap:8px;align-items:flex-start;font-size:11px;color:#4c5968}.cloud-config .checkbox-line input{width:auto;margin:3px 0}.danger-info{font-size:11px;color:var(--danger)!important}.dialog-actions{display:flex;justify-content:space-between;gap:10px;margin-top:19px;flex-wrap:wrap}.notice{background:#f7f4ee;color:#746551;border:1px solid #ebe2d3;border-radius:9px;padding:10px 13px;font-size:11px;line-height:1.6}
 .backdrop{position:fixed;inset:0;background:#1c2529a8;display:grid;place-items:center;z-index:20;padding:16px}
 .login{background:#fff;padding:32px;border-radius:17px;max-width:410px;width:100%;box-shadow:0 24px 85px #101d2040}.login h2{font:400 30px Georgia,serif;letter-spacing:-.05em;margin:0 0 10px}.login p{font-size:12px;color:var(--muted);line-height:1.7}
 dialog{border:1px solid var(--line);border-radius:16px;width:min(500px,calc(100% - 32px));max-height:90vh;overflow:auto;padding:27px;color:var(--ink);box-shadow:0 25px 100px #0004}dialog::backdrop{background:#131d20a8}
@@ -111,9 +111,19 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
         <div class="plan-actions"><button class="button primary" id="approve-plan" hidden type="button">Approve exact steps</button><button class="button primary" id="next-step" hidden type="button">Run next step</button><button class="button danger" id="cancel-plan" hidden type="button">Cancel plan</button><button class="button" id="resume-plan" hidden type="button">Acknowledge interruption</button></div>
        </div>
        <form id="task-form" class="compose">
-        <div class="compose-head"><div class="segment" role="group" aria-label="Work mode"><button type="button" id="mode-plan" class="selected" aria-pressed="true">Plan a task</button><button type="button" id="mode-ask" aria-pressed="false">Ask local AI</button></div><span class="quiet" id="mode-hint">Approval required before tools run</span></div>
+        <div class="compose-head"><div class="segment" role="group" aria-label="Work mode"><button type="button" id="mode-plan" class="selected" aria-pressed="true">Plan a task</button><button type="button" id="mode-ask" aria-pressed="false">Ask local AI</button><button type="button" id="mode-cloud" aria-pressed="false">Ask cloud AI</button></div><span class="quiet" id="mode-hint">Approval required before tools run</span></div>
         <label for="task" style="position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden">Task or question</label>
         <textarea id="task" maxlength="1200" required placeholder="Describe the result you want, in your own words."></textarea>
+        <section id="cloud-config" class="cloud-config" hidden aria-label="Cloud AI billing consent">
+          <label for="cloud-provider">Explicit provider</label><select id="cloud-provider"></select>
+          <label for="cloud-model">Exact provider model ID</label><input id="cloud-model" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Enter an available provider model ID">
+          <label for="cloud-owner">Current owner password for this request</label><input id="cloud-owner" type="password" autocomplete="off">
+          <label class="checkbox-line" for="cloud-consent"><input id="cloud-consent" type="checkbox">I explicitly authorize ONE potentially billable cloud text request. I have checked the provider's own pricing, quotas and account. No automatic retry.</label>
+          <p class="hint">Configured providers only. Shared five-attempt daily limit is NOT a monetary cap. Subscriptions cannot be reused as API credits. Provider-side billing must be checked separately.</p>
+          <div class="mem-tools"><label for="cloud-receipt-id">Recovery receipt ID (32 hexadecimal characters)</label><button class="note-control" type="button" id="cloud-receipt-check">Inspect receipt only</button></div>
+          <input id="cloud-receipt-id" maxlength="32" pattern="[0-9a-f]{32}" spellcheck="false" autocomplete="off" placeholder="No request ID yet">
+          <div id="cloud-result" class="state" role="status" aria-live="polite">No cloud request sent.</div>
+        </section>
         <div class="composer-actions"><span class="state" id="status" role="status" aria-live="polite">Sign in to begin.</span><button type="submit" class="button primary" id="submit-task">Propose steps</button></div>
        </form>
       </section>
@@ -128,7 +138,7 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
       <hr class="divider">
       <label for="project">Project scope (optional)</label><input id="project" maxlength="60" value="personal_workspace" autocomplete="off" spellcheck="false">
       <p class="hint">Project scope is used only when selecting scoped memory notes for a named Agent.</p>
-      <label>Context notes <span class="quiet">(select up to 3)</span></label><div id="memories" class="state">Choose an Agent to inspect its notes.</div>
+      <div class="mem-tools"><label style="margin:0">Context notes <span class="quiet">(select up to 3)</span></label><button id="new-note" class="note-control" type="button" disabled>New note</button></div><div id="memories" class="state">Choose an Agent to inspect its notes.</div><p class="hint">Notes are private plaintext SQLite data, not verified evidence. Editing one invalidates any plan bound to its previous revision.</p>
       <div class="capability" id="capabilities">Checking real capabilities. No simulated providers, connectors or background agents.</div>
      </aside>
     </div>
@@ -145,14 +155,25 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
 <dialog id="agent-dialog" aria-labelledby="dialog-title">
  <form id="agent-form"><div class="eyebrow">New specialist</div><h2 id="dialog-title">Create an Agent</h2><p>Profiles restrict which tools can appear in reviewed task plans. Instructions cannot override server policy.</p>
   <label for="new-id">Agent ID</label><input id="new-id" required maxlength="40" pattern="[a-z][a-z0-9_]{2,39}" placeholder="research_agent" autocomplete="off">
-  <label for="new-name">Name</label><input id="new-name" required maxlength="80" placeholder="Research Analyst" autocomplete="off">
+  <label for="new-name">Name</label><input id="new-name" required maxlength="64" placeholder="Research Analyst" autocomplete="off">
   <label for="new-category">Category</label><select id="new-category"><option value="research">Research</option><option value="engineering">Engineering</option><option value="business">Business</option><option value="creative">Creative</option><option value="productivity">Productivity</option><option value="personal">Personal</option></select>
-  <label for="new-desc">Description</label><input id="new-desc" maxlength="240" placeholder="What this Agent is for">
-  <label for="new-instructions">Operating instructions</label><textarea id="new-instructions" maxlength="1600" placeholder="Boundaries, preferred approach and output standards"></textarea>
+  <label for="new-desc">Description</label><input id="new-desc" maxlength="280" placeholder="What this Agent is for">
+  <label for="new-instructions">Operating instructions</label><textarea id="new-instructions" maxlength="1200" placeholder="Boundaries, preferred approach and output standards"></textarea>
   <label>Permitted read-only tools</label><div class="tools"><label><input type="checkbox" value="calculate" checked> Calculate</label><label><input type="checkbox" value="utc_now" checked> UTC time</label></div>
   <label for="new-password">Re-enter owner password</label><input id="new-password" type="password" required autocomplete="off">
   <p id="agent-save-status" class="state" role="status"></p>
-  <div class="plan-actions" style="justify-content:flex-end"><button class="button" id="close-agent" type="button">Cancel</button><button class="button primary" type="submit" id="save-agent">Create saved profile</button></div>
+  <div class="dialog-actions"><button class="button danger" type="button" id="disable-agent" hidden>Disable Agent</button><div class="plan-actions" style="margin:0"><button class="button" id="close-agent" type="button">Cancel</button><button class="button primary" type="submit" id="save-agent">Create saved profile</button></div></div>
+ </form>
+</dialog>
+<dialog id="note-dialog" aria-labelledby="note-title">
+ <form id="note-form"><div class="eyebrow">Owner-curated scoped memory</div><h2 id="note-title">Create a note</h2><p id="note-scope">A note belongs only to the selected project and Agent. It never becomes a system instruction.</p>
+ <label for="note-id">Note ID</label><input id="note-id" required maxlength="32" pattern="[a-z][a-z0-9_-]{2,31}" autocomplete="off" spellcheck="false" placeholder="project_guidance">
+ <label for="note-text">Note content (max 600 characters)</label><textarea id="note-text" required maxlength="600"></textarea>
+ <label for="note-source">Owner-provided source label</label><input id="note-source" maxlength="96" autocomplete="off" placeholder="My own note">
+ <label for="note-retention">Retention from save</label><select id="note-retention"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">365 days</option></select>
+ <label for="note-password">Re-enter current owner password</label><input id="note-password" type="password" required autocomplete="off">
+ <p id="note-status" class="state" role="status" aria-live="polite"></p>
+ <div class="dialog-actions"><button class="button danger" id="delete-note" type="button" hidden>Delete note</button><div class="plan-actions" style="margin:0"><button class="button" id="close-note" type="button">Cancel</button><button class="button primary" id="save-note" type="submit">Save note</button></div></div>
  </form>
 </dialog>
 <script>
