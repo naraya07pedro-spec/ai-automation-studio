@@ -1,0 +1,40 @@
+name: Stage 125 read-only owner acceptance readiness
+
+on:
+  pull_request:
+    paths:
+      - 'tools/owner_acceptance_readiness.py'
+      - 'tests/test_owner_acceptance_readiness.py'
+      - 'docs/OWNER_ACCEPTANCE_READINESS_V1.md'
+      - '.github/workflows/owner-acceptance-readiness.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/owner_acceptance_readiness.py'
+      - 'tests/test_owner_acceptance_readiness.py'
+      - 'docs/OWNER_ACCEPTANCE_READINESS_V1.md'
+      - '.github/workflows/owner-acceptance-readiness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-readonly-progress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Test redaction, fail-closed preflight and read-only history
+        run: python -m unittest discover -s tests -p 'test_owner_acceptance_readiness.py' -v
+      - name: Compile CLI
+        run: python -m py_compile tools/owner_acceptance_readiness.py tests/test_owner_acceptance_readiness.py
