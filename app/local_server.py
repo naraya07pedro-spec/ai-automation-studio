@@ -74,6 +74,7 @@ from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorH
 from local_handoff_outcome_proof import SignedManualHandoffOutcome, HandoffOutcomeProofError
 from local_n8n_execution_verifier import N8NExecutionVerifier, ProviderExecutionError
 from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
+from local_typed_agent_handoff import LocalTypedAgentHandoff, TypedHandoffError
 from local_scoped_agent_memory import LocalScopedAgentMemory, ScopedMemoryError, MAX_NOTES as SCOPED_MAX_NOTES, MAX_SELECTED as SCOPED_MAX_SELECTED
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
@@ -128,7 +129,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    agent_connector_handoff=None, handoff_outcomes=None,
                    n8n_execution_verifier=None,
                    durable_jobs=None, agent_profiles=None,
-                   scoped_memory_store=None,
+                   scoped_memory_store=None, typed_handoff=None,
                    shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
@@ -369,6 +370,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 except ScopedMemoryError as exc:
                     self._send(exc.status, {"error":str(exc)})
                 return
+            if route.path == "/api/agent-typed-handoff-receipt":
+                if typed_handoff is None:
+                    self._send(403, {"error":"typed_agent_handoff_disabled"})
+                    return
+                try:
+                    query = parse_qs(route.query, strict_parsing=True)
+                    if set(query) != {"preview_id"} or len(query["preview_id"]) != 1:
+                        raise TypedHandoffError("invalid_handoff_preview_id",422)
+                    self._send(200, typed_handoff.receipt(query["preview_id"][0]))
+                except (ValueError,TypedHandoffError) as exc:
+                    self._send(getattr(exc,"status",422),{"error":str(exc)})
+                return
             if route.path == "/api/agent-profiles":
                 if agent_profiles is None:
                     self._send(403, {"error": "agent_profiles_disabled"})
@@ -404,6 +417,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
                                  "durable_job_queue": durable_jobs is not None,
+                                  "typed_agent_handoff": typed_handoff is not None,
                                   "bounded_agent_delegation": bool(
                                       durable_jobs is not None
                                       and local_agent_plan_store is not None
@@ -945,6 +959,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-multi-document-analyze",
                                  "/api/local-agent-device-acceptance",
                                  "/api/local-agent-timeout-acknowledge",
+                                 "/api/agent-typed-handoff-preview",
+                                 "/api/agent-typed-handoff-commit",
                                  "/api/agent-scoped-memory-save",
                                  "/api/agent-scoped-memory-delete",
                                  "/api/agent-profile-create",
@@ -1031,6 +1047,43 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/agent-typed-handoff-preview",
+                             "/api/agent-typed-handoff-commit"):
+                if typed_handoff is None:
+                    self._send(403,{"error":"typed_agent_handoff_disabled"})
+                    return
+                action="AGENT_TYPED_HANDOFF"
+                if not self._audit_event(action,"ATTEMPT"):
+                    self._send(503,{"error":"security_audit_restart_required"})
+                    return
+                if (type(data) is not dict
+                        or type(data.get("current_password")) is not str
+                        or operator_auth is None):
+                    self._audit_event(action,"DENIED")
+                    self._send(422,{"error":"owner_password_required"})
+                    return
+                verified=operator_auth.confirm_current_password(
+                    data["current_password"])
+                if verified!=200:
+                    self._audit_event(action,"DENIED")
+                    self._send(verified,{"error":(
+                        "operator_restart_required" if verified==503 else
+                        "operator_login_locked" if verified==429 else
+                        "invalid_operator_credentials")})
+                    return
+                values={k:v for k,v in data.items() if k!="current_password"}
+                try:
+                    result=(typed_handoff.preview(values) if self.path.endswith("-preview")
+                            else typed_handoff.commit(values))
+                except TypedHandoffError as exc:
+                    self._audit_event(action,"UNCERTAIN" if exc.status==503 else "DENIED")
+                    self._send(exc.status,{"error":str(exc)})
+                    return
+                if not self._audit_event(action,"SUCCESS"):
+                    self._send(503,{"error":"typed_handoff_audit_uncertain"})
+                else:
+                    self._send(200,result)
                 return
             if self.path in ("/api/agent-scoped-memory-save",
                              "/api/agent-scoped-memory-delete"):
@@ -3084,6 +3137,7 @@ def start_local_server(port=8765, enable_local_agent=False,
     agent_profiles = None
     memory_store = None
     scoped_memory_store = None
+    typed_handoff = None
     hn_policy = (HNStoryPolicy(home / "hn-story-grants.json")
                  if enable_hn_story_read else None)
     if enable_agent_memory:
@@ -3223,6 +3277,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             durable_queue = LocalDurablePlanQueue(
                 plan_store, model_safety, shared_gate, shared_gate_lock,
                 home / "durable-plan-jobs.sqlite3")
+            if agent_profiles is not None and scoped_memory_store is not None:
+                typed_handoff = LocalTypedAgentHandoff(
+                    durable_queue, home / "agent-typed-handoffs.sqlite3")
         server = ThreadingHTTPServer(
             ("127.0.0.1", port),
             create_handler(local_core=core, operator_auth=operator,
@@ -3269,6 +3326,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                             durable_jobs=durable_queue,
                             agent_profiles=agent_profiles,
                             scoped_memory_store=scoped_memory_store,
+                            typed_handoff=typed_handoff,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
@@ -3310,6 +3368,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed_autopilot.close()
         if outbound is not None:
             outbound.close()
+        if typed_handoff is not None:
+            typed_handoff.close()
         if durable_queue is not None:
             durable_queue.close()
         if agent_handoff is not None:

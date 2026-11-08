@@ -1,0 +1,50 @@
+name: Stage 130 typed owner-reviewed Agent handoff
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_typed_agent_handoff.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_typed_agent_handoff.py'
+      - 'docs/TYPED_AGENT_HANDOFF_V1.md'
+      - '.github/workflows/typed-agent-handoff.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_typed_agent_handoff.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_typed_agent_handoff.py'
+      - 'docs/TYPED_AGENT_HANDOFF_V1.md'
+      - '.github/workflows/typed-agent-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typed-handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11','3.12','3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile transfer, server, audit and tests
+        run: python -m py_compile app/local_typed_agent_handoff.py app/local_server.py app/local_security_audit.py tests/test_typed_agent_handoff.py
+      - name: Reviewed typed handoff and security acceptance
+        run: python -m unittest discover -s tests -p 'test_typed_agent_handoff.py' -v
+      - name: Earlier Agent policies and queue regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_agent_delegation.py' -v
+          python -m unittest discover -s tests -p 'test_scoped_agent_memory.py' -v
+          python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
+          python -m unittest discover -s tests -p 'test_agent_profiles.py' -v
