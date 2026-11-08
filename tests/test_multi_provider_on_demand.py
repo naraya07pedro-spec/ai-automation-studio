@@ -328,7 +328,7 @@ class PersistentProviderLedger(unittest.TestCase):
     def test_invalid_model_policy_configuration_fails_closed(self):
         for allowlist in [
             [],["auto:gpt-5"],["gemini_generate_content:a/b"],
-            ["anthropic_messages:gpt-5"],["openai_responses:gpt-5"]*2,
+            ["anthropic_messages:a:b"],["openai_responses:gpt-5"]*2,
             ["openai_responses:gpt-5","openai_responses:gpt-5"],
             [True],
         ]:
