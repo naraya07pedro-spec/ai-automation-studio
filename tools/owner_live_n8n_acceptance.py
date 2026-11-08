@@ -92,7 +92,8 @@ class OwnerLiveClient:
         try:
             with self.opener.open(request, timeout=30 if
                                   path=="/api/gmail-sent-evidence" else 18 if
-                                  path=="/api/n8n-execution-check" else 5) as response:
+                                  path in ("/api/n8n-execution-check",
+                                           "/api/n8n-gmail-output-witness") else 5) as response:
                 if response.status != 200:
                     raise OwnerLiveAcceptanceError("local_http_not_successful")
                 # Never expose large/hostile application responses.
