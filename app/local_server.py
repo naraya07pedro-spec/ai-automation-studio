@@ -74,6 +74,7 @@ from local_agent_connector_handoff import AgentConnectorHandoff, AgentConnectorH
 from local_handoff_outcome_proof import SignedManualHandoffOutcome, HandoffOutcomeProofError
 from local_n8n_execution_verifier import N8NExecutionVerifier, ProviderExecutionError
 from local_durable_plan_queue import LocalDurablePlanQueue, DurableQueueError
+from local_scoped_agent_memory import LocalScopedAgentMemory, ScopedMemoryError, MAX_NOTES as SCOPED_MAX_NOTES, MAX_SELECTED as SCOPED_MAX_SELECTED
 from local_agent_memory import (LocalAgentMemory, MemoryCardError, MAX_MEMORY_CARDS,
                                 MAX_SELECTED_MEMORY, valid_selection)
 from local_agent_conversation import (LocalAgentConversation, ConversationError,
@@ -127,6 +128,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    agent_connector_handoff=None, handoff_outcomes=None,
                    n8n_execution_verifier=None,
                    durable_jobs=None, agent_profiles=None,
+                   scoped_memory_store=None,
                    shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
@@ -345,6 +347,28 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path not in ("/", "/mission", "/api/health"):
                 if not self._operator_authorized():
                     return
+            if route.path == "/api/agent-scoped-memory":
+                if scoped_memory_store is None:
+                    self._send(403, {"error": "agent_scoped_memory_disabled"})
+                    return
+                try:
+                    query = parse_qs(route.query, strict_parsing=True)
+                    if (set(query) != {"project_id", "agent_id"}
+                            or any(len(v) != 1 for v in query.values())):
+                        raise ScopedMemoryError("invalid_scoped_memory_scope")
+                    records = scoped_memory_store.list(
+                        query["project_id"][0], query["agent_id"][0])
+                    self._send(200, {
+                        "notes": records,
+                        "capacity": SCOPED_MAX_NOTES,
+                        "max_selected": SCOPED_MAX_SELECTED,
+                        "source": "OWNER_CURATED_UNVERIFIED",
+                        "storage": "PLAINTEXT_OWNER_PRIVATE_SQLITE"})
+                except ValueError:
+                    self._send(422, {"error":"invalid_scoped_memory_scope"})
+                except ScopedMemoryError as exc:
+                    self._send(exc.status, {"error":str(exc)})
+                return
             if route.path == "/api/agent-profiles":
                 if agent_profiles is None:
                     self._send(403, {"error": "agent_profiles_disabled"})
@@ -381,6 +405,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
                                  "durable_job_queue": durable_jobs is not None,
                                   "agent_profiles": agent_profiles is not None,
+                                  "scoped_agent_memory": scoped_memory_store is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -915,6 +940,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-multi-document-analyze",
                                  "/api/local-agent-device-acceptance",
                                  "/api/local-agent-timeout-acknowledge",
+                                 "/api/agent-scoped-memory-save",
+                                 "/api/agent-scoped-memory-delete",
                                  "/api/agent-profile-create",
                                  "/api/agent-profile-update",
                                  "/api/agent-profile-disable",
@@ -999,6 +1026,60 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/agent-scoped-memory-save",
+                             "/api/agent-scoped-memory-delete"):
+                if scoped_memory_store is None or agent_profiles is None:
+                    self._send(403, {"error":"agent_scoped_memory_disabled"})
+                    return
+                action = "SCOPED_AGENT_MEMORY_CONFIG"
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error":"security_audit_restart_required"})
+                    return
+                if (type(data) is not dict or
+                        type(data.get("current_password")) is not str
+                        or operator_auth is None):
+                    self._audit_event(action, "DENIED")
+                    self._send(422, {"error":"owner_password_required"})
+                    return
+                verified = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if verified != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(verified, {"error": (
+                        "operator_restart_required" if verified == 503 else
+                        "operator_login_locked" if verified == 429 else
+                        "invalid_operator_credentials")})
+                    return
+                values = {k:v for k,v in data.items() if k != "current_password"}
+                try:
+                    if self.path.endswith("-save"):
+                        # Only a currently enabled Agent can receive new memory.
+                        if type(values.get("agent_id")) is not str:
+                            raise ScopedMemoryError("invalid_scoped_memory_scope")
+                        agent_profiles.context(values["agent_id"])
+                        result = scoped_memory_store.put(values)
+                    else:
+                        if set(values) != {
+                                "project_id", "agent_id", "note_id", "expected_revision"}:
+                            raise ScopedMemoryError("invalid_scoped_memory_fields")
+                        # Deletion is still permitted after disabling a profile.
+                        result = scoped_memory_store.delete(
+                            values["project_id"], values["agent_id"],
+                            values["note_id"], values["expected_revision"])
+                except AgentProfileError as exc:
+                    self._audit_event(action, "DENIED")
+                    self._send(exc.status, {"error":str(exc)})
+                    return
+                except ScopedMemoryError as exc:
+                    self._audit_event(action, "UNCERTAIN" if exc.status == 503
+                                      else "DENIED")
+                    self._send(exc.status, {"error":str(exc)})
+                    return
+                if not self._audit_event(action, "SUCCESS"):
+                    self._send(503, {"error":"scoped_memory_audit_uncertain"})
+                else:
+                    self._send(200, result)
                 return
             if self.path in ("/api/agent-profile-create",
                              "/api/agent-profile-update",
@@ -1498,7 +1579,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     (creating and (
                         not {"goal", "model"}.issubset(set(data))
                         or not set(data).issubset(
-                            {"goal", "model", "memory_ids", "document", "documents", "csv", "agent_id"})
+                            {"goal", "model", "memory_ids", "document", "documents", "csv", "agent_id", "project_id", "scoped_memory_ids"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
@@ -1508,6 +1589,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 if creating and "agent_id" in data and agent_profiles is None:
                     self._send(403, {"error": "agent_profiles_disabled"})
                     return
+                if creating and "agent_id" in data and "memory_ids" in data:
+                    # Global legacy memory must NEVER cross into a named Agent.
+                    self._send(422, {"error":"global_memory_not_allowed_for_agent"})
+                    return
+                if creating and ("project_id" in data or "scoped_memory_ids" in data):
+                    if (not {"project_id","scoped_memory_ids","agent_id"}.issubset(data)
+                            or scoped_memory_store is None):
+                        self._send(403 if scoped_memory_store is None else 422,
+                                   {"error": "agent_scoped_memory_disabled"
+                                    if scoped_memory_store is None else
+                                    "invalid_scoped_memory_selection"})
+                        return
                 selected_memory_ids = data.get("memory_ids") if creating else None
                 if creating and "memory_ids" in data:
                     if not valid_selection(selected_memory_ids):
@@ -1632,6 +1725,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 raise PlanError("plan_capacity_reached")
                             kwargs = {}
                             refs = None
+                            scoped_refs = None
                             agent_profile = None
                             if "agent_id" in data:
                                 try:
@@ -1639,6 +1733,14 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 except AgentProfileError as exc:
                                     raise PlanError(str(exc)) from None
                                 kwargs["agent_context"] = agent_profile["planning"]
+                            if "scoped_memory_ids" in data:
+                                try:
+                                    scoped_context, scoped_refs = scoped_memory_store.select(
+                                        data["project_id"], data["agent_id"],
+                                        data["scoped_memory_ids"])
+                                except ScopedMemoryError as exc:
+                                    raise PlanError(str(exc)) from None
+                                kwargs["memory_context"] = scoped_context
                             if selected_memory_ids is not None:
                                 cards = agent_memory_store.selected_with_revisions(
                                     selected_memory_ids)
@@ -1672,7 +1774,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 csv_snapshot=(data["csv"] if csv_snapshot is not None
                                               else None),
                                 agent_binding=(agent_profile["binding"]
-                                               if agent_profile is not None else None))
+                                               if agent_profile is not None else None),
+                                scoped_memory_refs=scoped_refs)
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
@@ -1694,9 +1797,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
                                 else 403 if err in ("public_source_not_allowed",
-                                                    "agent_profile_tool_denied")
-                                else 404 if err == "plan_not_found"
-                                else 409 if err in ("agent_profile_changed_or_disabled",
+                                                    "agent_profile_tool_denied",
+                                                    "scoped_memory_scope_denied")
+                                else 404 if err in ("plan_not_found", "scoped_memory_not_found")
+                                else 409 if err in ("scoped_memory_context_changed",
+                                                    "scoped_memory_expired",
+                                                    "agent_profile_changed_or_disabled",
                                                     "agent_profile_binding_invalid",
                                                     "plan_state_conflict", "plan_capacity_reached",
                                                      "public_source_permission_changed",
@@ -2972,12 +3078,16 @@ def start_local_server(port=8765, enable_local_agent=False,
     plan_store = None
     agent_profiles = None
     memory_store = None
+    scoped_memory_store = None
     hn_policy = (HNStoryPolicy(home / "hn-story-grants.json")
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     if enable_agent_plans:
         agent_profiles = LocalAgentProfiles(home / "agent-profiles.sqlite3")
+    if enable_agent_plans and enable_agent_memory:
+        scoped_memory_store = LocalScopedAgentMemory(
+            home / "scoped-agent-memory.sqlite3")
     if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
@@ -2991,7 +3101,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             multi_document_analyzer=(analyze_multiple_documents
                                      if enable_multi_documents else None),
             csv_profiler=(profile_selected_csv if enable_plan_csv else None),
-            agent_profiles=agent_profiles)
+            agent_profiles=agent_profiles,
+            scoped_memory_store=scoped_memory_store)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     # The same durable model checkpoint is REQUIRED for remote-only
@@ -3152,6 +3263,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                             n8n_gmail_output_witness=n8n_gmail_witness,
                             durable_jobs=durable_queue,
                             agent_profiles=agent_profiles,
+                            scoped_memory_store=scoped_memory_store,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
@@ -3201,6 +3313,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed.close()
         if memory_store is not None:
             memory_store.close()
+        if scoped_memory_store is not None:
+            scoped_memory_store.close()
         if model_safety is not None:
             model_safety.close()
         if plan_store is not None:

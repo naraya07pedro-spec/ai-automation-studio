@@ -34,6 +34,7 @@ from local_csv_profile import (
     profile_selected_csv, COLUMN_NAME, CSV_NAME, MAX_CSV_BYTES, MAX_CSV_COLUMNS)
 from local_tool_registry import BATCH_READ_TOOLS
 from local_agent_profiles import AgentProfileError, AGENT_ID
+from local_scoped_agent_memory import ScopedMemoryError, _validate_refs as validate_scoped_refs
 from local_hn_story_policy import valid_story_id
 from local_hn_story_reader import HNStoryReadError
 from local_agent_memory import (MemoryCardError, valid_selection,
@@ -446,7 +447,7 @@ class LocalAgentPlanStore:
     def __init__(self, database=":memory:", github_reader=None, issue_analyzer=None,
                  memory_store=None, report_generator=None, document_analyzer=None,
                  multi_document_analyzer=None, csv_profiler=None,
-                 hn_reader=None, agent_profiles=None):
+                 hn_reader=None, agent_profiles=None, scoped_memory_store=None):
         try:
             location = prepare_private_sqlite(database)
         except PrivateSQLitePathError:
@@ -461,6 +462,7 @@ class LocalAgentPlanStore:
         self.csv_profiler = csv_profiler
         self.hn_reader = hn_reader
         self.agent_profiles = agent_profiles
+        self.scoped_memory_store = scoped_memory_store
         try:
             self.db = sqlite3.connect(location, check_same_thread=False)
             self.db.execute("PRAGMA busy_timeout=5000")
@@ -524,6 +526,9 @@ class LocalAgentPlanStore:
                 if "agent_binding_json" not in columns:
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN agent_binding_json TEXT NOT NULL DEFAULT ''""")
+                if "scoped_memory_refs_json" not in columns:
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN scoped_memory_refs_json TEXT NOT NULL DEFAULT '[]'""")
                 # Never redispatch a persisted server run after service restart.
                 self.db.execute("""UPDATE agent_task_plans SET
                     batch_run_status='INTERRUPTED' WHERE
@@ -543,6 +548,21 @@ class LocalAgentPlanStore:
         try:
             self.agent_profiles.check_binding(binding, steps)
         except AgentProfileError as exc:
+            raise PlanError(str(exc)) from None
+
+    @staticmethod
+    def _verify_global_memory_isolation(agent_binding, legacy_refs):
+        if agent_binding is not None and legacy_refs:
+            raise PlanError("global_memory_not_allowed_for_agent")
+
+    def _verify_scoped_memory_refs(self, refs, agent_binding):
+        if not refs:
+            return
+        if self.scoped_memory_store is None:
+            raise PlanError("scoped_memory_unavailable")
+        try:
+            self.scoped_memory_store.require_revisions(refs, agent_binding)
+        except ScopedMemoryError as exc:
             raise PlanError(str(exc)) from None
 
     def _verify_memory_refs(self, refs):
@@ -633,7 +653,8 @@ class LocalAgentPlanStore:
                 next_index,status,created_utc,approval_epoch,memory_refs_json,
                 report_json,document_json,document_set_json,
                 handoff_log_json,batch_run_status,csv_json,
-                hn_approval_epoch,agent_binding_json FROM agent_task_plans
+                hn_approval_epoch,agent_binding_json,
+                scoped_memory_refs_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -647,6 +668,14 @@ class LocalAgentPlanStore:
             handoffs = json.loads(row[12])
             selected_csv = self._stored_csv(plan_id) if row[14] else None
             agent_binding = json.loads(row[16]) if row[16] else None
+            scoped_memory_refs = json.loads(row[17])
+            if type(scoped_memory_refs) is not list:
+                raise PlanError("plan_storage_invalid")
+            if scoped_memory_refs:
+                try:
+                    validate_scoped_refs(scoped_memory_refs)
+                except ScopedMemoryError:
+                    raise PlanError("plan_storage_invalid") from None
             if agent_binding is not None and (
                     type(agent_binding) is not dict or
                     set(agent_binding) != {"agent_id", "revision"} or
@@ -678,6 +707,7 @@ class LocalAgentPlanStore:
                 "next_index": row[4], "status": row[5],
                 "created_utc": row[6],
                 "agent_binding": agent_binding,
+                "scoped_memory_refs": scoped_memory_refs,
                 "approval_epoch": row[7],
                 "hn_approval_epoch": row[15],
                 "memory_refs": memory_refs,
@@ -709,7 +739,7 @@ class LocalAgentPlanStore:
 
     def create(self, proposed, memory_refs=None, document_snapshot=None,
                document_set_snapshot=None, csv_snapshot=None, *, plan_id=None,
-               agent_binding=None):
+               agent_binding=None, scoped_memory_refs=None):
         # A trusted internal paid-request bridge may bind a plan to a stable
         # id; HTTP/model input must never supply this parameter directly.
         if plan_id is not None and (type(plan_id) is not str
@@ -720,6 +750,12 @@ class LocalAgentPlanStore:
         _validate_goal_model(proposed["goal"], proposed["model"])
         steps = validate_steps(proposed["steps"])
         self._verify_agent_binding(agent_binding, steps)
+        scoped_refs = [] if scoped_memory_refs is None else scoped_memory_refs
+        if type(scoped_refs) is not list:
+            raise PlanError("invalid_scoped_memory_refs")
+        if scoped_refs and memory_refs:
+            raise PlanError("invalid_plan_memory_selection")
+        self._verify_scoped_memory_refs(scoped_refs, agent_binding)
         if document_snapshot is not None and document_set_snapshot is not None:
             raise PlanError("invalid_plan_document_selection")
         if csv_snapshot is not None and (
@@ -754,6 +790,7 @@ class LocalAgentPlanStore:
                     except HNStoryReadError:
                         raise PlanError("hn_story_not_allowed") from None
         refs = validate_memory_refs(memory_refs)
+        self._verify_global_memory_isolation(agent_binding, refs)
         self._verify_memory_refs(refs)
         if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
             if self.github_reader is None:
@@ -781,12 +818,13 @@ class LocalAgentPlanStore:
                 # A card can be edited while the model is preparing a plan.
                 # Never freeze an already-stale memory reference.
                 self._verify_memory_refs(refs)
+                self._verify_scoped_memory_refs(scoped_refs, agent_binding)
                 self._verify_agent_binding(agent_binding, steps)
                 self.db.execute("""INSERT INTO agent_task_plans
                     (plan_id,model,goal,steps_json,results_json,next_index,status,
                      created_utc,memory_refs_json,document_json,document_set_json,
-                     csv_json,agent_binding_json)
-                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?,?,?)""",
+                     csv_json,agent_binding_json,scoped_memory_refs_json)
+                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?,?,?,?)""",
                     (pid, proposed["model"], proposed["goal"],
                      json.dumps(steps, separators=(",", ":")), "[]", created,
                      json.dumps(refs, separators=(",", ":")),
@@ -799,7 +837,8 @@ class LocalAgentPlanStore:
                                 ensure_ascii=False, separators=(",", ":"))
                      if selected_csv is not None else "",
                      json.dumps(agent_binding, sort_keys=True, separators=(",", ":"))
-                     if agent_binding is not None else ""))
+                     if agent_binding is not None else "",
+                     json.dumps(scoped_refs, separators=(",", ":"), sort_keys=True)))
                 return self._fetch(pid)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
@@ -811,7 +850,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 self._verify_memory_refs(old["memory_refs"])
+                self._verify_scoped_memory_refs(old["scoped_memory_refs"], old["agent_binding"])
                 if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
                     if self.csv_profiler is None or old["csv_source"] is None:
                         raise PlanError("plan_csv_unavailable")
@@ -858,7 +899,9 @@ class LocalAgentPlanStore:
                 if old["status"] != "INTERRUPTED":
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 self._verify_memory_refs(old["memory_refs"])
+                self._verify_scoped_memory_refs(old["scoped_memory_refs"], old["agent_binding"])
                 if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
                     if self.csv_profiler is None or old["csv_source"] is None:
                         raise PlanError("plan_csv_unavailable")
@@ -896,9 +939,11 @@ class LocalAgentPlanStore:
                 if old["status"] not in ("APPROVED", "NEXT_READY"):
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 if from_batch and old["batch_run_status"] != "RUNNING":
                     raise PlanError("plan_batch_stop_requested")
                 self._verify_memory_refs(old["memory_refs"])
+                self._verify_scoped_memory_refs(old["scoped_memory_refs"], old["agent_binding"])
                 index = old["next_index"]
                 if index >= len(old["steps"]):
                     raise PlanError("plan_state_conflict")
