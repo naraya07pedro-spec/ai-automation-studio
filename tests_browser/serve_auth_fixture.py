@@ -6,6 +6,8 @@ it requires offline one-time owner provisioning.
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 import json
+import os
+import threading
 import sys
 import tempfile
 
@@ -25,6 +27,9 @@ from local_agent_task_plans import LocalAgentPlanStore
 from local_agent_profiles import LocalAgentProfiles
 from local_scoped_agent_memory import LocalScopedAgentMemory
 from local_on_demand_remote_ai import LocalOnDemandRemoteAI
+from local_model_safety import LocalModelSafetyState
+from local_durable_plan_queue import LocalDurablePlanQueue
+from local_typed_agent_handoff import LocalTypedAgentHandoff
 from local_csv_profile import profile_selected_csv
 from local_plan_artifacts import LocalPlanArtifactExporter
 from local_tool_action_gate import LocalCSVProfileActionGate
@@ -216,6 +221,25 @@ def main():
 
     plans.multi_document_analyzer = fixture_multi_document
 
+    if os.environ.get("AAS_FIXTURE_DELEGATIONS") == "1":
+        # Opt-in synthetic test plans; no provider/model tool execution yet.
+        for ident in ("research_browser", "review_browser"):
+            profiles.create({"agent_id":ident,"name":ident.replace("_"," ").title(),
+                "category":"research","description":"Synthetic governed Agent",
+                "instructions":"Use only approved plans.",
+                "allowed_tools":["calculate","utc_now"]})
+            scoped_notes.put({"project_id":"browser_project","agent_id":ident,
+                "note_id":"note_"+ident,"text":"Owner synthetic scoped note",
+                "source_kind":"OWNER_NOTE","source_label":"CI-only fixture",
+                "retention_days":30,"expected_revision":0})
+        for pid,ident,tool in [("a"*24,"research_browser","calculate"),("b"*24,"review_browser","utc_now")]:
+            refs=scoped_notes.select("browser_project",ident,["note_"+ident])[1]
+            plan={"model":"fixture:model","goal":"Synthetic approved "+ident,
+                "steps":[{"tool":tool,"args":({"a":"7","b":"8","operation":"multiply"} if tool=="calculate" else {})}]}
+            plans.create(plan,plan_id=pid,
+                agent_binding=profiles.context(ident)["binding"],scoped_memory_refs=refs)
+            plans.approve(pid)
+
     def fixture_device_acceptance(model):
         if model == "fixture:timeout":
             raise AgentError("local_model_timeout")
@@ -229,6 +253,12 @@ def main():
                 '"citations":[{"chunk_id":"F2C1",'
                 '"quote":"Maintenance review meeting starts at 18:30 WIB"}]}' }},
             memory=lambda:None)
+
+    safety=LocalModelSafetyState(Path(home.name) / "safety.sqlite3")
+    gate=threading.BoundedSemaphore(1)
+    gate_lock=threading.Lock()
+    queue=LocalDurablePlanQueue(plans,safety,gate,gate_lock,Path(home.name) / "queue.sqlite3")
+    typed=LocalTypedAgentHandoff(queue,Path(home.name) / "typed-handoffs.sqlite3")
 
     server = ThreadingHTTPServer(
         ("127.0.0.1", 8765),
@@ -257,6 +287,11 @@ def main():
                        agent_profiles=profiles,
                        scoped_memory_store=scoped_notes,
                        on_demand_ai=remote_asks,
+                       model_safety_state=safety,
+                       shared_agent_gate=gate,
+                       shared_agent_state_lock=gate_lock,
+                       durable_jobs=queue,
+                       typed_handoff=typed,
                        local_agent_models=fixture_models,
                        local_agent_probe=fixture_probe,
                        local_agent_planner=fixture_planner,
@@ -285,6 +320,9 @@ def main():
         profiles.close()
         scoped_notes.close()
         remote_asks.close()
+        typed.close()
+        queue.close()
+        safety.close()
         audit.close()
         home.cleanup()
 
