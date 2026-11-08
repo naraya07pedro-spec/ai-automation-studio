@@ -17,6 +17,7 @@ import threading
 
 from local_agent_task_plans import PlanError, ID_PATTERN as PLAN_ID
 from local_model_safety import ModelSafetyError
+from local_agent_delegation import validate_delegation, DelegationError
 from local_tool_registry import BATCH_READ_TOOLS
 
 JOB_ID = re.compile(r"^[a-z][a-z0-9_-]{2,39}$", re.ASCII)
@@ -48,7 +49,9 @@ def _valid_id(value):
 
 
 def _validate_create(data):
-    if type(data) is not dict or set(data) != {"job_id", "label", "priority", "nodes"}:
+    if (type(data) is not dict or set(data) not in (
+            {"job_id", "label", "priority", "nodes"},
+            {"job_id", "label", "priority", "nodes", "delegation"})):
         raise DurableQueueError("invalid_job_fields", 422)
     jid = _valid_id(data["job_id"])
     label = data["label"]
@@ -91,7 +94,7 @@ def _validate_create(data):
         visited.add(node)
     for key in graph:
         visit(key)
-    return jid, label.strip(), priority, nodes
+    return jid, label.strip(), priority, nodes, data.get("delegation")
 
 
 def _fingerprint(plan):
@@ -100,6 +103,14 @@ def _fingerprint(plan):
         "plan_id", "model", "goal", "steps", "created_utc",
         "approval_epoch", "hn_approval_epoch", "memory_refs",
         "document_source", "document_set_sources", "csv_source")})
+
+
+def _security_fingerprint(plan):
+    """Frozen permission metadata, separate from old intent hashes."""
+    return _digest({k: plan[k] for k in (
+        "agent_binding", "scoped_memory_refs", "memory_refs",
+        "document_source", "document_set_sources", "csv_source"
+    )})
 
 
 class LocalDurablePlanQueue:
@@ -139,13 +150,15 @@ class LocalDurablePlanQueue:
                     priority INTEGER NOT NULL, status TEXT NOT NULL,
                     revision INTEGER NOT NULL DEFAULT 0,
                     created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL,
-                    last_claim_seq INTEGER NOT NULL DEFAULT 0
+                    last_claim_seq INTEGER NOT NULL DEFAULT 0,
+                    delegation_json TEXT NOT NULL DEFAULT ''
                 )""")
                 self.db.execute("""CREATE TABLE IF NOT EXISTS durable_job_nodes(
                     job_id TEXT NOT NULL, plan_id TEXT NOT NULL UNIQUE,
                     deps_json TEXT NOT NULL, plan_sha256 TEXT NOT NULL,
                     node_status TEXT NOT NULL, next_index INTEGER NOT NULL,
                     last_receipt_sha256 TEXT,
+                    security_sha256 TEXT NOT NULL DEFAULT '',
                     PRIMARY KEY(job_id,plan_id),
                     FOREIGN KEY(job_id) REFERENCES durable_jobs(job_id)
                 )""")
@@ -155,6 +168,17 @@ class LocalDurablePlanQueue:
                     event TEXT NOT NULL, evidence_sha256 TEXT,
                     at_utc TEXT NOT NULL
                 )""")
+                # Additive migration preserves existing v1 jobs/hashes.
+                job_cols = {c[1] for c in self.db.execute(
+                    "PRAGMA table_info(durable_jobs)").fetchall()}
+                node_cols = {c[1] for c in self.db.execute(
+                    "PRAGMA table_info(durable_job_nodes)").fetchall()}
+                if "delegation_json" not in job_cols:
+                    self.db.execute("""ALTER TABLE durable_jobs
+                        ADD COLUMN delegation_json TEXT NOT NULL DEFAULT ''""")
+                if "security_sha256" not in node_cols:
+                    self.db.execute("""ALTER TABLE durable_job_nodes
+                        ADD COLUMN security_sha256 TEXT NOT NULL DEFAULT ''""")
                 # A completed tool step may have reached the other SQLite file
                 # before process death. DO NOT infer it was safely dispatched.
                 rows = self.db.execute("""SELECT DISTINCT job_id FROM durable_job_nodes
@@ -170,6 +194,12 @@ class LocalDurablePlanQueue:
         except sqlite3.Error:
             raise DurableQueueError("job_storage_unavailable", 503) from None
 
+    def _check_delegation(self, delegation, nodes):
+        try:
+            return validate_delegation(delegation, nodes, self.plans)
+        except DelegationError as exc:
+            raise DurableQueueError(str(exc), exc.status) from None
+
     def _event(self, job_id, plan_id, event, evidence):
         if self.db.execute("SELECT COUNT(*) FROM durable_job_events").fetchone()[0] >= MAX_EVENTS:
             raise DurableQueueError("job_history_capacity_reached", 409)
@@ -178,13 +208,24 @@ class LocalDurablePlanQueue:
             VALUES(?,?,?,?,?)""", (job_id, plan_id, event, evidence, _now()))
         return cur.lastrowid
 
-    def _plan(self, pid, *, index=0, original=None):
+    def _plan(self, pid, *, index=0, original=None, security=None):
         try:
             p = self.plans.get(pid)
         except PlanError:
             raise DurableQueueError("job_plan_missing_or_unavailable", 409) from None
         if original is not None and _fingerprint(p) != original:
             raise DurableQueueError("job_plan_source_changed", 409)
+        if security and _security_fingerprint(p) != security:
+            raise DurableQueueError("job_plan_permission_binding_changed", 409)
+        try:
+            self.plans._verify_agent_binding(p["agent_binding"],p["steps"])
+            self.plans._verify_global_memory_isolation(
+                p["agent_binding"],p["memory_refs"])
+            self.plans._verify_scoped_memory_refs(
+                p["scoped_memory_refs"],p["agent_binding"])
+            self.plans._verify_memory_refs(p["memory_refs"])
+        except PlanError:
+            raise DurableQueueError("job_plan_permission_or_memory_changed",409) from None
         status = "APPROVED" if index == 0 else "NEXT_READY"
         if (p["status"] != status or p["next_index"] != index
                 or p["batch_run_status"] in ("RUNNING", "STOPPING", "INTERRUPTED")
@@ -195,30 +236,52 @@ class LocalDurablePlanQueue:
 
     def _rows(self, job_id):
         return self.db.execute("""SELECT plan_id,deps_json,plan_sha256,
-            node_status,next_index,last_receipt_sha256 FROM durable_job_nodes
+            node_status,next_index,last_receipt_sha256,security_sha256 FROM durable_job_nodes
             WHERE job_id=? ORDER BY rowid""", (job_id,)).fetchall()
 
     def _job(self, job_id):
         _valid_id(job_id)
         row = self.db.execute("""SELECT job_id,label,priority,status,
-            revision,created_utc,updated_utc,last_claim_seq
+            revision,created_utc,updated_utc,last_claim_seq,delegation_json
             FROM durable_jobs WHERE job_id=?""", (job_id,)).fetchone()
         if row is None:
             raise DurableQueueError("job_not_found", 404)
         nodes = []
         completed = set()
-        for pid, deps, digest, state, ix, receipt in self._rows(job_id):
+        for pid, deps, digest, state, ix, receipt, security in self._rows(job_id):
             if state == "COMPLETED":
                 completed.add(pid)
             nodes.append({"plan_id": pid, "depends_on": json.loads(deps),
                           "status": state, "next_index": ix,
                           "plan_sha256": digest,
-                          "last_receipt_sha256": receipt})
+                          "last_receipt_sha256": receipt,
+                          "security_sha256": security})
         for node in nodes:
             node["dependencies_satisfied"] = all(
                 d in completed for d in node["depends_on"])
+        try:
+            delegation = json.loads(row[8]) if row[8] else None
+            if delegation is not None:
+                from local_agent_delegation import _validate_fields
+                delegation = _validate_fields(delegation)
+        except (ValueError, TypeError, DelegationError):
+            raise DurableQueueError("job_delegation_storage_invalid",503) from None
+        handoff_sha256 = None
+        if (delegation is not None and len(nodes) == 2
+                and nodes[0]["status"] == "COMPLETED"):
+            receipt = nodes[0]["last_receipt_sha256"]
+            if type(receipt) is str and re.fullmatch(r"[0-9a-f]{64}",receipt):
+                handoff_sha256 = _digest({
+                    "project_id": delegation["project_id"],
+                    "source_plan_id": nodes[0]["plan_id"],
+                    "target_plan_id": nodes[1]["plan_id"],
+                    "source_receipt_sha256": receipt,
+                })
         return {"job_id": row[0], "label": row[1],
                 "priority": row[2], "status": row[3],
+                "delegation": delegation,
+                "completion_handoff_sha256": handoff_sha256,
+                "handoff_payload": "NONE",
                 "revision": row[4], "created_utc": row[5],
                 "updated_utc": row[6], "nodes": nodes,
                 "next_requires_owner_action": True,
@@ -260,26 +323,29 @@ class LocalDurablePlanQueue:
                 raise DurableQueueError("job_storage_unavailable", 503) from None
 
     def create(self, request):
-        jid, label, priority, nodes = _validate_create(request)
+        jid, label, priority, nodes, delegation = _validate_create(request)
         with self.lock:
             checked = []
             for n in nodes:
                 p = self._plan(n["plan_id"])
-                checked.append((n, _fingerprint(p)))
+                checked.append((n, _fingerprint(p), _security_fingerprint(p)))
+            if delegation is not None:
+                self._check_delegation(delegation, nodes)
             try:
                 with self.db:
                     if self.db.execute("SELECT count(*) FROM durable_jobs").fetchone()[0] >= MAX_JOBS:
                         raise DurableQueueError("job_capacity_reached", 409)
                     stamp = _now()
                     self.db.execute("""INSERT INTO durable_jobs
-                        (job_id,label,priority,status,created_utc,updated_utc)
-                        VALUES(?,?,?,'DRAFT',?,?)""",
-                        (jid,label,priority,stamp,stamp))
-                    for n, sha in checked:
+                        (job_id,label,priority,status,created_utc,updated_utc,delegation_json)
+                        VALUES(?,?,?,'DRAFT',?,?,?)""",
+                        (jid,label,priority,stamp,stamp,
+                         json.dumps(delegation,sort_keys=True) if delegation else ""))
+                    for n, sha, security in checked:
                         self.db.execute("""INSERT INTO durable_job_nodes
-                            (job_id,plan_id,deps_json,plan_sha256,node_status,next_index)
-                            VALUES(?,?,?,?,'WAITING',0)""",
-                            (jid,n["plan_id"],json.dumps(n["depends_on"]),sha))
+                            (job_id,plan_id,deps_json,plan_sha256,node_status,next_index,security_sha256)
+                            VALUES(?,?,?,?,'WAITING',0,?)""",
+                            (jid,n["plan_id"],json.dumps(n["depends_on"]),sha,security))
                     self._event(jid,None,"CREATED",None)
                 return self._job(jid)
             except sqlite3.IntegrityError:
@@ -307,11 +373,14 @@ class LocalDurablePlanQueue:
                     if any(n["status"]=="IN_FLIGHT" for n in old["nodes"]):
                         raise DurableQueueError("job_step_in_flight", 409)
                     if action in ("arm","resume"):
+                        if old["delegation"] is not None:
+                            self._check_delegation(old["delegation"],old["nodes"])
                         for node in old["nodes"]:
                             if node["status"]=="COMPLETED":
                                 continue
                             self._plan(node["plan_id"],index=node["next_index"],
-                                       original=node["plan_sha256"])
+                                       original=node["plan_sha256"],
+                                       security=node["security_sha256"])
                     new = transitions[target][1]
                     self.db.execute("""UPDATE durable_jobs SET status=?,
                         revision=revision+1,updated_utc=? WHERE job_id=?""",
@@ -377,8 +446,11 @@ class LocalDurablePlanQueue:
                     with self.db:
                         job,node = self._choose(job_id)
                         jid,pid = job["job_id"],node["plan_id"]
+                        if job["delegation"] is not None:
+                            self._check_delegation(job["delegation"],job["nodes"])
                         self._plan(pid,index=node["next_index"],
-                                   original=node["plan_sha256"])
+                                   original=node["plan_sha256"],
+                                   security=node["security_sha256"])
                         ix = node["next_index"]
                         claimed_seq = self._event(jid,pid,"STEP_CLAIMED",None)
                         changed = self.db.execute("""UPDATE durable_job_nodes
@@ -478,6 +550,9 @@ class LocalDurablePlanQueue:
                     p=self.plans.get(plan_id)
                     if _fingerprint(p)!=node["plan_sha256"]:
                         raise DurableQueueError("job_plan_source_changed")
+                    if (node["security_sha256"] and
+                            _security_fingerprint(p)!=node["security_sha256"]):
+                        raise DurableQueueError("job_plan_permission_binding_changed")
                     ix=node["next_index"]
                     if (p["next_index"]!=ix+1 or len(p["results"])!=ix+1
                             or p["status"] not in ("NEXT_READY","COMPLETED")):
