@@ -56,6 +56,7 @@ from local_tool_registry import (
     GREENHOUSE_EVIDENCE, require_owner_action, require_discovery_preview,
     ToolPermissionError, registered_tools)
 from local_tool_action_gate import LocalCSVProfileActionGate, ToolActionError
+from local_agent_profiles import LocalAgentProfiles, AgentProfileError, MAX_AGENTS
 from local_agent_task_plans import (LocalAgentPlanStore, PlanError, MAX_PLANS,
                                     propose_readonly_plan, validated_document_snapshot,
                                     document_source_metadata, validated_document_set_snapshot,
@@ -124,7 +125,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                    scheduled_ai=None, on_demand_ai=None,
                    agent_connector_handoff=None, handoff_outcomes=None,
                    n8n_execution_verifier=None,
-                   durable_jobs=None,
+                   durable_jobs=None, agent_profiles=None,
                    shared_agent_gate=None, shared_agent_state_lock=None):
     """Return isolated handler; operator_auth=None ONLY in controlled old tests.
 
@@ -342,6 +343,18 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             if route.path not in ("/", "/mission", "/api/health"):
                 if not self._operator_authorized():
                     return
+            if route.path == "/api/agent-profiles":
+                if agent_profiles is None:
+                    self._send(403, {"error": "agent_profiles_disabled"})
+                elif route.query:
+                    self._send(422, {"error": "invalid_agent_profile_query"})
+                else:
+                    try:
+                        self._send(200, {"agents": agent_profiles.list(),
+                                         "capacity": MAX_AGENTS})
+                    except AgentProfileError as exc:
+                        self._send(exc.status, {"error": str(exc)})
+                return
             if route.path == "/api/local-agent-capabilities" and not route.query:
                 self._send(200, {"enabled": local_agent_runner is not None,
                                  "remote_scheduled_ai": bool(
@@ -362,6 +375,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
                                  "durable_job_queue": durable_jobs is not None,
+                                  "agent_profiles": agent_profiles is not None,
                                  "tools": ["calculate", "utc_now"],
                                  "local_only": True,
                                  "persisted": agent_conversation is not None,
@@ -896,6 +910,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-multi-document-analyze",
                                  "/api/local-agent-device-acceptance",
                                  "/api/local-agent-timeout-acknowledge",
+                                 "/api/agent-profile-create",
+                                 "/api/agent-profile-update",
+                                 "/api/agent-profile-disable",
                                  "/api/local-agent-plan-create",
                                  "/api/local-agent-plan-approve",
                                  "/api/local-agent-plan-next",
@@ -977,6 +994,53 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                 data = json.loads(self.rfile.read(size))
             except (UnicodeError, ValueError):
                 self._send(400, {"error": "invalid_json"})
+                return
+            if self.path in ("/api/agent-profile-create",
+                             "/api/agent-profile-update",
+                             "/api/agent-profile-disable"):
+                if agent_profiles is None:
+                    self._send(403, {"error": "agent_profiles_disabled"})
+                    return
+                action = "AGENT_PROFILE_CONFIG"
+                if not self._audit_event(action, "ATTEMPT"):
+                    self._send(503, {"error": "security_audit_restart_required"})
+                    return
+                if (type(data) is not dict or
+                        type(data.get("current_password")) is not str or
+                        operator_auth is None):
+                    self._audit_event(action, "DENIED")
+                    self._send(422, {"error": "owner_password_required"})
+                    return
+                verified = operator_auth.confirm_current_password(
+                    data["current_password"])
+                if verified != 200:
+                    self._audit_event(action, "DENIED")
+                    self._send(verified, {"error": (
+                        "operator_restart_required" if verified == 503 else
+                        "operator_login_locked" if verified == 429 else
+                        "invalid_operator_credentials")})
+                    return
+                values = {k: v for k,v in data.items() if k != "current_password"}
+                try:
+                    if self.path.endswith("-create"):
+                        result = agent_profiles.create(values)
+                    elif self.path.endswith("-update"):
+                        result = agent_profiles.update(values)
+                    else:
+                        if set(values) != {"agent_id", "expected_revision"}:
+                            raise AgentProfileError("invalid_agent_fields")
+                        result = agent_profiles.disable(
+                            values["agent_id"], values["expected_revision"])
+                except AgentProfileError as exc:
+                    self._audit_event(action, "DENIED" if exc.status != 503
+                                      else "UNCERTAIN")
+                    self._send(exc.status, {"error": str(exc)})
+                    return
+                if not self._audit_event(action, "SUCCESS"):
+                    self._send(503, {"error": "agent_profile_audit_uncertain"})
+                else:
+                    self._send(200 if self.path.endswith("-update") or
+                               self.path.endswith("-disable") else 201, result)
                 return
             if self.path in ("/api/cloud-ai-plan-create", "/api/cloud-ai-plan-recover"):
                 if cloud_plan_bridge is None:
@@ -1426,12 +1490,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     (creating and (
                         not {"goal", "model"}.issubset(set(data))
                         or not set(data).issubset(
-                            {"goal", "model", "memory_ids", "document", "documents", "csv"})
+                            {"goal", "model", "memory_ids", "document", "documents", "csv", "agent_id"})
                         or type(data["goal"]) is not str
                         or type(data["model"]) is not str)) or
                     (not creating and (set(data) != {"plan_id"}
                         or type(data["plan_id"]) is not str))):
                     self._send(422, {"error": "invalid_plan_request"})
+                    return
+                if creating and "agent_id" in data and agent_profiles is None:
+                    self._send(403, {"error": "agent_profiles_disabled"})
                     return
                 selected_memory_ids = data.get("memory_ids") if creating else None
                 if creating and "memory_ids" in data:
@@ -1557,6 +1624,13 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                 raise PlanError("plan_capacity_reached")
                             kwargs = {}
                             refs = None
+                            agent_profile = None
+                            if "agent_id" in data:
+                                try:
+                                    agent_profile = agent_profiles.context(data["agent_id"])
+                                except AgentProfileError as exc:
+                                    raise PlanError(str(exc)) from None
+                                kwargs["agent_context"] = agent_profile["planning"]
                             if selected_memory_ids is not None:
                                 cards = agent_memory_store.selected_with_revisions(
                                     selected_memory_ids)
@@ -1588,7 +1662,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                                        if source_set_snapshot is not None
                                                        else None),
                                 csv_snapshot=(data["csv"] if csv_snapshot is not None
-                                              else None))
+                                              else None),
+                                agent_binding=(agent_profile["binding"]
+                                               if agent_profile is not None else None))
                         else:
                             action = {
                                 "/api/local-agent-plan-approve": local_agent_plan_store.approve,
@@ -1609,9 +1685,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         self._mark_model_uncertainty(exc)
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
-                                else 403 if err == "public_source_not_allowed"
+                                else 403 if err in ("public_source_not_allowed",
+                                                    "agent_profile_tool_denied")
                                 else 404 if err == "plan_not_found"
-                                else 409 if err in ("plan_state_conflict", "plan_capacity_reached",
+                                else 409 if err in ("agent_profile_changed_or_disabled",
+                                                    "agent_profile_binding_invalid",
+                                                    "plan_state_conflict", "plan_capacity_reached",
                                                      "public_source_permission_changed",
                                                      "memory_context_changed",
                                                      "plan_report_requires_completed",
@@ -2881,11 +2960,14 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise ValueError("plan_actions_require_plans_csv_and_artifacts")
     conversation = None
     plan_store = None
+    agent_profiles = None
     memory_store = None
     hn_policy = (HNStoryPolicy(home / "hn-story-grants.json")
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
+    if enable_agent_plans:
+        agent_profiles = LocalAgentProfiles(home / "agent-profiles.sqlite3")
     if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
@@ -2898,7 +2980,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                                if enable_local_documents else None),
             multi_document_analyzer=(analyze_multiple_documents
                                      if enable_multi_documents else None),
-            csv_profiler=(profile_selected_csv if enable_plan_csv else None))
+            csv_profiler=(profile_selected_csv if enable_plan_csv else None),
+            agent_profiles=agent_profiles)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     # The same durable model checkpoint is REQUIRED for remote-only
@@ -3021,7 +3104,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                            local_agent_planner=(
                                (lambda goal, model, memory_context=None, document_context=None,
                                        document_set_context=None, csv_context=None,
-                                       hn_allowed_ids=None:
+                                       hn_allowed_ids=None, agent_context=None:
                                 propose_readonly_plan(
                                    goal, model, allow_github=enable_agent_github_read,
                                    memory_context=memory_context,
@@ -3029,7 +3112,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                                    document_set_context=document_set_context,
                                    csv_context=csv_context,
                                    allow_hn=enable_hn_story_read,
-                                   hn_allowed_ids=hn_allowed_ids))
+                                   hn_allowed_ids=hn_allowed_ids,
+                                   agent_context=agent_context))
                                if enable_agent_plans else None),
                            local_agent_plan_store=plan_store,
                            local_scheduler=scheduler,
@@ -3047,6 +3131,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                             signed_gmail_binding=signed_gmail_binding,
                             n8n_gmail_output_witness=n8n_gmail_witness,
                             durable_jobs=durable_queue,
+                            agent_profiles=agent_profiles,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
@@ -3100,6 +3185,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             model_safety.close()
         if plan_store is not None:
             plan_store.close()
+        if agent_profiles is not None:
+            agent_profiles.close()
         if conversation is not None:
             conversation.close()
         core.close()
