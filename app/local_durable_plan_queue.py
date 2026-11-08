@@ -367,11 +367,14 @@ class LocalDurablePlanQueue:
                     if any(n["status"]=="IN_FLIGHT" for n in old["nodes"]):
                         raise DurableQueueError("job_step_in_flight", 409)
                     if action in ("arm","resume"):
+                        if old["delegation"] is not None:
+                            validate_delegation(old["delegation"],old["nodes"],self.plans)
                         for node in old["nodes"]:
                             if node["status"]=="COMPLETED":
                                 continue
                             self._plan(node["plan_id"],index=node["next_index"],
-                                       original=node["plan_sha256"])
+                                       original=node["plan_sha256"],
+                                       security=node["security_sha256"])
                     new = transitions[target][1]
                     self.db.execute("""UPDATE durable_jobs SET status=?,
                         revision=revision+1,updated_utc=? WHERE job_id=?""",
@@ -437,8 +440,11 @@ class LocalDurablePlanQueue:
                     with self.db:
                         job,node = self._choose(job_id)
                         jid,pid = job["job_id"],node["plan_id"]
+                        if job["delegation"] is not None:
+                            validate_delegation(job["delegation"],job["nodes"],self.plans)
                         self._plan(pid,index=node["next_index"],
-                                   original=node["plan_sha256"])
+                                   original=node["plan_sha256"],
+                                   security=node["security_sha256"])
                         ix = node["next_index"]
                         claimed_seq = self._event(jid,pid,"STEP_CLAIMED",None)
                         changed = self.db.execute("""UPDATE durable_job_nodes
@@ -538,6 +544,9 @@ class LocalDurablePlanQueue:
                     p=self.plans.get(plan_id)
                     if _fingerprint(p)!=node["plan_sha256"]:
                         raise DurableQueueError("job_plan_source_changed")
+                    if (node["security_sha256"] and
+                            _security_fingerprint(p)!=node["security_sha256"]):
+                        raise DurableQueueError("job_plan_permission_binding_changed")
                     ix=node["next_index"]
                     if (p["next_index"]!=ix+1 or len(p["results"])!=ix+1
                             or p["status"] not in ("NEXT_READY","COMPLETED")):
