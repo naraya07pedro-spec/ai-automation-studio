@@ -164,6 +164,17 @@ class Stage121SignedBindingTests(unittest.TestCase):
             self.verify()
         self.assertEqual(self.gmail.calls,[GMAIL_ID])
 
+    def test_legacy_unsigned_gmail_check_cannot_be_retroactively_signed(self):
+        legacy=GmailSentEvidence(self.previous.verifier,self.gmail)
+        result=legacy.verify_one({
+            "plan_id":PLAN, "gmail_message_id":GMAIL_ID,
+            "expected_to":RECIPIENT, "expected_subject":SUBJECT})
+        self.assertEqual(result["status"],"SENT_ARTIFACT_MATCHED")
+        with self.assertRaisesRegex(SignedGmailArtifactError,
+                                    "prior_gmail_check_cannot_be_retroactively_bound"):
+            self.binding.import_claim(self.claim())
+        self.assertEqual(self.binding.history()["records"],[])
+
     def test_sqlite_reopen_preserves_bound_claim(self):
         self.binding.import_claim(self.claim())
         again=SignedGmailArtifactBinding(self.previous.verifier,self.previous.manager)
