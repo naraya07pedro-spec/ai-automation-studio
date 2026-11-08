@@ -142,7 +142,7 @@ class ScopedMemoryStoreTests(unittest.TestCase):
             {**NOTE,"agent_id":"research_agent/other"},
             {**NOTE,"note_id":"a"},
             {**NOTE,"text":"secret\x00payload"},
-            {**NOTE,"text":"x"*1001},
+            {**NOTE,"text":"x"*601},
             {**NOTE,"retention_days":True},
             {**NOTE,"retention_days":99999},
             {**NOTE,"expected_revision":False},
