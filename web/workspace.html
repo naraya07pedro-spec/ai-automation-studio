@@ -180,6 +180,7 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
 "use strict";
 const el=id=>document.getElementById(id);
 let csrf="",caps={},agents=[],currentPlan=null,mode="plan",busy=false,authEpoch=0;
+let memoryNotes=[],memoryScope="",memoryEpoch=0,editingAgent=null,editingNote=null,scopeEditing=null,cloudAttemptId="";
 function setStatus(message,error=false){el("status").textContent=message;el("status").classList.toggle("error",error)}
 function addMessage(author,message){
  const empty=el("empty");if(empty)empty.remove();
@@ -189,12 +190,16 @@ function addMessage(author,message){
  el("messages").append(node);el("messages").scrollTop=el("messages").scrollHeight;
 }
 function lock(message){
- csrf="";authEpoch++;agents=[];currentPlan=null;caps={};el("gate").hidden=false;el("logout").hidden=true;
+ csrf="";authEpoch++;memoryEpoch++;agents=[];currentPlan=null;caps={};memoryNotes=[];memoryScope="";editingAgent=null;editingNote=null;scopeEditing=null;cloudAttemptId="";
+ for(const id of ["agent-dialog","note-dialog"]){const d=el(id);if(d.open)d.close()}
+ for(const id of ["cloud-owner","new-password","note-password","cloud-receipt-id"]){el(id).value=""}
+ el("cloud-consent").checked=false;el("cloud-result").textContent="No cloud request in this session.";el("cloud-provider").replaceChildren();
+ el("gate").hidden=false;el("logout").hidden=true;
  el("session-label").textContent="Locked";el("session-dot").classList.remove("good");
  el("agent-select").replaceChildren(new Option("General · no profile",""));
  el("agent-grid").textContent="Sign in to load Agents.";el("tasks").textContent="Sign in to load saved tasks.";
  el("memories").textContent="Choose an Agent to inspect its notes.";el("capabilities").textContent="Sign in to inspect supported capabilities.";
- el("new-agent").disabled=true;el("plan-box").hidden=true;el("messages").replaceChildren();
+ el("new-agent").disabled=true;el("new-note").disabled=true;el("plan-box").hidden=true;el("messages").replaceChildren();
  el("submit-task").disabled=true;el("password").value="";
  el("login-status").textContent=message||"Sign in to continue.";setStatus("Locked.");
 }
@@ -208,9 +213,11 @@ async function api(path,body){
  return data;
 }
 function refreshComposer(){
- el("submit-task").textContent=mode==="plan"?"Propose steps":"Ask local AI";
- el("submit-task").disabled=!csrf||busy||(mode==="plan"?!caps.planning:!caps.enabled);
- el("new-agent").disabled=!csrf||!caps.agent_profiles||busy;
+ el("submit-task").textContent=mode==="plan"?"Propose steps":mode==="cloud"?"Send one cloud request":"Ask local AI";
+ const cloudReady=!!caps.remote_on_demand_ai&&Array.isArray(caps.remote_on_demand_providers)&&caps.remote_on_demand_providers.includes(el("cloud-provider").value);
+ el("submit-task").disabled=!csrf||busy||(mode==="plan"?!caps.planning:mode==="cloud"?!cloudReady||!el("cloud-consent").checked||!el("cloud-owner").value:!caps.enabled);
+ el("new-agent").disabled=!csrf||!caps.agent_profiles||busy||agents.length>=24;
+ el("new-note").disabled=!csrf||busy||!caps.scoped_agent_memory||!el("agent-select").value;
 }
 function switchView(view){
  const agent=view==="agents";
@@ -219,9 +226,10 @@ function switchView(view){
  el("crumb").textContent=agent?"Agents":"Workspace";
 }
 function setMode(next){
- mode=next;for(const m of ["plan","ask"]){const active=m===next;el("mode-"+m).classList.toggle("selected",active);el("mode-"+m).setAttribute("aria-pressed",String(active));}
- el("mode-hint").textContent=next==="plan"?"Approval required before tools run":"Single local answer · chat is not Agent-scoped";
- el("task").maxLength=next==="plan"?1200:3000;
+ mode=next;for(const m of ["plan","ask","cloud"]){const active=m===next;el("mode-"+m).classList.toggle("selected",active);el("mode-"+m).setAttribute("aria-pressed",String(active))}
+ el("cloud-config").hidden=next!=="cloud";
+ el("mode-hint").textContent=next==="plan"?"Approval required before tools run":next==="cloud"?"One paid request · no agent tool calls or automatic retry":"Single local answer · not Agent-scoped";
+ el("task").maxLength=next==="ask"?3000:1200;
  refreshComposer();
 }
 function validModel(){
@@ -232,7 +240,11 @@ function validModel(){
 async function loadCapabilities(){
  const data=await api("/api/local-agent-capabilities");caps=data;
  const available=!!data.enabled,planning=!!data.planning;
- el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Cloud providers are not enabled by this screen. External actions still require separate approval.";
+ const providers=Array.isArray(data.remote_on_demand_providers)?data.remote_on_demand_providers.filter(p=>["openai_responses","anthropic_messages","gemini_generate_content"].includes(p)):[];
+ const selected=el("cloud-provider").value;
+ el("cloud-provider").replaceChildren(...providers.map(p=>new Option({openai_responses:"OpenAI Responses",anthropic_messages:"Anthropic Messages",gemini_generate_content:"Gemini generateContent"}[p],p)));
+ if(providers.includes(selected))el("cloud-provider").value=selected;
+ el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Paid text providers enabled: "+(providers.length?providers.join(", "):"none")+". Server permissions always apply.";
  refreshComposer();
 }
 async function loadModels(){
@@ -279,7 +291,7 @@ function selectAgent(){
  const a=agents.find(x=>x.agent_id===el("agent-select").value);
  el("active-agent-badge").textContent=a?a.name:"General";
  el("agent-hint").textContent=a?"Allowed tools: "+(a.allowed_tools||[]).join(", ")+". Revision "+a.revision+". Only task plans are bound to this Agent.":"Unbound task plans are supported. Ordinary local chat is not Agent-scoped.";
- loadMemories();
+ loadMemories();refreshComposer();
 }
 async function loadMemories(){
  const wrap=el("memories");wrap.replaceChildren();
