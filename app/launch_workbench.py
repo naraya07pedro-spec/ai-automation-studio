@@ -68,7 +68,9 @@ def _port_free():
     return True
 
 
-def _open_browser_after_ready(stop):
+def _open_browser_after_ready(stop, destination):
+    if destination not in ("/workspace", "/mission"):
+        raise ValueError("invalid_local_destination")
     # Only the fixed local endpoint; a response with the server's local
     # security headers is required before opening a browser.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -84,7 +86,7 @@ def _open_browser_after_ready(stop):
         except (OSError, ValueError):
             continue
         if confirmed and not stop.is_set():
-            webbrowser.open(URL.rstrip("/") + "/mission")
+            webbrowser.open(URL.rstrip("/") + destination)
             return
 
 
@@ -97,9 +99,13 @@ def _serve(flags):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Launch the private local AI Automation Studio.")
     parser.add_argument("--mode", choices=("offline", "local-ai", "full", "cloud-only"), default="full",
-                        help="offline=rules only; local-ai=Ollama; full=Ollama + opt-in source reads; cloud-only=OpenAI recurring text AI without Ollama")
+                        help="offline=rules only; local-ai=Ollama; full=Ollama + opt-in source reads; cloud-only=explicitly enabled paid text provider(s), no Ollama")
+    parser.add_argument("--enable-anthropic-on-demand", action="store_true",
+                        help="Opt in to billed one-shot Anthropic Messages; requires AAS_ANTHROPIC_API_KEY at private process startup.")
+    parser.add_argument("--enable-gemini-on-demand", action="store_true",
+                        help="Opt in to billed one-shot Gemini generateContent; requires AAS_GEMINI_API_KEY at private process startup.")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
-                        help="Explicitly opt in to paid OpenAI Responses API scheduled inference; requires --enable-scheduled-local-ai and a separate API key.")
+                        help="Explicitly opt in to billed OpenAI Responses text; cloud-only on-demand is supported, recurring local AI needs its own flag and private API key.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
                         help="Owner-armed recurring local AI inference, requires local-ai or full profile.")
     parser.add_argument("--enable-google-gmail-metadata", action="store_true",
@@ -124,8 +130,14 @@ def main(argv=None):
     try:
         flags = feature_flags(args.mode, history=args.enable_history)
         if args.mode == "cloud-only":
-            if not args.enable_scheduled_openai or args.enable_scheduled_local_ai:
-                raise ValueError("cloud-only requires --enable-scheduled-openai and forbids --enable-scheduled-local-ai")
+            if args.enable_scheduled_local_ai or not (args.enable_scheduled_openai or args.enable_anthropic_on_demand or args.enable_gemini_on_demand):
+                raise ValueError("cloud-only requires at least one explicit paid provider flag and forbids --enable-scheduled-local-ai")
+        if args.mode == "offline" and (args.enable_anthropic_on_demand or args.enable_gemini_on_demand):
+            raise ValueError("offline mode cannot enable paid cloud providers")
+        if args.enable_anthropic_on_demand:
+            flags += ("--enable-anthropic-on-demand",)
+        if args.enable_gemini_on_demand:
+            flags += ("--enable-gemini-on-demand",)
         if args.enable_scheduled_local_ai:
             if args.mode in ("offline", "cloud-only"):
                 raise ValueError("scheduled local AI requires local-ai or full mode")
@@ -178,7 +190,7 @@ def main(argv=None):
         print("Local AI needs independently installed Ollama and an installed model.")
         print("No automatic model download, compatibility test, or inference is started.")
     if args.mode == "cloud-only":
-        print("Cloud-only mode: no local Ollama model or interactive Ollama chat required. OpenAI API is owner-approved and separately billed.")
+        print("Cloud-only mode: no local Ollama required; configured paid provider text calls require one-request consent, owner password and independent billing.")
     if args.enable_history:
         print("WARNING: local chat history is saved as plaintext.")
     if args.mode == "full":
@@ -187,6 +199,10 @@ def main(argv=None):
         print("Gmail metadata-only API is opt-in; each read requires owner password. No automated inbox polling or sends.")
     if args.enable_managed_webhooks:
         print("LEGACY managed webhooks: private OS files but NOT ENCRYPTED; prefer the encrypted mode for new connections.")
+    if args.enable_anthropic_on_demand:
+        print("WARNING: Anthropic Messages one-shot text is separately billable; provider/model permissions and API quota are not verified.")
+    if args.enable_gemini_on_demand:
+        print("WARNING: Gemini generateContent one-shot text can incur separate charges; no automatic fallback or retries.")
     if args.enable_scheduled_openai:
         print("WARNING: OpenAI Responses scheduled tasks can incur separate API charges, sending prompts to OpenAI; up to 3 requests/7 days per task, manual owner arm required.")
     if args.enable_scheduled_local_ai:
@@ -200,7 +216,7 @@ def main(argv=None):
     stop = threading.Event()
     if not args.no_browser:
         threading.Thread(target=_open_browser_after_ready,
-                         args=(stop,), daemon=True).start()
+                         args=(stop, "/mission" if args.mode == "offline" else "/workspace"), daemon=True).start()
     try:
         _serve(flags)
         return 0
