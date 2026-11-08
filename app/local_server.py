@@ -978,6 +978,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/agent-typed-handoff-commit",
                                  "/api/agent-scoped-memory-save",
                                  "/api/agent-scoped-memory-delete",
+                                 "/api/agent-scoped-memory-purge-expired",
                                  "/api/agent-profile-create",
                                  "/api/agent-profile-update",
                                  "/api/agent-profile-disable",
@@ -1101,7 +1102,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     self._send(200,result)
                 return
             if self.path in ("/api/agent-scoped-memory-save",
-                             "/api/agent-scoped-memory-delete"):
+                             "/api/agent-scoped-memory-delete",
+                             "/api/agent-scoped-memory-purge-expired"):
                 if scoped_memory_store is None or agent_profiles is None:
                     self._send(403, {"error":"agent_scoped_memory_disabled"})
                     return
@@ -1132,7 +1134,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                             raise ScopedMemoryError("invalid_scoped_memory_scope")
                         agent_profiles.context(values["agent_id"])
                         result = scoped_memory_store.put(values)
-                    else:
+                    elif self.path.endswith("-delete"):
                         if set(values) != {
                                 "project_id", "agent_id", "note_id", "expected_revision"}:
                             raise ScopedMemoryError("invalid_scoped_memory_fields")
@@ -1140,6 +1142,16 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         result = scoped_memory_store.delete(
                             values["project_id"], values["agent_id"],
                             values["note_id"], values["expected_revision"])
+                    else:
+                        if set(values) != {"project_id", "agent_id",
+                                           "confirm_expired_purge"} or (
+                                    values["confirm_expired_purge"] !=
+                                    "PURGE_EXPIRED_SCOPED_NOTES"):
+                            raise ScopedMemoryError("invalid_expired_purge_confirmation")
+                        # Purge remains possible after Agent disable. Never
+                        # widen this owner-authenticated deletion to all scopes.
+                        result = scoped_memory_store.purge_expired(
+                            values["project_id"], values["agent_id"])
                 except AgentProfileError as exc:
                     self._audit_event(action, "DENIED")
                     self._send(exc.status, {"error":str(exc)})
