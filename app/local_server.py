@@ -959,6 +959,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "/api/local-agent-multi-document-analyze",
                                  "/api/local-agent-device-acceptance",
                                  "/api/local-agent-timeout-acknowledge",
+                                 "/api/agent-typed-handoff-preview",
+                                 "/api/agent-typed-handoff-commit",
                                  "/api/agent-scoped-memory-save",
                                  "/api/agent-scoped-memory-delete",
                                  "/api/agent-profile-create",
