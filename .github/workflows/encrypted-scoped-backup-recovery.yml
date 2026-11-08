@@ -1,0 +1,44 @@
+name: Encrypted Agent memory independent-key archive recovery proof
+on:
+  pull_request:
+    paths:
+      - 'tools/verify_encrypted_scoped_backup.py'
+      - 'tests/test_encrypted_scoped_backup_recovery.py'
+      - 'tools/offline_owner_backup.py'
+      - 'app/local_scoped_memory_crypto.py'
+      - 'app/local_scoped_agent_memory.py'
+      - 'docs/ENCRYPTED_SCOPED_BACKUP_RECOVERY_V1.md'
+      - '.github/workflows/encrypted-scoped-backup-recovery.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/verify_encrypted_scoped_backup.py'
+      - 'tests/test_encrypted_scoped_backup_recovery.py'
+      - 'tools/offline_owner_backup.py'
+      - '.github/workflows/encrypted-scoped-backup-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-backup-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned AES-GCM dependency
+        run: python -m pip install -r requirements-vault.txt
+      - name: Check Python source syntax
+        run: python -m py_compile tools/verify_encrypted_scoped_backup.py tests/test_encrypted_scoped_backup_recovery.py
+      - name: Verify real archive + two independent recovery secrets without staging plaintext
+        run: python -m unittest discover -s tests -p 'test_encrypted_scoped_backup_recovery.py' -v
+      - name: Preserve existing offline owner backup contracts
+        run: python -m unittest discover -s tests -p 'test_offline_owner_backup.py' -v
+      - name: Preserve sealed multi-copy recovery tests
+        run: python -m unittest discover -s tests -p 'test_owner_encrypted_recovery_drill.py' -v
