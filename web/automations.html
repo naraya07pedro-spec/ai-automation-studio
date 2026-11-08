@@ -215,11 +215,11 @@ async function runEvent(event){
    throw Error("run_receipt_unexpected_check_history");
   el("receipt").textContent="SAVED LOCAL RECEIPT\n"+JSON.stringify(result,null,2);
   setStatus("run-status",result.status==="REPLAYED_LOCAL"?"Exact event already existed. Returned its original saved decision.":"New local decision stored, with no external action.");
-  await refreshWorkflows(w.workflow_id);await loadHistory();
+  await refreshWorkflows(w.workflow_id);
  }catch(e){
   setStatus("run-status","No verified new result: "+e.message+". Inspect run history. Do not change IDs just to retry.",true);
   el("receipt").textContent="Outcome not confirmed. Inspect the server's saved run history.";
- }finally{busy=false;setControls()}
+ }finally{busy=false;setControls();if(csrf&&current?.workflow_id===w.workflow_id)await loadHistory()}
 }
 async function unlock(){
  el("gate").hidden=true;el("logout").hidden=false;el("session").textContent="Private local session";
