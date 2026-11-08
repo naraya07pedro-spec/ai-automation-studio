@@ -81,7 +81,8 @@ def _validate_put(item):
     if (type(item["retention_days"]) is not int
             or item["retention_days"] not in RETENTION_DAYS):
         raise ScopedMemoryError("invalid_scoped_memory_retention")
-    if type(item["expected_revision"]) is not int or item["expected_revision"] < 0:
+    if (type(item["expected_revision"]) is not int
+            or not 0 <= item["expected_revision"] <= 1000000):
         raise ScopedMemoryError("invalid_scoped_memory_revision")
     return item
 
@@ -98,7 +99,7 @@ def _validate_refs(refs):
             raise ScopedMemoryError("invalid_scoped_memory_refs")
         _scope(ref["project_id"], ref["agent_id"])
         _note_id(ref["note_id"])
-        if (type(ref["revision"]) is not int or ref["revision"] < 1
+        if (type(ref["revision"]) is not int or not 1 <= ref["revision"] <= 1000001
                 or type(ref["generation"]) is not str
                 or HEX32.fullmatch(ref["generation"]) is None
                 or type(ref["digest"]) is not str
@@ -244,7 +245,7 @@ class LocalScopedAgentMemory:
     def delete(self, project_id, agent_id, note_id, expected_revision):
         _scope(project_id, agent_id)
         _note_id(note_id)
-        if type(expected_revision) is not int or expected_revision < 1:
+        if type(expected_revision) is not int or not 1 <= expected_revision <= 1000000:
             raise ScopedMemoryError("invalid_scoped_memory_revision")
         try:
             with self.lock, self.db:
