@@ -253,8 +253,29 @@ class LocalDurablePlanQueue:
         for node in nodes:
             node["dependencies_satisfied"] = all(
                 d in completed for d in node["depends_on"])
+        try:
+            delegation = json.loads(row[8]) if row[8] else None
+            if delegation is not None:
+                from local_agent_delegation import _validate_fields
+                delegation = _validate_fields(delegation)
+        except (ValueError, TypeError, DelegationError):
+            raise DurableQueueError("job_delegation_storage_invalid",503) from None
+        handoff_sha256 = None
+        if (delegation is not None and len(nodes) == 2
+                and nodes[0]["status"] == "COMPLETED"):
+            receipt = nodes[0]["last_receipt_sha256"]
+            if type(receipt) is str and re.fullmatch(r"[0-9a-f]{64}",receipt):
+                handoff_sha256 = _digest({
+                    "project_id": delegation["project_id"],
+                    "source_plan_id": nodes[0]["plan_id"],
+                    "target_plan_id": nodes[1]["plan_id"],
+                    "source_receipt_sha256": receipt,
+                })
         return {"job_id": row[0], "label": row[1],
                 "priority": row[2], "status": row[3],
+                "delegation": delegation,
+                "completion_handoff_sha256": handoff_sha256,
+                "handoff_payload": "NONE",
                 "revision": row[4], "created_utc": row[5],
                 "updated_utc": row[6], "nodes": nodes,
                 "next_requires_owner_action": True,
@@ -296,26 +317,29 @@ class LocalDurablePlanQueue:
                 raise DurableQueueError("job_storage_unavailable", 503) from None
 
     def create(self, request):
-        jid, label, priority, nodes = _validate_create(request)
+        jid, label, priority, nodes, delegation = _validate_create(request)
         with self.lock:
             checked = []
             for n in nodes:
                 p = self._plan(n["plan_id"])
-                checked.append((n, _fingerprint(p)))
+                checked.append((n, _fingerprint(p), _security_fingerprint(p)))
+            if delegation is not None:
+                validate_delegation(delegation, nodes, self.plans)
             try:
                 with self.db:
                     if self.db.execute("SELECT count(*) FROM durable_jobs").fetchone()[0] >= MAX_JOBS:
                         raise DurableQueueError("job_capacity_reached", 409)
                     stamp = _now()
                     self.db.execute("""INSERT INTO durable_jobs
-                        (job_id,label,priority,status,created_utc,updated_utc)
-                        VALUES(?,?,?,'DRAFT',?,?)""",
-                        (jid,label,priority,stamp,stamp))
-                    for n, sha in checked:
+                        (job_id,label,priority,status,created_utc,updated_utc,delegation_json)
+                        VALUES(?,?,?,'DRAFT',?,?,?)""",
+                        (jid,label,priority,stamp,stamp,
+                         json.dumps(delegation,sort_keys=True) if delegation else ""))
+                    for n, sha, security in checked:
                         self.db.execute("""INSERT INTO durable_job_nodes
-                            (job_id,plan_id,deps_json,plan_sha256,node_status,next_index)
-                            VALUES(?,?,?,?,'WAITING',0)""",
-                            (jid,n["plan_id"],json.dumps(n["depends_on"]),sha))
+                            (job_id,plan_id,deps_json,plan_sha256,node_status,next_index,security_sha256)
+                            VALUES(?,?,?,?,'WAITING',0,?)""",
+                            (jid,n["plan_id"],json.dumps(n["depends_on"]),sha,security))
                     self._event(jid,None,"CREATED",None)
                 return self._job(jid)
             except sqlite3.IntegrityError:
