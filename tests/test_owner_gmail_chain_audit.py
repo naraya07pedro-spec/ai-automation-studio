@@ -8,6 +8,7 @@ No real provider account, network, user password or VPS.
 """
 from contextlib import closing, nullcontext
 import hashlib
+import importlib.util
 import io
 import json
 from pathlib import Path
@@ -39,6 +40,8 @@ def _sha(s):
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+@unittest.skipUnless(importlib.util.find_spec("cryptography") is not None,
+                     "Dedicated Stage124 workflow installs optional AES-GCM")
 class FullRestoredGmailChainTests(unittest.TestCase):
     def setUp(self):
         self.fixture=stage118.OfflineEvidenceAcceptance(
