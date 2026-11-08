@@ -117,10 +117,10 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
         <textarea id="task" maxlength="1200" required placeholder="Describe the result you want, in your own words."></textarea>
         <section id="cloud-config" class="cloud-config" hidden aria-label="Cloud AI billing consent">
           <label for="cloud-provider">Explicit provider</label><select id="cloud-provider"></select>
-          <label for="cloud-model">Exact provider model ID</label><input id="cloud-model" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Enter an available provider model ID">
+          <label for="cloud-model">Exact provider model ID</label><input id="cloud-model" maxlength="80" list="cloud-model-options" autocomplete="off" spellcheck="false" placeholder="Enter an available provider model ID"><datalist id="cloud-model-options"></datalist>
           <label for="cloud-owner">Current owner password for this request</label><input id="cloud-owner" type="password" autocomplete="off">
           <label class="checkbox-line" for="cloud-consent"><input id="cloud-consent" type="checkbox">I explicitly authorize ONE potentially billable cloud text request. I have checked the provider's own pricing, quotas and account. No automatic retry.</label>
-          <p class="hint">Configured providers only. Shared five-attempt daily limit is NOT a monetary cap. Subscriptions cannot be reused as API credits. Provider-side billing must be checked separately.</p>
+          <p class="hint" id="cloud-spend-hint">Configured providers only. Local attempt limits are NOT monetary caps. Provider-side billing must be checked separately.</p>
           <div class="mem-tools"><label for="cloud-receipt-id">Recovery receipt ID (32 hexadecimal characters)</label><button class="note-control" type="button" id="cloud-receipt-check">Inspect receipt only</button></div>
           <input id="cloud-receipt-id" maxlength="32" pattern="[0-9a-f]{32}" spellcheck="false" autocomplete="off" placeholder="No request ID yet">
           <div id="cloud-result" class="state" role="status" aria-live="polite">No cloud request sent.</div>
@@ -221,7 +221,9 @@ async function api(path,body){
 function refreshComposer(){
  el("submit-task").textContent=mode==="plan"?"Propose steps":mode==="cloud"?"Send one cloud request":"Ask local AI";
  const cloudReady=!!caps.remote_on_demand_ai&&Array.isArray(caps.remote_on_demand_providers)&&caps.remote_on_demand_providers.includes(el("cloud-provider").value);
- el("submit-task").disabled=!csrf||busy||(mode==="plan"?!caps.planning:mode==="cloud"?!cloudReady||!el("cloud-consent").checked||!el("cloud-owner").value:!caps.enabled);
+ const modelAllowed=!caps.remote_model_allowlist_enforced||(Array.isArray(caps.remote_approved_models)&&
+  caps.remote_approved_models.some(x=>x.provider===el("cloud-provider").value&&x.model===el("cloud-model").value.trim()));
+ el("submit-task").disabled=!csrf||busy||(mode==="plan"?!caps.planning:mode==="cloud"?!cloudReady||!modelAllowed||!el("cloud-consent").checked||!el("cloud-owner").value:!caps.enabled);
  el("new-agent").disabled=!csrf||!caps.agent_profiles||busy||agents.length>=24;
  el("new-note").disabled=!csrf||busy||!caps.scoped_agent_memory||!el("agent-select").value;
 }
@@ -243,6 +245,15 @@ function validModel(){
  if(!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(value))throw Error("Select a valid installed local model");
  return value;
 }
+function refreshCloudModels(){
+ const provider=el("cloud-provider").value;
+ const models=Array.isArray(caps.remote_approved_models)?caps.remote_approved_models.filter(x=>x.provider===provider):[];
+ el("cloud-model-options").replaceChildren(...models.map(x=>new Option(x.model,x.model)));
+ el("cloud-model").placeholder=caps.remote_model_allowlist_enforced?
+  (models.length?"Choose an explicitly approved model":"No models approved for this provider"):
+  "Enter an available provider model ID";
+ refreshComposer();
+}
 async function loadCapabilities(){
  const data=await api("/api/local-agent-capabilities");caps=data;
  const available=!!data.enabled,planning=!!data.planning;
@@ -250,6 +261,13 @@ async function loadCapabilities(){
  const selected=el("cloud-provider").value;
  el("cloud-provider").replaceChildren(new Option("Select a configured provider",""),...providers.map(p=>new Option({openai_responses:"OpenAI Responses",anthropic_messages:"Anthropic Messages",gemini_generate_content:"Gemini generateContent"}[p],p)));
  if(providers.includes(selected))el("cloud-provider").value=selected;
+ const cap=Number.isInteger(data.remote_daily_attempt_limit)?data.remote_daily_attempt_limit:5;
+ el("cloud-spend-hint").textContent="One-shot cloud ceiling: "+cap+" attempts per UTC day across configured providers. "+
+  (data.remote_model_allowlist_enforced?
+    "Exact owner model allowlist enforced by the server; unlisted models are rejected before any billable dispatch. ":
+    "No exact model allowlist configured; choose and verify model pricing yourself. ")+
+  "Neither a local attempt ceiling nor a model allowlist is a guaranteed USD budget. No automatic fallback or retries.";
+ refreshCloudModels();
  el("scoped-storage-hint").textContent=data.scoped_memory_at_rest_encrypted?"Agent/project note TEXT is AES-256-GCM encrypted at rest. Scope metadata, prompts, legacy global memory and backups are NOT protected by this flag.":"Agent/project notes use plaintext SQLite on this server. Enable the separately keyed encrypted scoped-memory mode after offline migration. Previously saved backups may retain plaintext.";
  el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Paid text providers enabled: "+(providers.length?providers.join(", "):"none")+". Server permissions always apply.";
  refreshComposer();
@@ -466,6 +484,9 @@ async function submitTask(e){
    setStatus("Choose an enabled provider and model, re-enter owner password and authorize one paid call.",true);return;
   }
   if(!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(model)){setStatus("Invalid provider model identifier.",true);return}
+  if(caps.remote_model_allowlist_enforced&&!caps.remote_approved_models?.some(x=>x.provider===provider&&x.model===model)){
+   setStatus("This exact provider/model is not approved in the owner startup allowlist.",true);return;
+  }
   if(!confirm("Authorize exactly ONE potentially billable text request?\n\nProvider: "+provider+
               "\nModel: "+model+"\n\nNo tools, no retry, no automatic fallback. Provider billing is not verified."))return;
  }else{try{model=validModel()}catch(error){setStatus(error.message,true);return}}
@@ -645,7 +666,8 @@ el("delete-note").addEventListener("click",async()=>{
  finally{el("note-password").value="";el("delete-note").disabled=false;busy=false;refreshComposer()}
 });
 el("mode-cloud").addEventListener("click",()=>setMode("cloud"));
-el("cloud-provider").addEventListener("change",()=>{el("cloud-model").value="";el("cloud-consent").checked=false;refreshComposer()});
+el("cloud-provider").addEventListener("change",()=>{el("cloud-model").value="";el("cloud-consent").checked=false;refreshCloudModels()});
+el("cloud-model").addEventListener("input",refreshComposer);
 el("cloud-owner").addEventListener("input",refreshComposer);
 el("cloud-consent").addEventListener("change",refreshComposer);
 el("cloud-receipt-check").addEventListener("click",inspectCloudReceipt);
