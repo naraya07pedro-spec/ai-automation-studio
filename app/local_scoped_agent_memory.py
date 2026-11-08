@@ -177,7 +177,11 @@ class LocalScopedAgentMemory:
                         except ScopedMemoryCryptoError:
                             raise ScopedMemoryError(
                                 "scoped_memory_unlock_failed", 503) from None
+        except ScopedMemoryError:
+            self.db.close()
+            raise
         except sqlite3.Error:
+            self.db.close()
             raise ScopedMemoryError("scoped_memory_storage_unavailable", 503) from None
 
     def _row(self, project_id, agent_id, note_id):
