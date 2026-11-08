@@ -13,6 +13,7 @@ from urllib.request import Request, ProxyHandler, HTTPCookieProcessor, build_ope
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from local_gmail_sent_evidence import GmailSentEvidence, GmailSentEvidenceError
 from local_google_gmail import GoogleGmailMetadata, GmailConnectorError, _official_json
@@ -269,6 +270,72 @@ class GmailSentEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(GmailSentEvidenceError,"daily_limit"):
             self.service.verify_one(self.request())
         self.assertEqual(self.gmail.calls,[])
+
+
+
+class OwnerGmailCLIContractTests(unittest.TestCase):
+    def client(self, *, n8n_status="EXECUTION_SUCCESS_CORRELATED",
+               gmail_checked=False, fail_post=False):
+        from owner_gmail_sent_acceptance import OwnerGmailSentClient
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        c=object.__new__(OwnerGmailSentClient)
+        calls=[]
+        c._login=lambda password: calls.append(("login",None))
+        c._logout=lambda: calls.append(("logout",None))
+
+        def request(path, values=None):
+            calls.append((path,values))
+            if path=="/api/n8n-execution-check-history":
+                return {"records":[{"plan_id":PLAN,"status":n8n_status,
+                                    "inbound_delivery_correlated":True}]}
+            if path=="/api/gmail-sent-evidence-history":
+                return {"records":[{"plan_id":PLAN}] if gmail_checked else []}
+            if path=="/api/gmail-sent-evidence":
+                if fail_post:
+                    raise OwnerLiveAcceptanceError("response_lost")
+                return {"plan_id":PLAN,"status":"SENT_ARTIFACT_MATCHED",
+                        "external_write_count":0,
+                        "causal_link_to_n8n_verified":False,
+                        "recipient_delivery_verified":False,
+                        "business_effect_verified":False}
+            raise AssertionError("Unexpected path: "+path)
+        c._request=request
+        return c,calls
+
+    def test_cli_inspect_never_issues_google_post(self):
+        c,calls=self.client()
+        result=c.execute(mode="inspect",plan_id=PLAN,password="secret")
+        self.assertEqual(result["status"],"READY_FOR_ONE_GMAIL_SENT_METADATA_READ")
+        self.assertFalse(any(path=="/api/gmail-sent-evidence" for path,_ in calls))
+
+    def test_cli_verify_sends_one_consent_bound_local_post(self):
+        c,calls=self.client()
+        result=c.execute(mode="verify",plan_id=PLAN,password="secret",
+            confirmation="VERIFY_GMAIL_SENT_ARTIFACT_ONCE",
+            gmail_message_id=MID,expected_to=TO,expected_subject=SUBJECT)
+        self.assertEqual(result["status"],"SENT_ARTIFACT_MATCHED")
+        posts=[args for path,args in calls if path=="/api/gmail-sent-evidence"]
+        self.assertEqual(len(posts),1)
+        self.assertEqual(posts[0]["consent"],"VERIFY_GMAIL_SENT_ARTIFACT_ONCE")
+        self.assertFalse(result["business_effect_verified"])
+        self.assertNotIn(TO,json.dumps(result))
+
+    def test_cli_lost_post_response_never_repeats(self):
+        c,calls=self.client(fail_post=True)
+        result=c.execute(mode="verify",plan_id=PLAN,password="secret",
+            confirmation="VERIFY_GMAIL_SENT_ARTIFACT_ONCE",
+            gmail_message_id=MID,expected_to=TO,expected_subject=SUBJECT)
+        self.assertEqual(result["status"],"LOCAL_RESPONSE_UNCERTAIN_NO_RETRY")
+        self.assertEqual(sum(path=="/api/gmail-sent-evidence" for path,_ in calls),1)
+
+    def test_cli_rejects_n8n_failure_before_google_post(self):
+        from owner_live_n8n_acceptance import OwnerLiveAcceptanceError
+        c,calls=self.client(n8n_status="EXECUTION_FAILED_CORRELATED")
+        with self.assertRaises(OwnerLiveAcceptanceError):
+            c.execute(mode="verify",plan_id=PLAN,password="secret",
+                confirmation="VERIFY_GMAIL_SENT_ARTIFACT_ONCE",
+                gmail_message_id=MID,expected_to=TO,expected_subject=SUBJECT)
+        self.assertFalse(any(path=="/api/gmail-sent-evidence" for path,_ in calls))
 
 
 class FixedGmailEndpointTests(unittest.TestCase):
