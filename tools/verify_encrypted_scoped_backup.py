@@ -128,6 +128,9 @@ def main(argv=None):
         outcome = verify_scoped_notes_archive(args.archive,passphrase,key)
         print(json.dumps(outcome,sort_keys=True))
         return 0
+    except ServiceCredentialError:
+        print("RECOVERY_PROOF_BLOCKED: scoped_memory_key_credential_unavailable",file=sys.stderr)
+        return 2
     except RecoveryProofError as exc:
         print("RECOVERY_PROOF_BLOCKED: "+str(exc),file=sys.stderr)
         return 2
