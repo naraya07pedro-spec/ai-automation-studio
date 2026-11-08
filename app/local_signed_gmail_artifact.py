@@ -91,7 +91,8 @@ class SignedGmailArtifactBinding:
             p.event_id,p.delivery_id,p.execution_id,p.signed_message_sha256,
             p.claimed_outcome,n.connector_id,n.delivery_id,n.execution_id,
             n.signed_message_sha256,n.status,n.provider_finished,
-            n.inbound_delivery_correlated
+            n.inbound_delivery_correlated,n.provider_workflow_id,
+            n.pinned_node_sha256,n.provider_hostname,n.provider_execution_status
             FROM signed_manual_handoff_outcomes p
             JOIN n8n_provider_execution_checks n ON n.plan_id=p.plan_id
             WHERE p.plan_id=?""", (pid,)).fetchone()
@@ -99,7 +100,11 @@ class SignedGmailArtifactBinding:
                 or row[4] != row[9] or row[5] != row[10]
                 or row[6] != row[11]
                 or row[12] != "EXECUTION_SUCCESS_CORRELATED"
-                or row[13] != 1 or row[14] != 1):
+                or row[13] != 1 or row[14] != 1
+                or row[15] != self.n8n.workflow_id
+                or row[16] != _digest(self.n8n.node_name)
+                or row[17] != self.n8n.host
+                or row[18] != "success"):
             raise SignedGmailArtifactError("verified_n8n_chain_required")
         return row
 
