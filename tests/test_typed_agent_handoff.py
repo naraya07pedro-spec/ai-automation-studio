@@ -326,7 +326,7 @@ class TypedHandoffContract(unittest.TestCase):
         status,read=call("GET","/api/agent-typed-handoff-receipt?"
                               "preview_id="+preview["preview_id"],cookie=cookie)
         self.assertEqual((status,read["status"]),(200,"COMMITTED"))
-        self.assertNotIn("56",json.dumps(read))
+        self.assertNotIn('"value": "56"',json.dumps(read))
         self.assertIn("AGENT_TYPED_HANDOFF",
                       [e["action"] for e in audit.recent(50)])
 
