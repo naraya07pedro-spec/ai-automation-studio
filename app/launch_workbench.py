@@ -104,6 +104,11 @@ def main(argv=None):
                         help="Opt in to billed one-shot Anthropic Messages; requires AAS_ANTHROPIC_API_KEY at private process startup.")
     parser.add_argument("--enable-gemini-on-demand", action="store_true",
                         help="Opt in to billed one-shot Gemini generateContent; requires AAS_GEMINI_API_KEY at private process startup.")
+    parser.add_argument("--allow-remote-model", action="append", default=None,
+                        metavar="PROVIDER:MODEL",
+                        help="Restrict owner-paid one-shot calls to these exact pairs (repeatable); never selects fallback.")
+    parser.add_argument("--remote-max-daily-attempts", type=int, default=5,
+                        metavar="1..5", help="Local one-shot attempt cap, not a monetary budget.")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
                         help="Explicitly opt in to billed OpenAI Responses text; cloud-only on-demand is supported, recurring local AI needs its own flag and private API key.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
@@ -136,6 +141,16 @@ def main(argv=None):
                 raise ValueError("cloud-only requires at least one explicit paid provider flag and forbids --enable-scheduled-local-ai")
         if args.mode == "offline" and (args.enable_anthropic_on_demand or args.enable_gemini_on_demand):
             raise ValueError("offline mode cannot enable paid cloud providers")
+        if not 1 <= args.remote_max_daily_attempts <= 5:
+            raise ValueError("remote-max-daily-attempts must be 1..5")
+        if (args.allow_remote_model is not None or args.remote_max_daily_attempts != 5) and not (
+                args.enable_scheduled_openai or args.enable_anthropic_on_demand
+                or args.enable_gemini_on_demand):
+            raise ValueError("remote model restrictions require an explicitly enabled paid provider")
+        for exact_model in (args.allow_remote_model or []):
+            flags += ("--allow-remote-model", exact_model)
+        if args.remote_max_daily_attempts != 5:
+            flags += ("--remote-max-daily-attempts", str(args.remote_max_daily_attempts))
         if args.enable_anthropic_on_demand:
             flags += ("--enable-anthropic-on-demand",)
         if args.enable_gemini_on_demand:
