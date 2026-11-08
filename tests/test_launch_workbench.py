@@ -39,6 +39,44 @@ class QuickstartTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid_quickstart_mode"):
             quickstart.feature_flags("cloud")
 
+    def test_cloud_only_provider_flags_route_without_local_ollama(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=pathlib.Path(tmp)/"operator.json"
+            owner.write_text("synthetic owner marker", encoding="utf-8")
+            with patch.object(quickstart,"_operator_path",return_value=owner), \
+                 patch.object(quickstart,"_port_free",return_value=True), \
+                 patch.object(quickstart,"_serve") as serve:
+                args=["--mode","cloud-only","--enable-anthropic-on-demand",
+                      "--enable-gemini-on-demand","--no-browser"]
+                self.assertEqual(quickstart.main(args),0)
+                flags=serve.call_args.args[0]
+                self.assertIn("--enable-anthropic-on-demand",flags)
+                self.assertIn("--enable-gemini-on-demand",flags)
+                self.assertNotIn("--enable-local-agent",flags)
+                self.assertNotIn("--enable-scheduled-openai",flags)
+
+    def test_paid_provider_selection_never_happens_in_offline_mode(self):
+        with patch.object(quickstart,"_serve") as serve:
+            self.assertEqual(quickstart.main(["--mode","offline",
+                "--enable-anthropic-on-demand","--no-browser"]),2)
+            self.assertEqual(quickstart.main(["--mode","cloud-only",
+                "--no-browser"]),2)
+            serve.assert_not_called()
+
+    def test_local_ai_profile_can_explicitly_enable_gemini_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=pathlib.Path(tmp)/"operator.json"
+            owner.write_text("synthetic owner marker",encoding="utf-8")
+            with patch.object(quickstart,"_operator_path",return_value=owner), \
+                 patch.object(quickstart,"_port_free",return_value=True), \
+                 patch.object(quickstart,"_serve") as serve:
+                self.assertEqual(quickstart.main(["--mode","local-ai",
+                    "--enable-gemini-on-demand","--no-browser"]),0)
+                flags=serve.call_args.args[0]
+                self.assertIn("--enable-agent-plans",flags)
+                self.assertIn("--enable-gemini-on-demand",flags)
+                self.assertNotIn("--enable-anthropic-on-demand",flags)
+
     def test_missing_owner_setup_failure_never_starts_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = pathlib.Path(tmp) / "operator.json"
