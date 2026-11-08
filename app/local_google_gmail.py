@@ -40,7 +40,7 @@ def _official_json(url, form=None, bearer=None):
         url) is not None
     sent_message_detail = re.fullmatch(
         re.escape(GMAIL_BASE) +
-        r"/messages/[A-Za-z0-9_-]{1,128}\\?format=metadata&metadataHeaders=To&metadataHeaders=Subject",
+        r"/messages/[A-Za-z0-9_-]{1,128}\?format=metadata&metadataHeaders=To&metadataHeaders=Subject",
         url) is not None
     if not (url == TOKEN_ENDPOINT or url == GMAIL_BASE + "/profile"
             or url == GMAIL_BASE + "/messages?maxResults=5&labelIds=INBOX"
