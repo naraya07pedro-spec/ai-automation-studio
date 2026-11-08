@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Workspace | Personal AI Harness</title>
+<style>
+:root{color-scheme:light;--canvas:#f5f5f1;--paper:#fff;--ink:#202421;--muted:#696f6a;--line:#e1e4df;--blue:#344f89;--blue-hover:#273e72;--wash:#f0f3f8;--danger:#a43f43;font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--canvas);color:var(--ink)}
+button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.48;cursor:not-allowed}a{color:inherit;text-decoration:none}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #8097ce;outline-offset:2px}
+[hidden]{display:none!important}
+.app{min-height:100vh;display:grid;grid-template-columns:225px minmax(0,1fr)}
+.rail{background:#1e2525;color:#e5eae6;padding:26px 15px;display:flex;flex-direction:column;gap:27px}
+.identity{display:flex;align-items:center;gap:11px;padding:0 10px}.logo{width:35px;height:35px;display:grid;place-items:center;background:#dde7db;color:#202820;border-radius:10px;font-size:13px;font-weight:800;letter-spacing:-.06em}
+.identity strong{font-size:13px;letter-spacing:-.015em}.identity small{display:block;color:#9daaa4;font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin-top:2px}
+.nav{display:grid;gap:5px}.nav-caption{margin:0 11px 9px;color:#99aaa3;font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700}
+.nav button,.nav a{border:0;background:none;color:#aebdb5;text-align:left;width:100%;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;font-size:13px}
+.nav button:hover,.nav a:hover,.nav button.active{background:#34413d;color:#f5f8f5}
+.nav b{display:none;font-size:16px;line-height:1}.nav button.active:before{content:"";height:6px;width:6px;border-radius:50%;background:#c5d9c7;margin-right:1px}
+.rail-foot{margin-top:auto;border-top:1px solid #35413e;padding:15px 10px 2px;color:#9daaa4;font-size:11px;line-height:1.6}
+.main{min-width:0}.topbar{height:70px;background:rgba(255,255,255,.73);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;padding:0 clamp(22px,4vw,62px);gap:18px}
+.crumb{font-size:12px;color:var(--muted)}.crumb strong{color:var(--ink);font-weight:600}.session{display:flex;align-items:center;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.session .dot{height:7px;width:7px;display:inline-block;border-radius:50%;background:#bcc3b9;margin-right:7px}.session .dot.good{background:#548665}
+.text-button{border:0;background:none;color:var(--blue);padding:5px;font-weight:650}
+.page{max-width:1280px;margin:auto;padding:43px clamp(22px,4vw,62px) 72px}
+.eyebrow{font-size:11px;font-weight:750;letter-spacing:.1em;color:#777f78;text-transform:uppercase;margin-bottom:10px}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(32px,3.8vw,49px);font-weight:400;letter-spacing:-.048em;line-height:1.12;margin:0 0 10px}
+.lede{color:var(--muted);margin:0;max-width:640px;font-size:14px}
+.page-head{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:32px;flex-wrap:wrap}
+.workspace-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:25px;align-items:start}
+.stage,.inspector,.saved,.agent-list{background:var(--paper);border:1px solid var(--line);border-radius:16px}
+.stage{min-height:550px;display:flex;flex-direction:column;overflow:hidden}
+.stage-top{padding:24px 28px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:18px}
+.stage-top strong{font-size:15px;letter-spacing:-.02em}.quiet{font-size:11px;color:var(--muted)}
+.comms{flex:1;min-height:250px;max-height:420px;overflow-y:auto;padding:22px 28px;display:flex;flex-direction:column;gap:17px}
+.empty{margin:auto;color:var(--muted);max-width:340px;text-align:center}.empty-symbol{font-family:Georgia,serif;font-size:33px;color:#9ba79c;margin-bottom:8px}.empty p{font-size:12px;line-height:1.7}
+.message{max-width:90%;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.8}.message.user{align-self:flex-end;background:#eef1ed;border:1px solid #e2e7e1;padding:13px 16px;border-radius:12px}.message.assistant{align-self:flex-start;border-left:2px solid #859c8b;padding:2px 0 2px 16px}.message small{display:block;color:var(--muted);margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.09em}
+.compose{border-top:1px solid var(--line);padding:20px 25px 22px}.compose-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:11px}
+.segment{display:flex;gap:4px;background:#edf0ec;padding:4px;border-radius:10px}.segment button{border:0;background:transparent;color:#5a625e;border-radius:7px;padding:7px 13px;font-size:11px;font-weight:650}.segment button.selected{color:var(--ink);background:#fff;box-shadow:0 1px 4px #17281c14}
+textarea,input,select{width:100%;background:#fff;color:var(--ink);border:1px solid #d4dad4;border-radius:9px;padding:11px 12px;outline:none}
+textarea{resize:vertical;min-height:94px;line-height:1.65}textarea:focus,input:focus,select:focus{border-color:#7794c2;box-shadow:0 0 0 3px #7794c221}
+.composer-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}
+.button{border:1px solid #d6ddd6;background:#fff;color:var(--ink);padding:10px 14px;font-weight:650;border-radius:9px;font-size:12px}
+.button:hover{background:#f5f7f4}.button.primary{background:var(--blue);border-color:var(--blue);color:#fff}.button.primary:hover{background:var(--blue-hover)}
+.button.danger{color:var(--danger)}
+.state{font-size:11px;color:var(--muted);line-height:1.6}.state.error{color:var(--danger)}
+.inspector{padding:23px}.inspector h2,.saved h2,.agent-list h2{font-size:14px;margin:0;font-weight:700;letter-spacing:-.02em}
+.inspector label,dialog label{display:block;font-size:11px;color:#545f58;font-weight:700;margin:18px 0 7px}
+.inspector .hint{font-size:11px;line-height:1.65;color:var(--muted);margin:9px 0 0}
+.divider{border:0;border-top:1px solid var(--line);margin:23px 0}
+.memory-item{display:flex;align-items:flex-start;gap:8px;margin:10px 0;font-size:11px;cursor:pointer;color:#4c5752}
+.memory-item input{width:auto;margin:3px 0}.memory-item small{display:block;color:var(--muted)}.memory-item:has(input:disabled){opacity:.52}
+.capability{margin-top:18px;background:#f3f5f2;padding:12px;border-radius:10px;color:#526057;font-size:11px;line-height:1.65}
+.saved{margin-top:25px;padding:20px 24px}.saved-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.saved-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:16px}
+.task-card{padding:13px;border:1px solid #e0e5df;border-radius:10px;text-align:left;background:#fff;min-width:0}.task-card:hover{border-color:#90a3bd;background:#fbfcfe}
+.task-card strong{display:block;font-size:12px;font-weight:600;overflow-wrap:anywhere;margin:7px 0}.task-card small{color:var(--muted);font-size:10px;overflow-wrap:anywhere}
+.tag{display:inline-block;text-transform:uppercase;letter-spacing:.05em;font-size:10px;color:#52668b;background:#edf2f9;border-radius:5px;padding:3px 7px}
+.plan-box{border-top:1px solid var(--line);padding:20px 28px;background:#fbfcfa}
+.plan-box h3{margin:0 0 4px;font-size:14px}.step{padding:10px 0;border-bottom:1px solid #e6e9e5;font-size:12px}.step:last-child{border:0}.step code{display:block;white-space:pre-wrap;word-break:break-word;font-size:11px;color:#64706a;margin-top:4px}
+.plan-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:15px}.result{white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4f2;padding:13px;font-size:11px;border-radius:9px;max-height:225px;overflow:auto}
+.agent-list{padding:23px}.library-tools{display:flex;gap:10px;margin:18px 0;flex-wrap:wrap}.library-tools input{flex:1;min-width:200px}
+.agent-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:12px}
+.agent-card{padding:18px;border:1px solid var(--line);border-radius:12px;min-height:160px;background:#fff;display:flex;flex-direction:column;gap:9px}
+.agent-card strong{font-size:14px}.agent-card p{font-size:11px;color:var(--muted);line-height:1.65;margin:0;flex:1}
+.agent-card small{color:#7e8981;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+.agent-card button{align-self:flex-start}
+.notice{background:#f7f4ee;color:#746551;border:1px solid #ebe2d3;border-radius:9px;padding:10px 13px;font-size:11px;line-height:1.6}
+.backdrop{position:fixed;inset:0;background:#1c2529a8;display:grid;place-items:center;z-index:20;padding:16px}
+.login{background:#fff;padding:32px;border-radius:17px;max-width:410px;width:100%;box-shadow:0 24px 85px #101d2040}.login h2{font:400 30px Georgia,serif;letter-spacing:-.05em;margin:0 0 10px}.login p{font-size:12px;color:var(--muted);line-height:1.7}
+dialog{border:1px solid var(--line);border-radius:16px;width:min(500px,calc(100% - 32px));max-height:90vh;overflow:auto;padding:27px;color:var(--ink);box-shadow:0 25px 100px #0004}dialog::backdrop{background:#131d20a8}
+dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var(--muted)}
+.tools{display:flex;gap:18px;flex-wrap:wrap}.tools label{margin:8px 0;font-weight:500}.tools input{width:auto}
+@media(max-width:1020px){.app{grid-template-columns:72px 1fr}.rail{padding:20px 9px}.identity{justify-content:center;padding:0}.identity .brand-copy,.nav-caption,.nav button span,.nav a span,.rail-foot{display:none}.nav b{display:inline}.nav button,.nav a{justify-content:center;padding:12px 4px;font-size:17px}.workspace-grid{grid-template-columns:minmax(0,1fr)}.inspector{order:-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}.inspector h2,.inspector .capability{grid-column:1/-1}.inspector .divider{display:none}}
+@media(max-width:620px){.app{display:block}.rail{height:auto;padding:9px 12px;display:flex;flex-direction:row;align-items:center;gap:14px}.identity{display:none}.nav{display:flex;gap:3px;overflow:auto}.nav button,.nav a{min-width:42px}.topbar{padding:0 16px;height:58px}.page{padding:28px 13px 45px}.workspace-grid{gap:12px}.stage-top,.comms,.compose,.plan-box{padding-left:16px;padding-right:16px}.inspector{display:block;padding:18px}.stage{min-height:500px}.page-head{margin-bottom:21px}.saved{margin-top:14px;padding:16px}}
+@media(prefers-reduced-motion:no-preference){.button,.task-card,.nav a,.nav button{transition:background-color .12s,border-color .12s}}
+</style>
+</head>
+<body>
+<div class="app">
+ <aside class="rail" aria-label="Primary navigation">
+  <div class="identity"><div class="logo" aria-hidden="true">A/S</div><div class="brand-copy"><strong>Personal AI</strong><small>Private workspace</small></div></div>
+  <nav class="nav" aria-label="Sections">
+   <div class="nav-caption">Your space</div>
+   <button id="nav-workspace" class="active" type="button" aria-label="Workspace" title="Workspace"><b aria-hidden="true">⌂</b><span>Workspace</span></button>
+   <button id="nav-agents" type="button" aria-label="Agents" title="Agents"><b aria-hidden="true">◇</b><span>Agents</span></button>
+   <a href="/" aria-label="Automation library" title="Automation library"><b aria-hidden="true">↻</b><span>Automations</span></a>
+   <a href="/" aria-label="Template library" title="Template library"><b aria-hidden="true">▤</b><span>Library</span></a>
+   <a href="/jobs" aria-label="Activity" title="Activity"><b aria-hidden="true">◷</b><span>Activity</span></a>
+   <a href="/handoff" aria-label="Connections" title="Connections"><b aria-hidden="true">⌁</b><span>Connections</span></a>
+   <a href="/mission" aria-label="Advanced controls" title="Advanced controls"><b aria-hidden="true">⚙</b><span>Advanced</span></a>
+  </nav>
+  <div class="rail-foot">Private local runtime.<br>Nothing runs without its required approvals.</div>
+ </aside>
+ <div class="main">
+  <header class="topbar"><div class="crumb">Personal AI Harness <span aria-hidden="true">/</span> <strong id="crumb">Workspace</strong></div>
+   <div class="session"><span><span class="dot" id="session-dot"></span><span id="session-label">Checking session</span></span><button id="logout" class="text-button" hidden type="button">Sign out</button></div>
+  </header>
+  <main class="page">
+   <section id="workspace-view">
+    <div class="page-head"><div><div class="eyebrow">Your working space</div><h1>What are we working on?</h1><p class="lede">Write a question, or propose a task. Review the actual steps before the agent can execute them.</p></div></div>
+    <div class="workspace-grid">
+     <div>
+      <section class="stage" aria-label="Agent work area">
+       <div class="stage-top"><strong>Workspace</strong><span id="active-agent-badge" class="tag">General</span></div>
+       <div class="comms" id="messages" aria-live="polite"><div class="empty" id="empty"><div class="empty-symbol">✳</div><strong>A quieter place to get things done.</strong><p>Choose a model and a task. Responses come from your configured local runtime, not from a visual demo.</p></div></div>
+       <div id="plan-box" class="plan-box" hidden>
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center"><div><h3 id="plan-title">Review plan</h3><div id="plan-id" class="quiet"></div></div><span class="tag" id="plan-status-label"></span></div>
+        <div id="plan-steps"></div>
+        <div id="plan-results" class="result" hidden></div>
+        <div class="plan-actions"><button class="button primary" id="approve-plan" hidden type="button">Approve exact steps</button><button class="button primary" id="next-step" hidden type="button">Run next step</button><button class="button danger" id="cancel-plan" hidden type="button">Cancel plan</button><button class="button" id="resume-plan" hidden type="button">Acknowledge interruption</button></div>
+       </div>
+       <form id="task-form" class="compose">
+        <div class="compose-head"><div class="segment" role="group" aria-label="Work mode"><button type="button" id="mode-plan" class="selected" aria-pressed="true">Plan a task</button><button type="button" id="mode-ask" aria-pressed="false">Ask local AI</button></div><span class="quiet" id="mode-hint">Approval required before tools run</span></div>
+        <label for="task" style="position:absolute;clip-path:inset(50%);width:1px;height:1px;overflow:hidden">Task or question</label>
+        <textarea id="task" maxlength="1200" required placeholder="Describe the result you want, in your own words."></textarea>
+        <div class="composer-actions"><span class="state" id="status" role="status" aria-live="polite">Sign in to begin.</span><button type="submit" class="button primary" id="submit-task">Propose steps</button></div>
+       </form>
+      </section>
+      <section class="saved" aria-label="Saved work"><div class="saved-heading"><h2>Recent tasks</h2><button id="refresh-tasks" class="text-button" type="button">Refresh</button></div><div id="tasks" class="saved-list"><span class="state">Sign in to load saved tasks.</span></div></section>
+     </div>
+     <aside class="inspector" aria-label="Agent context">
+      <h2>Work context</h2>
+      <label for="agent-select">Agent</label><select id="agent-select"><option value="">General · no profile</option></select>
+      <p class="hint" id="agent-hint">Profiles constrain tools for saved plans. Ordinary local chat is not Agent-scoped.</p>
+      <label for="model">Local model</label><input id="model" list="model-list" maxlength="80" autocomplete="off" placeholder="Choose installed Ollama model"><datalist id="model-list"></datalist>
+      <button id="refresh-models" type="button" class="text-button">Refresh models</button>
+      <hr class="divider">
+      <label for="project">Project scope (optional)</label><input id="project" maxlength="60" value="personal_workspace" autocomplete="off" spellcheck="false">
+      <p class="hint">Project scope is used only when selecting scoped memory notes for a named Agent.</p>
+      <label>Context notes <span class="quiet">(select up to 3)</span></label><div id="memories" class="state">Choose an Agent to inspect its notes.</div>
+      <div class="capability" id="capabilities">Checking real capabilities. No simulated providers, connectors or background agents.</div>
+     </aside>
+    </div>
+   </section>
+   <section id="agents-view" hidden>
+    <div class="page-head"><div><div class="eyebrow">Specialists</div><h1>Agents, with boundaries.</h1><p class="lede">Real saved profiles and tool permissions, not fictional personalities or an unverified marketplace.</p></div><button class="button primary" id="new-agent" type="button" disabled>Create Agent</button></div>
+    <section class="agent-list"><h2>Agent library</h2><div class="library-tools"><input id="agent-search" aria-label="Search Agents" placeholder="Search by name or category" autocomplete="off"><span id="agent-count" class="state"></span></div><div id="agent-grid" class="agent-grid"><span class="state">Sign in to load Agents.</span></div></section>
+    <p class="notice" style="margin-top:20px">An Agent profile is a permission-bound identity. It does not independently grant cloud credits, unlimited tools, Gmail access or unattended execution. Editing or disabling a profile invalidates existing bound plans.</p>
+   </section>
+  </main>
+ </div>
+</div>
+<div id="gate" class="backdrop"><form class="login" id="login-form"><div class="eyebrow">Owner access</div><h2>Unlock your workspace.</h2><p>Your password stays in this session. Model, memory and tool actions remain governed by the existing local server.</p><label for="password" style="font-size:12px;font-weight:650">Owner password</label><input id="password" type="password" autocomplete="current-password" required><div style="display:flex;justify-content:flex-end;gap:12px;align-items:center;margin-top:16px"><span id="login-status" class="state"></span><button class="button primary" id="login" type="submit">Unlock</button></div></form></div>
+<dialog id="agent-dialog" aria-labelledby="dialog-title">
+ <form id="agent-form"><div class="eyebrow">New specialist</div><h2 id="dialog-title">Create an Agent</h2><p>Profiles restrict which tools can appear in reviewed task plans. Instructions cannot override server policy.</p>
+  <label for="new-id">Agent ID</label><input id="new-id" required maxlength="40" pattern="[a-z][a-z0-9_]{2,39}" placeholder="research_agent" autocomplete="off">
+  <label for="new-name">Name</label><input id="new-name" required maxlength="80" placeholder="Research Analyst" autocomplete="off">
+  <label for="new-category">Category</label><select id="new-category"><option value="research">Research</option><option value="engineering">Engineering</option><option value="business">Business</option><option value="creative">Creative</option><option value="productivity">Productivity</option><option value="personal">Personal</option></select>
+  <label for="new-desc">Description</label><input id="new-desc" maxlength="240" placeholder="What this Agent is for">
+  <label for="new-instructions">Operating instructions</label><textarea id="new-instructions" maxlength="1600" placeholder="Boundaries, preferred approach and output standards"></textarea>
+  <label>Permitted read-only tools</label><div class="tools"><label><input type="checkbox" value="calculate" checked> Calculate</label><label><input type="checkbox" value="utc_now" checked> UTC time</label></div>
+  <label for="new-password">Re-enter owner password</label><input id="new-password" type="password" required autocomplete="off">
+  <p id="agent-save-status" class="state" role="status"></p>
+  <div class="plan-actions" style="justify-content:flex-end"><button class="button" id="close-agent" type="button">Cancel</button><button class="button primary" type="submit" id="save-agent">Create saved profile</button></div>
+ </form>
+</dialog>
+<script>
+"use strict";
+const el=id=>document.getElementById(id);
+let csrf="",caps={},agents=[],currentPlan=null,mode="plan",busy=false,authEpoch=0;
+function setStatus(message,error=false){el("status").textContent=message;el("status").classList.toggle("error",error)}
+function addMessage(author,message){
+ const empty=el("empty");if(empty)empty.remove();
+ const node=document.createElement("div");node.className="message "+(author==="You"?"user":"assistant");
+ const small=document.createElement("small");small.textContent=author;
+ const body=document.createElement("div");body.textContent=message;node.append(small,body);
+ el("messages").append(node);el("messages").scrollTop=el("messages").scrollHeight;
+}
+function lock(message){
+ csrf="";authEpoch++;agents=[];currentPlan=null;caps={};el("gate").hidden=false;el("logout").hidden=true;
+ el("session-label").textContent="Locked";el("session-dot").classList.remove("good");
+ el("agent-select").replaceChildren(new Option("General · no profile",""));
+ el("agent-grid").textContent="Sign in to load Agents.";el("tasks").textContent="Sign in to load saved tasks.";
+ el("memories").textContent="Choose an Agent to inspect its notes.";el("capabilities").textContent="Sign in to inspect supported capabilities.";
+ el("new-agent").disabled=true;el("plan-box").hidden=true;el("messages").replaceChildren();
+ el("submit-task").disabled=true;el("password").value="";
+ el("login-status").textContent=message||"Sign in to continue.";setStatus("Locked.");
+}
+async function api(path,body){
+ const headers={};const method=body===undefined?"GET":"POST";
+ if(method==="POST"){headers["Content-Type"]="application/json";headers["X-AAS-CSRF"]=csrf;}
+ let response;try{response=await fetch(path,{method,headers,credentials:"same-origin",cache:"no-store",...(body===undefined?{}:{body:JSON.stringify(body)})});}
+ catch(e){throw Error("connection_failed")}
+ let data;try{data=await response.json()}catch(e){throw Error("invalid_response")}
+ if(!response.ok){if(response.status===401)lock("Session expired.");throw Error(data.error||"request_failed")}
+ return data;
+}
+function refreshComposer(){
+ el("submit-task").textContent=mode==="plan"?"Propose steps":"Ask local AI";
+ el("submit-task").disabled=!csrf||busy||(mode==="plan"?!caps.planning:!caps.enabled);
+ el("new-agent").disabled=!csrf||!caps.agent_profiles||busy;
+}
+function switchView(view){
+ const agent=view==="agents";
+ el("workspace-view").hidden=agent;el("agents-view").hidden=!agent;
+ el("nav-agents").classList.toggle("active",agent);el("nav-workspace").classList.toggle("active",!agent);
+ el("crumb").textContent=agent?"Agents":"Workspace";
+}
+function setMode(next){
+ mode=next;for(const m of ["plan","ask"]){const active=m===next;el("mode-"+m).classList.toggle("selected",active);el("mode-"+m).setAttribute("aria-pressed",String(active));}
+ el("mode-hint").textContent=next==="plan"?"Approval required before tools run":"Single local answer · chat is not Agent-scoped";
+ el("task").maxLength=next==="plan"?1200:3000;
+ refreshComposer();
+}
+function validModel(){
+ const value=el("model").value.trim();
+ if(!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/.test(value))throw Error("Select a valid installed local model");
+ return value;
+}
+async function loadCapabilities(){
+ const data=await api("/api/local-agent-capabilities");caps=data;
+ const available=!!data.enabled,planning=!!data.planning;
+ el("capabilities").textContent="Local AI: "+(available?"enabled":"disabled")+". Plans: "+(planning?"enabled":"disabled")+". Agent profiles: "+(data.agent_profiles?"enabled":"disabled")+". Scoped notes: "+(data.scoped_agent_memory?"enabled":"disabled")+". Cloud providers are not enabled by this screen. External actions still require separate approval.";
+ refreshComposer();
+}
+async function loadModels(){
+ if(!csrf)return;
+ try{const d=await api("/api/local-agent-models");const models=Array.isArray(d.models)?d.models.filter(x=>typeof x==="string"&&x.length<=80):[];
+ el("model-list").replaceChildren(...models.map(name=>new Option("",name)));
+ if(models.length===1&&!el("model").value)el("model").value=models[0];
+ if(!models.length)setStatus("No local Ollama model detected. Check server configuration.",true);
+ }catch(e){setStatus("Local models unavailable: "+e.message,true)}
+}
+async function loadAgents(){
+ if(!csrf)return;
+ try{
+  const d=await api("/api/agent-profiles");agents=Array.isArray(d.agents)?d.agents:[];
+  const selected=el("agent-select").value,options=[new Option("General · no profile","")];
+  for(const item of agents.filter(a=>a.enabled!==false)){options.push(new Option(item.name+" · "+item.category,item.agent_id))}
+  el("agent-select").replaceChildren(...options);
+  if(options.some(o=>o.value===selected))el("agent-select").value=selected;
+  el("agent-count").textContent=agents.length+" / "+(d.capacity||24)+" profiles";
+  renderAgents();
+  await loadMemories();
+ }catch(e){
+  agents=[];el("agent-grid").textContent=e.message==="agent_profiles_disabled"?"Agent Profiles are not enabled on this server.":"Cannot load Agent profiles: "+e.message;
+  el("agent-count").textContent="Unavailable";el("agent-select").replaceChildren(new Option("General · no profile",""));
+ }
+ refreshComposer();
+}
+function renderAgents(){
+ const q=el("agent-search").value.trim().toLowerCase(),grid=el("agent-grid");grid.replaceChildren();
+ const matches=agents.filter(x=>(x.name+" "+x.category+" "+x.description).toLowerCase().includes(q));
+ if(!matches.length){grid.textContent="No matching Agent Profiles. Create one when this capability is enabled.";return}
+ for(const a of matches){
+  const card=document.createElement("div");card.className="agent-card";
+  const cat=document.createElement("small");cat.textContent=a.category+" · "+(a.enabled?"enabled":"disabled");
+  const name=document.createElement("strong");name.textContent=a.name;
+  const desc=document.createElement("p");desc.textContent=a.description||"No description";
+  const tools=document.createElement("span");tools.className="state";tools.textContent="Tools: "+(Array.isArray(a.allowed_tools)?a.allowed_tools.join(", "):"not available");
+  const use=document.createElement("button");use.className="button";use.textContent=a.enabled?"Use for a task":"Disabled";use.disabled=!a.enabled;
+  use.addEventListener("click",()=>{el("agent-select").value=a.agent_id;selectAgent();switchView("workspace")});
+  card.append(cat,name,desc,tools,use);grid.append(card);
+ }
+}
+function selectAgent(){
+ const a=agents.find(x=>x.agent_id===el("agent-select").value);
+ el("active-agent-badge").textContent=a?a.name:"General";
+ el("agent-hint").textContent=a?"Allowed tools: "+(a.allowed_tools||[]).join(", ")+". Revision "+a.revision+". Only task plans are bound to this Agent.":"Unbound task plans are supported. Ordinary local chat is not Agent-scoped.";
+ loadMemories();
+}
+async function loadMemories(){
+ const wrap=el("memories");wrap.replaceChildren();
+ if(!caps.scoped_agent_memory){wrap.textContent="Scoped memory is not enabled here.";return}
+ const aid=el("agent-select").value,project=el("project").value.trim();
+ if(!aid){wrap.textContent="Select an Agent to see its project notes.";return}
+ if(!/^[a-z][a-z0-9_-]{2,59}$/.test(project)){wrap.textContent="Use a lowercase project ID, 3–60 characters.";return}
+ try{
+  const d=await api("/api/agent-scoped-memory?project_id="+encodeURIComponent(project)+"&agent_id="+encodeURIComponent(aid));
+  if(!csrf||aid!==el("agent-select").value||project!==el("project").value.trim())return;
+  const notes=(Array.isArray(d.notes)?d.notes:[]).filter(n=>!n.expired);
+  if(!notes.length){wrap.textContent="No active notes in this Agent/project scope. Plans can be created without selected notes.";return}
+  for(const note of notes){
+   const label=document.createElement("label");label.className="memory-item";
+   const input=document.createElement("input");input.type="checkbox";input.value=note.note_id;input.name="scoped_note";input.addEventListener("change",()=>{
+    const selected=[...wrap.querySelectorAll("input:checked")];if(selected.length>3){input.checked=false;setStatus("Select at most 3 memory notes.",true)}
+   });
+   const text=document.createElement("span");text.textContent=note.note_id;
+   const sub=document.createElement("small");sub.textContent=(note.source_kind||"OWNER_NOTE")+" · unverified context";text.append(sub);
+   label.append(input,text);wrap.append(label);
+  }
+ }catch(e){wrap.textContent="Notes unavailable: "+e.message}
+}
+async function loadPlans(){
+ if(!csrf)return;
+ try{
+  const d=await api("/api/local-agent-plans"),wrap=el("tasks");wrap.replaceChildren();
+  const plans=Array.isArray(d.plans)?d.plans:[];
+  if(!plans.length){wrap.textContent="No saved task plans yet.";return}
+  for(const p of plans.slice(0,24)){
+   const b=document.createElement("button");b.type="button";b.className="task-card";
+   const state=document.createElement("span");state.className="tag";state.textContent=p.status||"UNKNOWN";
+   const goal=document.createElement("strong");goal.textContent=p.goal||"Untitled task";
+   const meta=document.createElement("small");meta.textContent="Plan "+(p.plan_id||"unknown");
+   b.append(state,goal,meta);b.addEventListener("click",()=>openPlan(p.plan_id));wrap.append(b);
+  }
+ }catch(e){el("tasks").textContent="Saved plans unavailable: "+e.message}
+}
+async function openPlan(id){
+ if(!/^[0-9a-f]{24}$/.test(id)||!csrf)return;
+ try{const data=await api("/api/local-agent-plan?plan_id="+encodeURIComponent(id));renderPlan(data);switchView("workspace");el("plan-box").scrollIntoView({block:"nearest",behavior:"auto"})}
+ catch(e){setStatus("Cannot load task: "+e.message,true)}
+}
+function renderPlan(data){
+ currentPlan=data;const box=el("plan-box");box.hidden=!data;if(!data)return;
+ el("plan-title").textContent=data.goal||"Saved task";
+ el("plan-id").textContent="Plan "+data.plan_id+" · "+(data.model||"unknown")+" · Agent binding "+(data.agent_binding?.agent_id||"none");
+ el("plan-status-label").textContent=data.status||"UNKNOWN";
+ const steps=el("plan-steps");steps.replaceChildren();
+ for(const [i,s] of (data.steps||[]).entries()){
+  const row=document.createElement("div");row.className="step";
+  const title=document.createElement("strong");title.textContent=(i+1)+". "+s.tool;
+  const args=document.createElement("code");args.textContent=JSON.stringify(s.args||{});
+  row.append(title,args);steps.append(row);
+ }
+ const results=Array.isArray(data.results)?data.results:[];
+ el("plan-results").hidden=!results.length;
+ el("plan-results").textContent=results.map(r=>(r.tool||"Step")+"\n"+(r.output||"")).join("\n\n");
+ const s=data.status,active=["RUNNING","STOPPING"].includes(data.batch_run_status);
+ el("approve-plan").hidden=s!=="PREPARED"||active;
+ el("next-step").hidden=!["APPROVED","NEXT_READY"].includes(s)||active;
+ el("cancel-plan").hidden=!["PREPARED","APPROVED","NEXT_READY","INTERRUPTED","BLOCKED"].includes(s)||active;
+ el("resume-plan").hidden=s!=="INTERRUPTED"||active;
+}
+async function action(name){
+ if(!csrf||!currentPlan||busy)return;
+ const id=currentPlan.plan_id;
+ if(name==="next"&&!confirm("Execute exactly one approved local tool step?"))return;
+ busy=true;refreshComposer();setStatus("Processing reviewed task…");
+ try{
+  const d=await api("/api/local-agent-plan-"+name,{plan_id:id});renderPlan(d);setStatus("Saved status: "+d.status);await loadPlans();
+ }catch(e){setStatus("Action was not confirmed: "+e.message+". Inspect the saved plan before retrying.",true)}
+ finally{busy=false;refreshComposer()}
+}
+async function submitTask(e){
+ e.preventDefault();if(!csrf||busy)return;
+ let model;try{model=validModel()}catch(e){setStatus(e.message,true);return}
+ const text=el("task").value.trim();if(!text)return;
+ let payload={goal:text,model};
+ if(mode==="plan"){
+  const agent=el("agent-select").value;const checked=[...el("memories").querySelectorAll("input:checked")].map(x=>x.value);
+  if(agent)payload.agent_id=agent;
+  if(checked.length){
+   const project=el("project").value.trim();
+   if(!agent||!/^[a-z][a-z0-9_-]{2,59}$/.test(project)){setStatus("Select a named Agent and valid project to use scoped notes.",true);return}
+   payload.project_id=project;payload.scoped_memory_ids=checked;
+  }
+ }
+ busy=true;refreshComposer();setStatus(mode==="plan"?"Requesting a bounded plan from the local model…":"Waiting for an actual local response…");
+ addMessage("You",text);el("task").value="";
+ try{
+  if(mode==="plan"){
+   const data=await api("/api/local-agent-plan-create",payload);
+   renderPlan(data);addMessage("Studio","Proposed "+(data.steps||[]).length+" steps. Review all tools and arguments below before approval.");
+   setStatus("Review required. Nothing has executed.");await loadPlans();
+  }else{
+   const d=await api("/api/local-agent-run",{model,prompt:text});
+   addMessage("Local AI",typeof d.answer==="string"?d.answer:JSON.stringify(d));
+   setStatus("Local model responded. Verify important claims.");
+  }
+ }catch(e){addMessage("Studio","No confirmed result: "+e.message);setStatus("Request failed: "+e.message,true)}
+ finally{busy=false;refreshComposer()}
+}
+async function unlock(){
+ el("gate").hidden=true;el("logout").hidden=false;el("session-dot").classList.add("good");el("session-label").textContent="Private session";setStatus("Connected to local server.");
+ const epoch=authEpoch;
+ await loadCapabilities();
+ if(!csrf||epoch!==authEpoch)return;
+ await Promise.all([loadAgents(),loadModels(),loadPlans()]);
+ refreshComposer();
+}
+el("login-form").addEventListener("submit",async e=>{
+ e.preventDefault();el("login").disabled=true;const password=el("password").value;
+ try{
+  const r=await fetch("/api/operator-login",{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});
+  const d=await r.json();if(!r.ok)throw Error(d.error||"login_failed");
+  csrf=d.csrf_token;authEpoch++;el("password").value="";await unlock();
+ }catch(e){el("login-status").textContent="Cannot sign in: "+e.message}
+ finally{el("login").disabled=false}
+});
+el("logout").addEventListener("click",async()=>{try{await api("/api/operator-logout",{})}catch(e){}lock("Signed out.")});
+el("nav-workspace").addEventListener("click",()=>switchView("workspace"));
+el("nav-agents").addEventListener("click",()=>switchView("agents"));
+el("mode-plan").addEventListener("click",()=>setMode("plan"));
+el("mode-ask").addEventListener("click",()=>setMode("ask"));
+el("task-form").addEventListener("submit",submitTask);
+el("refresh-models").addEventListener("click",loadModels);
+el("refresh-tasks").addEventListener("click",loadPlans);
+el("agent-select").addEventListener("change",selectAgent);
+el("project").addEventListener("change",loadMemories);
+el("agent-search").addEventListener("input",renderAgents);
+for(const [id,name] of [["approve-plan","approve"],["next-step","next"],["cancel-plan","cancel"],["resume-plan","resume"]])el(id).addEventListener("click",()=>action(name));
+el("new-agent").addEventListener("click",()=>{el("agent-save-status").textContent="";el("agent-dialog").showModal()});
+el("close-agent").addEventListener("click",()=>el("agent-dialog").close());
+el("agent-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!csrf||busy)return;
+ const password=el("new-password").value;const tools=[...el("agent-form").querySelectorAll(".tools input:checked")].map(x=>x.value);
+ if(!tools.length){el("agent-save-status").textContent="Choose at least one allowed tool.";return}
+ busy=true;refreshComposer();el("save-agent").disabled=true;
+ try{
+  const payload={agent_id:el("new-id").value.trim(),name:el("new-name").value.trim(),category:el("new-category").value,
+   description:el("new-desc").value.trim(),instructions:el("new-instructions").value.trim(),allowed_tools:tools,current_password:password};
+  await api("/api/agent-profile-create",payload);
+  el("new-password").value="";el("agent-form").reset();el("agent-dialog").close();
+  await loadAgents();el("agent-select").value=payload.agent_id;selectAgent();switchView("workspace");
+  setStatus("Agent Profile created and saved. Its allowed tools are enforced by the server.");
+ }catch(e){el("agent-save-status").textContent="Creation failed: "+e.message}
+ finally{el("new-password").value="";busy=false;el("save-agent").disabled=false;refreshComposer()}
+});
+(async()=>{
+ try{
+  const r=await fetch("/api/operator-session",{credentials:"same-origin",cache:"no-store"}),d=await r.json();
+  if(d.authenticated&&d.csrf_token){csrf=d.csrf_token;authEpoch++;await unlock()}
+  else lock("Enter your private owner password.");
+ }catch(e){lock("Local server unavailable. Open through your private tunnel.")}
+})();
+</script>
+</body>
+</html>
