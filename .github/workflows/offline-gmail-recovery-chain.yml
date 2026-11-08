@@ -1,0 +1,50 @@
+name: Stage 124 offline restored Gmail evidence chain
+
+on:
+  pull_request:
+    paths:
+      - 'tools/owner_gmail_chain_audit.py'
+      - 'tools/owner_acceptance_audit.py'
+      - 'tools/owner_encrypted_recovery_drill.py'
+      - 'tests/test_owner_gmail_chain_audit.py'
+      - 'docs/OFFLINE_GMAIL_RECOVERY_CHAIN_AUDIT_V1.md'
+      - '.github/workflows/offline-gmail-recovery-chain.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/owner_gmail_chain_audit.py'
+      - 'tools/owner_acceptance_audit.py'
+      - 'tools/owner_encrypted_recovery_drill.py'
+      - 'tests/test_owner_gmail_chain_audit.py'
+      - 'docs/OFFLINE_GMAIL_RECOVERY_CHAIN_AUDIT_V1.md'
+      - '.github/workflows/offline-gmail-recovery-chain.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-gmail-evidence-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned optional cryptography for real encrypted recovery fixtures
+        run: python -m pip install -r requirements-vault.txt
+      - name: Stage124 strict nine-layer Gmail chain and restored secondary archive tests
+        run: python -m unittest discover -s tests -p 'test_owner_gmail_chain_audit.py' -v
+      - name: Stage118 and Stage123 opt-in backward compatibility regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_owner_acceptance_audit.py' -v
+          python -m unittest discover -s tests -p 'test_owner_encrypted_recovery_drill.py' -v
+      - name: Syntax validation
+        run: python -m py_compile tools/owner_gmail_chain_audit.py tools/owner_acceptance_audit.py tools/owner_encrypted_recovery_drill.py tests/test_owner_gmail_chain_audit.py

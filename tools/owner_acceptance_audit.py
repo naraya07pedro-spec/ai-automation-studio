@@ -84,7 +84,8 @@ def _decode_list(value, field):
     return decoded
 
 def audit(root, plan_id, *, expected_host=None, expected_workflow=None,
-          expected_node=None):
+          expected_node=None, require_gmail_sent_chain=False,
+          expected_gmail_node=None):
     """No live writes. Return non-sensitive verdict, never raw evidence contents."""
     _require(type(plan_id) is str and PLAN_ID.fullmatch(plan_id),
              "invalid_plan_id")
@@ -94,6 +95,20 @@ def audit(root, plan_id, *, expected_host=None, expected_workflow=None,
     source=source.resolve(strict=True)
     _source_root(source)
     _check_private(source/"operator.json")
+    if type(require_gmail_sent_chain) is not bool:
+        raise AcceptanceError("invalid_gmail_audit_mode")
+    if require_gmail_sent_chain and any(
+            v is None for v in (
+                expected_host,expected_workflow,expected_node,expected_gmail_node)):
+        raise AcceptanceError("strict_gmail_audit_requires_four_owner_pins")
+    if not require_gmail_sent_chain and expected_gmail_node is not None:
+        raise AcceptanceError("gmail_node_pin_requires_strict_audit")
+    if expected_gmail_node is not None:
+        _require(type(expected_gmail_node) is str
+                 and 1 <= len(expected_gmail_node) <= 100
+                 and all(32 <= ord(c) < 127 for c in expected_gmail_node)
+                 and expected_gmail_node != expected_node,
+                 "invalid_pinned_gmail_send_node")
     if expected_host is not None:
         _require(type(expected_host) is str and HOST.fullmatch(expected_host)
                  and "." in expected_host, "invalid_pinned_host")
@@ -228,18 +243,33 @@ def audit(root, plan_id, *, expected_host=None, expected_workflow=None,
             else:
                 _require(claim=="FAILED" and pstate=="error",
                          "provider_failure_inconsistent")
-            # No independent remote fetch here: it audits the locally recorded
-            # Stage 117 response, not the trustworthiness of the provider.
+            # The strict extension stays inside this same offline guard and
+            # opened read-only SQLite transaction. Legacy six-ledger behavior
+            # remains unchanged unless the owner explicitly requests strict.
+            gmail_layers = []
+            if require_gmail_sent_chain:
+                _require(status=="EXECUTION_SUCCESS_CORRELATED",
+                         "gmail_strict_requires_successful_n8n_execution")
+                from owner_gmail_chain_audit import check_saved_gmail_chain
+                gmail_layers = check_saved_gmail_chain(
+                    handoffs,plan_id,cid,wid,eid,did,exid,hash_msg,
+                    owner_pinned_gmail_node=expected_gmail_node,
+                    one=_one,require=_require,hex_valid=_hex)
+            # No independent remote fetch here: local consistency only.
             return {
-                "status":"LOCAL_EVIDENCE_CHAIN_CONSISTENT",
+                "status":("LOCAL_GMAIL_EVIDENCE_CHAIN_CONSISTENT"
+                          if require_gmail_sent_chain else
+                          "LOCAL_EVIDENCE_CHAIN_CONSISTENT"),
                 "checked_layers":["completed_plan","local_workflow_run",
                                   "stage114_handoff","actual_connector_sender_ledger",
                                   "stage116_signed_claim_record",
-                                  "stage117_saved_provider_execution_record"],
+                                  "stage117_saved_provider_execution_record"] + gmail_layers,
                 "recorded_provider_execution":status,
                 "owner_host_pin_checked":expected_host is not None,
                 "owner_workflow_pin_checked":expected_workflow is not None,
                 "owner_node_pin_checked":expected_node is not None,
+                "owner_gmail_node_pin_checked":expected_gmail_node is not None,
+                "strict_saved_gmail_chain_audited":require_gmail_sent_chain,
                 "live_provider_queried_now":False,
                 "hmac_secret_reverified_offline":False,
                 "business_effect_verified":False,
@@ -256,12 +286,17 @@ def main(argv=None):
     parser.add_argument("--expected-n8n-host")
     parser.add_argument("--expected-n8n-workflow")
     parser.add_argument("--expected-n8n-node")
+    parser.add_argument("--require-gmail-sent-chain",action="store_true",
+                        help="Strictly require Stage 121+122+120 same-plan evidence; needs all 4 owner pins")
+    parser.add_argument("--expected-n8n-gmail-node")
     args=parser.parse_args(argv)
     try:
         result=audit(args.owner_root,args.plan_id,
                      expected_host=args.expected_n8n_host,
                      expected_workflow=args.expected_n8n_workflow,
-                     expected_node=args.expected_n8n_node)
+                     expected_node=args.expected_n8n_node,
+                     require_gmail_sent_chain=args.require_gmail_sent_chain,
+                     expected_gmail_node=args.expected_n8n_gmail_node)
     except (AcceptanceError,BackupError,OSError,ValueError,sqlite3.Error) as exc:
         reason=str(exc) if isinstance(exc,(AcceptanceError,BackupError)) else "local_state_unreadable"
         print(json.dumps({"status":"LOCAL_EVIDENCE_CHAIN_NOT_PROVEN",
