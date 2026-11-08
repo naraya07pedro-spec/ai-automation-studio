@@ -541,23 +541,82 @@ el("agent-select").addEventListener("change",selectAgent);
 el("project").addEventListener("change",loadMemories);
 el("agent-search").addEventListener("input",renderAgents);
 for(const [id,name] of [["approve-plan","approve"],["next-step","next"],["cancel-plan","cancel"],["resume-plan","resume"]])el(id).addEventListener("click",()=>action(name));
-el("new-agent").addEventListener("click",()=>{el("agent-save-status").textContent="";el("agent-dialog").showModal()});
+el("new-agent").addEventListener("click",()=>openAgentEditor());
 el("close-agent").addEventListener("click",()=>el("agent-dialog").close());
+el("agent-dialog").addEventListener("close",()=>{el("new-password").value="";editingAgent=null});
 el("agent-form").addEventListener("submit",async e=>{
  e.preventDefault();if(!csrf||busy)return;
- const password=el("new-password").value;const tools=[...el("agent-form").querySelectorAll(".tools input:checked")].map(x=>x.value);
- if(!tools.length){el("agent-save-status").textContent="Choose at least one allowed tool.";return}
+ const password=el("new-password").value;
+ const tools=[...el("agent-tools").querySelectorAll("input:checked")].map(x=>x.value);
+ if(!tools.length){el("agent-save-status").textContent="Choose at least one permitted tool.";return}
+ const instructions=el("new-instructions").value;
+ if(/[\x00-\x1f\x7f]/.test(instructions)){el("agent-save-status").textContent="Agent instructions must be one line (no control characters).";return}
+ const selected=editingAgent;
  busy=true;refreshComposer();el("save-agent").disabled=true;
  try{
-  const payload={agent_id:el("new-id").value.trim(),name:el("new-name").value.trim(),category:el("new-category").value,
-   description:el("new-desc").value.trim(),instructions:el("new-instructions").value.trim(),allowed_tools:tools,current_password:password};
-  await api("/api/agent-profile-create",payload);
-  el("new-password").value="";el("agent-form").reset();el("agent-dialog").close();
-  await loadAgents();el("agent-select").value=payload.agent_id;selectAgent();switchView("workspace");
-  setStatus("Agent Profile created and saved. Its allowed tools are enforced by the server.");
- }catch(e){el("agent-save-status").textContent="Creation failed: "+e.message}
+  const payload={agent_id:el("new-id").value.trim(),name:el("new-name").value.trim(),category:el("new-category").value,description:el("new-desc").value.trim(),instructions,allowed_tools:tools,current_password:password};
+  if(selected)payload.expected_revision=selected.revision;
+  await api(selected?"/api/agent-profile-update":"/api/agent-profile-create",payload);
+  el("agent-dialog").close();await loadAgents();
+  if(agents.some(a=>a.agent_id===payload.agent_id&&a.enabled)){el("agent-select").value=payload.agent_id;selectAgent()}
+  switchView("workspace");
+  setStatus(selected?"Agent revised. Its older bound plans are now invalid.":"Agent created with server-enforced tool restrictions.");
+ }catch(error){el("agent-save-status").textContent="Not confirmed: "+error.message+". Inspect profile before retrying."}
  finally{el("new-password").value="";busy=false;el("save-agent").disabled=false;refreshComposer()}
 });
+el("disable-agent").addEventListener("click",async()=>{
+ const target=editingAgent;if(!target||busy||!csrf)return;
+ const password=el("new-password").value;
+ if(!password){el("agent-save-status").textContent="Current owner password required.";return}
+ if(!confirm("DISABLE "+target.name+" ("+target.agent_id+") permanently?\n\nV1 cannot reactivate profiles. Old bound plans stop; memory is not erased."))return;
+ busy=true;refreshComposer();el("disable-agent").disabled=true;
+ try{
+  await api("/api/agent-profile-disable",{agent_id:target.agent_id,expected_revision:target.revision,current_password:password});
+  el("agent-dialog").close();await loadAgents();selectAgent();
+  setStatus("Agent disabled. Existing bound plans cannot execute.");
+ }catch(error){el("agent-save-status").textContent="Disable not confirmed: "+error.message}
+ finally{el("new-password").value="";el("disable-agent").disabled=false;busy=false;refreshComposer()}
+});
+el("new-note").addEventListener("click",()=>openNoteEditor());
+el("close-note").addEventListener("click",()=>el("note-dialog").close());
+el("note-dialog").addEventListener("close",()=>{el("note-password").value="";editingNote=null;scopeEditing=null});
+el("note-form").addEventListener("submit",async e=>{
+ e.preventDefault();if(!csrf||busy||!sameNoteScope())return;
+ if(editingNote?.expired){el("note-status").textContent="Expired notes can only be deleted.";return}
+ const snapshot=scopeEditing,note=editingNote;
+ const payload={project_id:snapshot.project_id,agent_id:snapshot.agent_id,
+  note_id:el("note-id").value.trim(),text:el("note-text").value,
+  source_kind:"OWNER_NOTE",source_label:el("note-source").value.trim(),
+  retention_days:Number(el("note-retention").value),expected_revision:note?.revision||0,
+  current_password:el("note-password").value};
+ if(!payload.current_password){el("note-status").textContent="Current owner password required.";return}
+ if(note?.source_kind==="OWNER_IMPORTED_UNVERIFIED"&&!confirm("Replace imported provenance with OWNER_NOTE?\n\nThe record will be explicitly owner-authored and older linked plans invalidated."))return;
+ busy=true;refreshComposer();el("save-note").disabled=true;
+ try{
+  await api("/api/agent-scoped-memory-save",payload);
+  el("note-dialog").close();await loadMemories();
+  setStatus("Memory saved. Plans bound to older revisions are invalid.");
+ }catch(error){el("note-status").textContent="Save not confirmed: "+error.message+". Inspect current revision before retrying."}
+ finally{el("note-password").value="";el("save-note").disabled=false;busy=false;refreshComposer()}
+});
+el("delete-note").addEventListener("click",async()=>{
+ const note=editingNote,snapshot=scopeEditing;
+ if(!note||!csrf||busy||!sameNoteScope())return;
+ const password=el("note-password").value;if(!password){el("note-status").textContent="Current owner password required.";return}
+ if(!confirm("DELETE "+note.note_id+" revision "+note.revision+"?\n\nLinked plans stop. Previous backup/swap copies may remain."))return;
+ busy=true;refreshComposer();el("delete-note").disabled=true;
+ try{
+  await api("/api/agent-scoped-memory-delete",{project_id:snapshot.project_id,agent_id:snapshot.agent_id,note_id:note.note_id,expected_revision:note.revision,current_password:password});
+  el("note-dialog").close();await loadMemories();
+  setStatus("Note deleted from live ledger. Backup copies may remain.");
+ }catch(error){el("note-status").textContent="Delete not confirmed: "+error.message+". Inspect ledger first."}
+ finally{el("note-password").value="";el("delete-note").disabled=false;busy=false;refreshComposer()}
+});
+el("mode-cloud").addEventListener("click",()=>setMode("cloud"));
+el("cloud-provider").addEventListener("change",()=>{el("cloud-model").value="";el("cloud-consent").checked=false;refreshComposer()});
+el("cloud-owner").addEventListener("input",refreshComposer);
+el("cloud-consent").addEventListener("change",refreshComposer);
+el("cloud-receipt-check").addEventListener("click",inspectCloudReceipt);
 (async()=>{
  try{
   const r=await fetch("/api/operator-session",{credentials:"same-origin",cache:"no-store"}),d=await r.json();
