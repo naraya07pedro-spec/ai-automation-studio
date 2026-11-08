@@ -1,6 +1,6 @@
 # Personal AI Harness / AI Automation Studio · Execution roadmap (living)
 
-Last reviewed: **7 November 2026 (WIB)**. This record is a decision-and-evidence ledger, not a claim that the overall product is finished. Owner priority: make a usable, trustworthy personal AI workbench **without depending on Tencent VPS first**. No product-level fake percentage-complete score.
+Last reviewed: **8 November 2026 (WIB)**. This record is a decision-and-evidence ledger, not a claim that the overall product is finished. Owner priority: make a usable, trustworthy personal AI workbench **without depending on Tencent VPS first**. No product-level fake percentage-complete score.
 
 ## Objective and boundaries
 
@@ -126,6 +126,9 @@ Compose existing Stage #111 encrypted backup and Stage #118 six-ledger restored-
 New owner-opt-in strict local audit extends Stage #118 six-ledger consistency through Stage #121's recorded signed-claim digest, Stage #122's pinned official n8n Gmail Send node output and Stage #120's saved independent Gmail SENT metadata. Four owner-pinned n8n identifiers required; discrepancies/missing records fail closed. Stage #123 two-copy encrypted backup/restore can demand nine-layer audit **on the restored secondary copy** with separate typed plaintext consent. This checks local recorded evidence, not live n8n/Gmail provider state, real email delivery or proof of independent physical offsite storage. Operator instructions `docs/OFFLINE_GMAIL_RECOVERY_CHAIN_AUDIT_V1.md`. **Merged:** [PR #124](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/124) at `a4e7eb124a6becbcb18efb5d5600de84baccf75f`, exact tested PR head `ff8250ea13625ef4ba77f5e4ecd9a31377a623c1`. **7/7 triggered workflows SUCCESS**, focused Stage #124 **12/12 tests** on Python 3.11/3.12/3.13 with optional cryptography installed; Stage #118 **15/15** and #123 **14/14** in the same focused workflow per Python. Full standard suite: **1,390 tests per version** (187 optional skips, cryptography cases independently exercised), Chromium **58/58**. Live Windows owner and provider acceptance are **NOT VERIFIED**.
 
 
-### Stage #125 · Owner-only acceptance readiness, no provider requests (implementation under review)
+### Stage #125 · Owner-only acceptance readiness (merged, CI verified; live owner acceptance pending)
 
 A single local CLI now reads Stage #116/117/121/122/120 saved records and strict capability flags using the existing authenticated loopback-only client, with an explicit next **inspect** step and fail-closed handling of failure, missing/truncated history and duplicate entries. It cannot initiate any remote provider read, email send, connector write, paid inference, retry, VPS call or backup restore. Capped history visibility is not proof of absence. The result is navigation convenience, **not evidence integrity audit**; actual integrity verification remains Stage #124 and owner Windows acceptance remains mandatory. See `docs/OWNER_ACCEPTANCE_READINESS_V1.md`. No live verification claimed before an owner run.
+
+
+**Stage #125 final evidence:** [PR #125](https://github.com/naraya07pedro-spec/ai-automation-studio/pull/125), merge `bc3a2775a2a3b5e6b69d5d80d536ba646af46253`, exact tested head `1ebf7e52a1ac209c36b9199128a86f9cb44b4dd4`; 5/5 workflow runs and 10/10 checks successful; 10 focused tests and 1,400 full-suite tests (187 optional skipped) per Python 3.11/3.12/3.13; 58/58 Chromium tests. Live Windows/provider/recovery/24-hour gates stay unverified. The next real task remains owner-executed end-to-end acceptance, not more synthetic success labels.
