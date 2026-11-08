@@ -159,7 +159,7 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
   <label for="new-category">Category</label><select id="new-category"><option value="research">Research</option><option value="engineering">Engineering</option><option value="business">Business</option><option value="creative">Creative</option><option value="productivity">Productivity</option><option value="personal">Personal</option></select>
   <label for="new-desc">Description</label><input id="new-desc" maxlength="280" placeholder="What this Agent is for">
   <label for="new-instructions">Operating instructions</label><textarea id="new-instructions" maxlength="1200" placeholder="Boundaries, preferred approach and output standards"></textarea>
-  <label>Permitted read-only tools</label><div class="tools"><label><input type="checkbox" value="calculate" checked> Calculate</label><label><input type="checkbox" value="utc_now" checked> UTC time</label></div>
+  <label>Permitted read-only tools</label><div id="agent-tools" class="tools"></div><p class="hint">Existing nonstandard read-only grants are preserved when editing; extra grants cannot be added by this simple editor.</p>
   <label for="new-password">Re-enter owner password</label><input id="new-password" type="password" required autocomplete="off">
   <p id="agent-save-status" class="state" role="status"></p>
   <div class="dialog-actions"><button class="button danger" type="button" id="disable-agent" hidden>Disable Agent</button><div class="plan-actions" style="margin:0"><button class="button" id="close-agent" type="button">Cancel</button><button class="button primary" type="submit" id="save-agent">Create saved profile</button></div></div>
