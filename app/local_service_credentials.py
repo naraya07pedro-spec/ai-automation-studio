@@ -10,6 +10,7 @@ import stat
 
 CREDENTIAL_NAMES = {
     "AAS_VAULT_MASTER_KEY": "aas-vault-key",
+    "AAS_SCOPED_MEMORY_KEY": "aas-scoped-memory-key",
     "AAS_WEBHOOK_URL": "aas-webhook-url",
     "AAS_WEBHOOK_SIGNING_SECRET": "aas-webhook-signing-secret",
     "AAS_OPENAI_API_KEY": "aas-openai-api-key",
