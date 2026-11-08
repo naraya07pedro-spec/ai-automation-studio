@@ -349,6 +349,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "agent_connector_handoff": agent_connector_handoff is not None,
                                   "signed_handoff_outcome_import": handoff_outcomes is not None,
                                   "n8n_execution_readonly_verify": n8n_execution_verifier is not None,
+                                  "gmail_sent_artifact_verification": gmail_sent_evidence is not None,
+                                  "signed_gmail_artifact_binding_required": signed_gmail_binding is not None,
                                   "n8n_execution_hostname": (n8n_execution_verifier.host if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
