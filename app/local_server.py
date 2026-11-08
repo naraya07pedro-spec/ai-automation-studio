@@ -407,6 +407,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                  "remote_on_demand_providers": (
                                      on_demand_ai.enabled_providers()
                                      if on_demand_ai is not None else []),
+                                 "remote_model_allowlist_enforced": (
+                                     on_demand_ai is not None and
+                                     on_demand_ai.model_allowlist is not None),
+                                 "remote_approved_models": (
+                                     on_demand_ai.approved_models()
+                                     if on_demand_ai is not None else None),
+                                 "remote_daily_attempt_limit": (
+                                     on_demand_ai.daily_attempt_limit
+                                     if on_demand_ai is not None else None),
                                  "cloud_plan_review": cloud_plan_bridge is not None,
                                  "agent_connector_handoff": agent_connector_handoff is not None,
                                   "signed_handoff_outcome_import": handoff_outcomes is not None,
@@ -3106,6 +3115,8 @@ def start_local_server(port=8765, enable_local_agent=False,
                        enable_scheduled_openai=False,
                        enable_anthropic_on_demand=False,
                        enable_gemini_on_demand=False,
+                       remote_model_allowlist=None,
+                       remote_daily_attempt_limit=5,
                        enable_n8n_execution_verify=False,
                        enable_gmail_sent_evidence=False,
                        enable_signed_gmail_artifact_binding=False,
@@ -3122,6 +3133,13 @@ def start_local_server(port=8765, enable_local_agent=False,
         raise
     if enable_scheduled_local_ai and not enable_local_agent:
         raise ValueError("scheduled_local_ai_requires_local_agent")
+    if (type(remote_daily_attempt_limit) is not int
+            or not 1 <= remote_daily_attempt_limit <= 5):
+        raise ValueError("remote_daily_attempt_limit_must_be_1_to_5")
+    if remote_model_allowlist is not None and not (
+            enable_scheduled_openai or enable_anthropic_on_demand
+            or enable_gemini_on_demand):
+        raise ValueError("remote_model_allowlist_requires_paid_on_demand_provider")
     # OpenAI-only scheduling is a valid low-memory server configuration.
     # The local-Ollama flag still requires interactive local agent enablement.
     if enable_managed_autopilot and not enable_encrypted_managed_webhooks:
@@ -3270,7 +3288,9 @@ def start_local_server(port=8765, enable_local_agent=False,
         if openai_runner is not None or additional_runners:
             on_demand_ai = LocalOnDemandRemoteAI(
                 home / "on-demand-remote-ai.sqlite3",
-                runner=openai_runner, additional_runners=additional_runners)
+                runner=openai_runner, additional_runners=additional_runners,
+                model_allowlist=remote_model_allowlist,
+                daily_attempt_limit=remote_daily_attempt_limit)
         if enable_managed_autopilot:
             managed_autopilot = ManagedScheduledWebhookAutopilot(
                 scheduler,managed,audit,home / "managed-scheduled-webhook-ledgers")
@@ -3455,6 +3475,12 @@ def main(argv=None):
                         help="Explicitly enable paid Anthropic Messages one-shot text with AAS_ANTHROPIC_API_KEY; never auto-fallback.")
     parser.add_argument("--enable-gemini-on-demand", action="store_true",
                         help="Explicitly enable paid Gemini generateContent one-shot text with AAS_GEMINI_API_KEY; never auto-fallback.")
+    parser.add_argument("--allow-remote-model", action="append", default=None,
+                        metavar="PROVIDER:MODEL",
+                        help="Opt-in exact approved provider/model for one-shot paid requests. Repeat for additional approved pairs. No automatic model fallback.")
+    parser.add_argument("--remote-max-daily-attempts", type=int, default=5,
+                        metavar="1..5",
+                        help="Lower one-shot paid request cap from five to 1..5 attempts per UTC day. NOT a USD hard budget.")
     parser.add_argument("--enable-scheduled-openai", action="store_true",
                         help="Opt in to owner-armed billable OpenAI Responses scheduled text tasks; requires --enable-scheduled-local-ai and a separately provisioned AAS_OPENAI_API_KEY.")
     parser.add_argument("--enable-scheduled-local-ai", action="store_true",
@@ -3512,6 +3538,12 @@ def main(argv=None):
     # no local Ollama chat, model listing, or model tool functions enabled.
     if args.enable_managed_autopilot and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-managed-autopilot requires --enable-encrypted-managed-webhooks")
+    if not 1 <= args.remote_max_daily_attempts <= 5:
+        parser.error("--remote-max-daily-attempts must be 1..5")
+    if args.allow_remote_model is not None and not (
+            args.enable_scheduled_openai or args.enable_anthropic_on_demand
+            or args.enable_gemini_on_demand):
+        parser.error("--allow-remote-model requires a paid one-shot provider flag")
     if args.enable_n8n_execution_verify and not args.enable_encrypted_managed_webhooks:
         parser.error("--enable-n8n-execution-verify requires --enable-encrypted-managed-webhooks")
     if args.enable_encrypted_managed_webhooks and args.enable_managed_webhooks:
@@ -3629,11 +3661,13 @@ def main(argv=None):
                            enable_scheduled_openai=args.enable_scheduled_openai,
                            enable_anthropic_on_demand=args.enable_anthropic_on_demand,
                            enable_gemini_on_demand=args.enable_gemini_on_demand,
+                           remote_model_allowlist=args.allow_remote_model,
+                           remote_daily_attempt_limit=args.remote_max_daily_attempts,
                            enable_n8n_execution_verify=args.enable_n8n_execution_verify,
                            enable_gmail_sent_evidence=args.enable_gmail_sent_evidence,
                            enable_signed_gmail_artifact_binding=args.enable_signed_gmail_artifact_binding,
                            enable_official_n8n_gmail_output=args.enable_official_n8n_gmail_output)
-    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError, N8NGmailOutputError, ScopedMemoryError) as exc:
+    except (OperatorConfigurationError, SourcePolicyError, SecurityAuditError, OutboundError, AutopilotError, ManagedConnectorError, VaultError, GmailConnectorError, ServiceCredentialError, AgentScheduleError, RemoteInferenceError, ProviderExecutionError, GmailSentEvidenceError, SignedGmailArtifactError, N8NGmailOutputError, ScopedMemoryError, OnDemandRemoteAIError) as exc:
         raise SystemExit(
             str(exc) + ": run python app/local_server.py --init-owner first.")
 
