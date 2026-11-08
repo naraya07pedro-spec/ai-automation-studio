@@ -96,6 +96,7 @@ MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
 MISSION = ROOT / "web" / "mission.html"
 WORKSPACE = ROOT / "web" / "workspace.html"
+DELEGATIONS = ROOT / "web" / "delegations.html"
 HANDOFF = ROOT / "web" / "handoff.html"
 JOBS = ROOT / "web" / "jobs.html"
 _CONFIGURATION = {
@@ -346,7 +347,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     else:
                         self._send(200, {"authenticated": True, **session})
                 return
-            if route.path not in ("/", "/mission", "/workspace", "/api/health"):
+            if route.path not in ("/", "/mission", "/workspace", "/delegations", "/api/health"):
                 if not self._operator_authorized():
                     return
             if route.path == "/api/agent-scoped-memory":
@@ -929,6 +930,9 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                            "text/html; charset=utf-8")
             elif self.path == "/workspace":
                 self._send(200, WORKSPACE.read_text(encoding="utf-8"),
+                           "text/html; charset=utf-8")
+            elif self.path == "/delegations":
+                self._send(200, DELEGATIONS.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
             elif self.path == "/jobs":
                 self._send(200, JOBS.read_text(encoding="utf-8"),

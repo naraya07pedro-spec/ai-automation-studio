@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Delegations | Personal AI Harness</title>
+<style>
+:root{font:14px/1.55 Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#1e2925;--bg:#f5f5f1;--ink:#1e2925;--muted:#66736d;--line:#dde4de;--blue:#344f89;--warn:#92463a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);min-height:100vh}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}a{color:var(--blue);text-decoration:none}[hidden]{display:none!important}
+:focus-visible{outline:3px solid #8fa7ce;outline-offset:2px}
+header{background:#fff;border-bottom:1px solid var(--line);padding:17px clamp(20px,4vw,52px);display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:12px;color:var(--ink);font-weight:720;letter-spacing:-.025em}.glyph{width:33px;height:33px;border-radius:10px;background:#1e2925;color:#e7eee7;display:grid;place-items:center;font-size:12px}
+nav{display:flex;gap:19px;align-items:center;font-size:12px;flex-wrap:wrap;color:var(--muted)}
+main{max-width:1220px;padding:42px clamp(20px,4vw,52px) 90px;margin:auto}
+.eyebrow{font-size:11px;letter-spacing:.13em;color:#637168;text-transform:uppercase;font-weight:750}
+h1{font:400 clamp(33px,4.8vw,54px)/1.1 Georgia,serif;letter-spacing:-.05em;margin:11px 0 12px}
+h2{font-size:15px;letter-spacing:-.02em;margin:0 0 12px}h3{font-size:13px;margin:0 0 7px}
+p{line-height:1.7}.muted{color:var(--muted);font-size:12px}.lead{max-width:730px;color:#5e6d63;margin:0 0 28px}
+.columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.85fr);gap:19px;align-items:start}
+.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:23px;min-width:0;margin-bottom:19px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.form-grid .wide{grid-column:1/-1}
+label{display:block;font-size:11px;color:#52605a;font-weight:680;margin:15px 0 7px}
+input,select,textarea{width:100%;border:1px solid #d0d9d2;border-radius:8px;padding:10px 12px;background:#fff;color:var(--ink);outline:none}
+textarea{min-height:74px;resize:vertical}
+input:focus,select:focus,textarea:focus{border-color:#7592bc;box-shadow:0 0 0 3px #96afcf30}
+.button{border:1px solid #cbd5ce;border-radius:9px;padding:10px 14px;background:#fff;color:var(--ink);font-size:12px;font-weight:690}
+.button.primary{background:var(--blue);border-color:var(--blue);color:#fff}.button.danger{border-color:#e2b9b2;color:#993a36}
+.button:hover{background:#f4f6f4}.button.primary:hover{background:#293f70}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:17px;align-items:center}
+.help{font-size:11px;color:var(--muted);line-height:1.75;margin:9px 0}.notice{font-size:11px;padding:11px 13px;border-radius:9px;background:#f8f4ea;color:#755c3b;border:1px solid #ebe0c6;line-height:1.75}
+.status{font-size:11px;color:var(--muted);line-height:1.7;margin:10px 0;overflow-wrap:anywhere}.status.error{color:var(--warn)}
+.job-card{border:1px solid #dde5df;background:#fff;border-radius:10px;padding:14px;display:block;width:100%;text-align:left;margin-top:9px;color:var(--ink)}
+.job-card.active{border-color:#8195b9;background:#f2f6fc}.job-card strong{display:block;font-size:12px}.job-card small{display:block;font-size:11px;color:var(--muted);margin-top:5px}
+.tag{display:inline-block;background:#eef1f7;color:#526788;border-radius:4px;text-transform:uppercase;font-size:9px;font-weight:750;letter-spacing:.06em;padding:3px 7px;margin-bottom:6px}
+.node{border:1px solid #e1e7e2;border-radius:9px;padding:12px;margin:8px 0;font-size:11px;overflow-wrap:anywhere}
+.node code{display:block;font-size:10px;color:#6b786f;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:6px}
+.receipt{border:1px solid #dce4dc;border-radius:9px;background:#f6f8f6;padding:13px;max-height:270px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.7 ui-monospace,Consolas,monospace;color:#34443d}
+.split{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.gate{position:fixed;inset:0;background:#182621a8;display:grid;place-items:center;z-index:10;padding:16px}
+.login{max-width:415px;width:100%;background:white;padding:32px;border-radius:16px;box-shadow:0 23px 80px #0004}
+.login h2{font:400 29px Georgia,serif}.login p{color:var(--muted);font-size:12px}
+@media(max-width:900px){.columns{grid-template-columns:1fr}main{padding-top:30px}}
+@media(max-width:560px){.form-grid{grid-template-columns:1fr}.panel{padding:17px}header{padding:15px}nav{gap:12px}}
+</style>
+</head>
+<body>
+<header><div class="logo"><span class="glyph">A/S</span><span>Personal AI Harness</span></div>
+ <nav aria-label="Navigation"><a href="/workspace">Workspace</a><a href="/mission">Advanced</a><a href="/jobs">Jobs</a><span id="session-state">Checking session</span><button id="logout" class="button" type="button" hidden>Sign out</button></nav>
+</header>
+<main>
+ <div class="eyebrow">Reviewed cooperation / controlled execution</div>
+ <h1>Two Agents. One reviewed workflow.</h1>
+ <p class="lead">Pair two separately approved, permission-bound Agent plans. Each runs only when you explicitly authorize its next read-only step. A typed result can cross Agent scopes only after a separate owner review.</p>
+ <div id="cap-note" class="notice">Loading actual backend capabilities. No jobs are executed automatically.</div>
+ <div class="columns">
+  <div>
+   <section class="panel" aria-label="Create delegation">
+    <div class="split"><h2>Create a delegation</h2><button class="button" id="refresh-plans" type="button">Refresh eligible plans</button></div>
+    <p class="help">Each plan must already be APPROVED, belong to a different enabled Agent, and have independently selected notes from the same project. Create those plans in <a href="/workspace">Workspace</a> first.</p>
+    <form id="create-form">
+     <div class="form-grid">
+      <div><label for="job-id">Job ID</label><input id="job-id" required maxlength="40" pattern="[a-z][a-z0-9_-]{2,39}" autocomplete="off" placeholder="research_to_review"></div>
+      <div><label for="job-priority">Priority</label><select id="job-priority"><option value="1">Normal · 1</option><option value="2">Higher · 2</option><option value="3">Highest · 3</option><option value="0">Low · 0</option></select></div>
+      <div class="wide"><label for="job-label">Job description</label><input id="job-label" required maxlength="80" placeholder="Research and review"></div>
+      <div class="wide"><label for="source-plan">Source Agent · first approved plan</label><select id="source-plan" required></select></div>
+      <div class="wide"><label for="target-plan">Target Agent · separate approved plan</label><select id="target-plan" required></select></div>
+      <div class="wide"><div id="pair-preview" class="notice">Select two eligible plans. Their scope and identity will be compared before creation.</div></div>
+      <div class="wide"><label for="create-password">Current owner password</label><input id="create-password" type="password" required autocomplete="off"></div>
+     </div>
+     <div class="actions"><button id="create-job" class="button primary" type="submit" disabled>Create reviewed job</button></div>
+    </form>
+    <div id="create-status" class="status" role="status" aria-live="polite"></div>
+   </section>
+   <section class="panel" aria-label="Current job">
+    <div class="split"><h2>Selected job</h2><span id="job-status" class="tag">None</span></div>
+    <div id="job-detail" class="help">Choose a saved job to inspect the durable queue.</div>
+    <div class="actions" id="control-actions" hidden>
+     <button id="job-arm" class="button primary" type="button" hidden>Arm job</button>
+     <button id="job-next" class="button primary" type="button" hidden>Run exactly one step</button>
+     <button id="job-pause" class="button" type="button" hidden>Pause</button>
+     <button id="job-resume" class="button" type="button" hidden>Resume</button>
+     <button id="job-cancel" class="button danger" type="button" hidden>Cancel</button>
+    </div>
+    <label for="job-password">Current owner password for one job action</label><input id="job-password" type="password" autocomplete="off">
+    <div class="notice" style="margin-top:14px">On a crash or uncertain step, execution is quarantined for owner inspection. Never click run again as a blind retry.</div>
+    <div class="split" style="margin-top:17px"><h3>Saved event timeline</h3><button class="button" id="refresh-history" type="button">Inspect events</button></div>
+    <pre id="job-history" class="receipt" aria-live="polite">No job history loaded.</pre>
+    <h3 style="margin-top:18px">Review-only recovery</h3>
+    <p class="help">Reconcile only a step that the server can prove was already durably recorded. A missing/ambiguous result must not be replayed.</p>
+    <label for="reconcile-plan">Recorded plan to inspect</label><select id="reconcile-plan"></select>
+    <div class="actions"><button class="button" id="inspect-plan" type="button">Inspect plan receipt</button><button class="button danger" id="job-reconcile" type="button">Reconcile recorded step</button></div>
+    <pre id="plan-evidence" class="receipt">No plan inspected.</pre>
+   </section>
+  </div>
+  <div>
+   <section class="panel" aria-label="Saved jobs">
+    <div class="split"><h2>Durable jobs</h2><button class="button" id="refresh-jobs" type="button">Refresh</button></div>
+    <div id="jobs" class="status">Sign in to load durable jobs.</div>
+   </section>
+   <section class="panel" aria-label="Typed Agent handoff" id="handoff-panel">
+    <h2>Owner-reviewed typed result transfer</h2>
+    <p class="help">When the source finishes and the target has not started, preview its final deterministic decimal or UTC result. Commit only into a NEW note owned by the target Agent. The existing target plan is never changed or automatically re-approved.</p>
+    <form id="handoff-preview-form">
+     <label for="handoff-note">New target note ID</label><input id="handoff-note" required maxlength="32" pattern="[a-z][a-z0-9_-]{2,31}" placeholder="reviewed_source_value" autocomplete="off">
+     <label for="handoff-days">Retention</label><select id="handoff-days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">365 days</option></select>
+     <label for="handoff-password">Current owner password (each review/commit)</label><input id="handoff-password" type="password" autocomplete="off">
+     <div class="actions"><button id="handoff-preview" class="button" type="submit" disabled>Preview typed value</button><button id="handoff-commit" class="button primary" type="button" disabled>Commit reviewed note</button></div>
+    </form>
+    <pre id="handoff-output" class="receipt">No preview. This does not copy or send data automatically.</pre>
+    <div class="split" style="margin-top:19px"><label for="handoff-receipt-id">Handoff preview ID for recovery</label><button class="button" id="handoff-inspect" type="button">Inspect receipt</button></div>
+    <input id="handoff-receipt-id" maxlength="32" pattern="[0-9a-f]{32}" autocomplete="off" spellcheck="false">
+    <p class="help">A cross-SQLite crash can leave CLAIMED_REVIEW_REQUIRED. Inspect the receipt AND destination memory manually. No automatic retry or override.</p>
+    <div id="handoff-status" class="status" role="status" aria-live="polite"></div>
+   </section>
+  </div>
+ </div>
+</main>
+<div id="gate" class="gate"><form id="login-form" class="login"><div class="eyebrow">Private operator access</div><h2>Unlock Delegations</h2><p>Use the existing owner password. Profiles, notes and approved plans never grant unattended execution on their own.</p><label for="password">Owner password</label><input id="password" type="password" required autocomplete="current-password"><div class="actions"><button id="login" class="button primary" type="submit">Sign in</button></div><p id="login-status" class="status" role="status"></p></form></div>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let csrf="",caps={},plans=[],jobs=[],selectedJob=null,preview=null,busy=false,authEpoch=0;
+let recoveryInspected=null;
+function state(id,message,error=false){const e=$(id);e.textContent=message;e.classList.toggle("error",error)}
+function clearSecrets(){for(const id of ["create-password","job-password","handoff-password","password"])$(id).value=""}
+function lock(message){
+ csrf="";authEpoch++;caps={};plans=[];jobs=[];selectedJob=null;preview=null;recoveryInspected=null;busy=false;
+ clearSecrets();$("handoff-receipt-id").value="";$("handoff-output").textContent="Locked";
+ $("jobs").textContent="Sign in to load durable jobs.";$("job-detail").textContent="Locked";
+ $("job-history").textContent="Locked";$("plan-evidence").textContent="Locked";
+ $("cap-note").textContent="Private session required.";$("gate").hidden=false;
+ $("logout").hidden=true;$("session-state").textContent="Locked";state("login-status",message||"Sign in.");
+ setControls();
+}
+async function api(path,body){
+ const method=body===undefined?"GET":"POST",headers={};
+ if(method==="POST"){headers["Content-Type"]="application/json";headers["X-AAS-CSRF"]=csrf}
+ let response;try{response=await fetch(path,{method,credentials:"same-origin",cache:"no-store",headers,...(body===undefined?{}:{body:JSON.stringify(body)})})}
+ catch(e){throw Error("connection_failed")}
+ let data;try{data=await response.json()}catch(e){throw Error("invalid_response")}
+ if(!response.ok){if(response.status===401)lock("Session expired.");throw Error(data.error||"request_failed")}
+ return data;
+}
+function currentProject(plan){
+ const refs=Array.isArray(plan?.scoped_memory_refs)?plan.scoped_memory_refs:[];
+ if(!refs.length||!plan.agent_binding?.agent_id||plan.status!=="APPROVED")return null;
+ const project=refs[0].project_id;
+ if(!refs.every(x=>x.project_id===project&&x.agent_id===plan.agent_binding.agent_id))return null;
+ return project;
+}
+function validPair(){
+ const a=plans.find(x=>x.plan_id===$("source-plan").value),b=plans.find(x=>x.plan_id===$("target-plan").value);
+ const pa=currentProject(a),pb=currentProject(b);
+ const valid=!!pa&&pa===pb&&a.plan_id!==b.plan_id&&a.agent_binding.agent_id!==b.agent_binding.agent_id;
+ $("pair-preview").textContent=valid?
+  "Project "+pa+" · "+a.agent_binding.agent_id+" → "+b.agent_binding.agent_id+
+  ". Existing separately approved plans and scoped notes; no data automatically transferred.":
+  "Both plans must be distinct, APPROVED, independently memory-scoped, with different Agents and the same project.";
+ $("create-job").disabled=!csrf||busy||!caps.bounded_agent_delegation||!valid;
+ return valid?{source:a,target:b,project:pa}:null;
+}
+function setControls(){
+ $("refresh-jobs").disabled=!csrf||busy;$("refresh-plans").disabled=!csrf||busy;
+ $("handoff-inspect").disabled=!csrf||busy;
+ if(!csrf||busy){$("create-job").disabled=true;for(const id of ["job-arm","job-next","job-pause","job-resume","job-cancel","job-reconcile","inspect-plan","handoff-preview","handoff-commit"])$(id).disabled=true;return}
+ validPair();
+ const job=selectedJob,st=job?.status;const enabled=!!caps.durable_job_queue;
+ $("control-actions").hidden=!job;
+ for(const [id,show] of [["job-arm",st==="DRAFT"],["job-next",st==="ACTIVE"],["job-pause",st==="ACTIVE"],["job-resume",st==="PAUSED"],["job-cancel",["DRAFT","ACTIVE","PAUSED","REVIEW_REQUIRED"].includes(st)]]){
+  $(id).hidden=!show;$(id).disabled=!enabled||!show;
+ }
+ const recoveryNode=(job?.nodes||[]).find(n=>n.plan_id===$("reconcile-plan").value&&n.status==="REVIEW_REQUIRED");
+ $("job-reconcile").disabled=!job||st!=="REVIEW_REQUIRED"||!recoveryNode||!recoveryInspected||
+   recoveryInspected.job_id!==job.job_id||recoveryInspected.plan_id!==recoveryNode.plan_id||
+   recoveryInspected.revision!==job.revision||recoveryInspected.results<1;
+ $("inspect-plan").disabled=!job;
+ const nodes=job?.nodes||[];
+ const canTransfer=!!caps.typed_agent_handoff&&!!job?.delegation&&
+   ["ACTIVE","PAUSED"].includes(st)&&nodes.length===2&&nodes[0].status==="COMPLETED"&&nodes[1].status==="WAITING";
+ $("handoff-preview").disabled=!canTransfer;
+ $("handoff-commit").disabled=!canTransfer||!preview;
+}
+async function loadCandidates(){
+ if(!csrf)return;
+ const epoch=authEpoch;
+ try{
+  const list=await api("/api/local-agent-plans");
+  const ids=(Array.isArray(list.plans)?list.plans:[]).filter(p=>p.status==="APPROVED"&&/^[0-9a-f]{24}$/.test(p.plan_id)).map(p=>p.plan_id).slice(0,48);
+  const found=await Promise.allSettled(ids.map(id=>api("/api/local-agent-plan?plan_id="+encodeURIComponent(id))));
+  if(!csrf||epoch!==authEpoch)return;
+  plans=found.filter(r=>r.status==="fulfilled").map(r=>r.value).filter(p=>currentProject(p));
+  const lastSource=$("source-plan").value,lastTarget=$("target-plan").value;
+  const options=()=>[new Option("Choose eligible approved plan",""),...plans.map(p=>new Option(
+   p.agent_binding.agent_id+" · "+p.goal.slice(0,75)+" · "+p.plan_id.slice(0,8),p.plan_id))];
+  $("source-plan").replaceChildren(...options());$("target-plan").replaceChildren(...options());
+  if(plans.some(p=>p.plan_id===lastSource))$("source-plan").value=lastSource;
+  if(plans.some(p=>p.plan_id===lastTarget))$("target-plan").value=lastTarget;
+  state("create-status",plans.length+" eligible approved, scoped plans. Each may be used in only one durable job.");
+  validPair();
+ }catch(e){state("create-status","Cannot load plans: "+e.message,true)}
+}
+function displayJobs(){
+ const box=$("jobs");box.replaceChildren();
+ if(!jobs.length){box.textContent="No durable jobs. Create one from two eligible plans.";return}
+ for(const job of jobs){
+  const btn=document.createElement("button");btn.type="button";btn.className="job-card"+(selectedJob?.job_id===job.job_id?" active":"");
+  const tag=document.createElement("span");tag.className="tag";tag.textContent=job.status;
+  const title=document.createElement("strong");title.textContent=job.label;
+  const meta=document.createElement("small");meta.textContent=job.job_id+" · "+(job.delegation?.project_id||"generic job");
+  btn.append(tag,title,meta);btn.addEventListener("click",()=>showJob(job));box.append(btn);
+ }
+}
+function showJob(job){
+ if(selectedJob?.job_id!==job?.job_id||selectedJob?.revision!==job?.revision)recoveryInspected=null;
+ selectedJob=job;preview=null;$("handoff-output").textContent="No active preview for this selection.";
+ $("job-status").textContent=job?.status||"None";$("job-detail").replaceChildren();
+ const box=$("job-detail");
+ if(job){
+  const heading=document.createElement("p");heading.textContent=job.label+" · ID: "+job.job_id+" · Revision "+job.revision;
+  box.append(heading);
+  if(job.delegation){const d=document.createElement("p");d.textContent=
+   "Project "+job.delegation.project_id+" · "+job.delegation.source_agent_id+" → "+job.delegation.target_agent_id+
+   " · completion proof, no automatic raw handoff";box.append(d)}
+  for(const node of job.nodes||[]){
+   const row=document.createElement("div");row.className="node";
+   const title=document.createElement("strong");title.textContent=node.plan_id+" · "+node.status;
+   const meta=document.createElement("code");meta.textContent="Dependencies: "+node.depends_on.join(", ")+
+    "\nNext step: "+node.next_index+"\nLast receipt SHA-256: "+(node.last_receipt_sha256||"none")+
+    "\nAuthorization SHA-256: "+(node.security_sha256||"legacy");
+   row.append(title,meta);box.append(row);
+  }
+ }
+ const sel=$("reconcile-plan");sel.replaceChildren(...(job?.nodes||[]).map(n=>new Option(n.plan_id+" · "+n.status,n.plan_id)));
+ displayJobs();setControls();
+ if(job)loadHistory(job.job_id);
+}
+async function loadJobs(preferred){
+ if(!csrf)return;
+ const epoch=authEpoch;
+ try{
+  const data=await api("/api/durable-jobs");if(!csrf||epoch!==authEpoch)return;
+  jobs=Array.isArray(data.jobs)?data.jobs:[];
+  const chosen=jobs.find(x=>x.job_id===(preferred||selectedJob?.job_id));
+  if(chosen)showJob(chosen);else{selectedJob=null;$("job-detail").textContent="Choose a saved job.";displayJobs();setControls()}
+ }catch(e){$("jobs").textContent="Durable jobs unavailable: "+e.message}
+}
+async function loadHistory(id){
+ if(!csrf||!id)return;
+ try{
+  const d=await api("/api/durable-job-history?job_id="+encodeURIComponent(id));
+  if(selectedJob?.job_id!==id)return;
+  $("job-history").textContent=(d.events||[]).length?
+   d.events.map(x=>x.seq+" · "+x.event+" · "+(x.plan_id||"job")+"\n"+(x.at_utc||"")+
+    "\nEvidence: "+(x.evidence_sha256||"not recorded")).join("\n\n"):"No events recorded.";
+ }catch(e){state("job-history","History unavailable: "+e.message)}
+}
+async function inspectPlan(){
+ const id=$("reconcile-plan").value;
+ if(!csrf||!/^[0-9a-f]{24}$/.test(id))return;
+ try{
+  const plan=await api("/api/local-agent-plan?plan_id="+encodeURIComponent(id));
+  const lines=["Plan: "+plan.plan_id,"Status: "+plan.status,"Agent: "+(plan.agent_binding?.agent_id||"none"),
+    "Stored step count: "+(plan.steps||[]).length,"Next index: "+plan.next_index,""];
+  for(const [i,row] of (plan.results||[]).entries())lines.push(
+   "RESULT "+(i+1)+" · "+row.tool+"\n"+row.output);
+  $("plan-evidence").textContent=lines.join("\n");
+  recoveryInspected={job_id:selectedJob?.job_id,revision:selectedJob?.revision,plan_id:id,
+    results:Array.isArray(plan.results)?plan.results.length:0};
+  setControls();
+ }catch(e){$("plan-evidence").textContent="Read-only evidence unavailable: "+e.message}
+}
+async function createJob(e){
+ e.preventDefault();if(!csrf||busy||!caps.bounded_agent_delegation)return;
+ const pair=validPair();if(!pair){state("create-status","Invalid pair. Recheck current Agent and scoped memory.",true);return}
+ const password=$("create-password").value;if(!password){state("create-status","Owner password required.",true);return}
+ const request={job_id:$("job-id").value.trim(),label:$("job-label").value.trim(),priority:Number($("job-priority").value),
+   nodes:[{plan_id:pair.source.plan_id,depends_on:[]},{plan_id:pair.target.plan_id,depends_on:[pair.source.plan_id]}],
+   delegation:{project_id:pair.project,source_agent_id:pair.source.agent_binding.agent_id,
+    target_agent_id:pair.target.agent_binding.agent_id,handoff_mode:"COMPLETION_PROOF_ONLY"},
+   current_password:password};
+ if(!confirm("CREATE two-Agent delegation?\n\n"+request.delegation.source_agent_id+" → "+request.delegation.target_agent_id+
+  "\nProject: "+pair.project+"\n\nBoth plans are already approved. The job does NOT auto-run or transfer data."))return;
+ busy=true;setControls();
+ try{
+  const job=await api("/api/durable-job-create",request);
+  state("create-status","Saved "+job.job_id+" as "+job.status+". Arm separately; nothing executed.");
+  await Promise.all([loadJobs(job.job_id),loadCandidates()]);
+ }catch(error){state("create-status","Creation not confirmed: "+error.message+". Check durable job history before retry.",true)}
+ finally{$("create-password").value="";busy=false;setControls()}
+}
+async function jobAction(action){
+ const job=selectedJob;if(!csrf||!job||busy)return;
+ if(action==="reconcile"&&$("job-reconcile").disabled){state("job-history","First inspect a recorded REVIEW_REQUIRED plan with a persisted result; do not replay missing work.",true);return}
+ const password=$("job-password").value;if(!password){state("job-history","Owner password required for one action.",true);return}
+ if(!confirm((action==="run-one"?"EXECUTE EXACTLY ONE previously approved read-only step":
+ action==="reconcile"?"RECONCILE ONLY a verified durably recorded step":action.toUpperCase()+" JOB")+
+ "\n\nJob "+job.job_id+"\nNo automatic retries. Inspect history if outcome is uncertain."))return;
+ busy=true;setControls();
+ try{
+  const data={job_id:job.job_id,current_password:password};
+  if(action==="reconcile")data.plan_id=$("reconcile-plan").value;
+  const d=await api("/api/durable-job-"+action,data);
+  state("job-history","Action response: "+(d.status||"stored")+". Refreshing durable evidence.");
+  await loadJobs(job.job_id);
+ }catch(e){state("job-history","Action not confirmed: "+e.message+". Inspect saved queue and plan before any further action.",true)}
+ finally{$("job-password").value="";busy=false;setControls()}
+}
+async function handoffPreview(e){
+ e.preventDefault();const job=selectedJob;
+ if(!csrf||busy||!caps.typed_agent_handoff||!job?.delegation)return;
+ const sourceId=job.nodes?.[0]?.plan_id;
+ const pass=$("handoff-password").value;
+ if(!pass){state("handoff-status","Owner password required for preview.",true);return}
+ busy=true;preview=null;setControls();
+ try{
+  const p=await api("/api/local-agent-plan?plan_id="+encodeURIComponent(sourceId));
+  if(!p.steps?.length)throw Error("source_steps_missing");
+  const payload={job_id:job.job_id,source_step_index:p.steps.length-1,
+    target_note_id:$("handoff-note").value.trim(),retention_days:Number($("handoff-days").value),current_password:pass};
+  const out=await api("/api/agent-typed-handoff-preview",payload);
+  if(selectedJob?.job_id!==job.job_id)throw Error("selected_job_changed");
+  preview=out;$("handoff-receipt-id").value=out.preview_id;
+  $("handoff-output").textContent="PREVIEW ONLY · no target note written.\n\nKind: "+out.typed_result.kind+
+   "\nValue: "+out.typed_result.value+
+   "\nTarget: "+out.project_id+"/"+out.target_agent_id+"/"+out.target_note_id+
+   "\nSource receipt SHA-256: "+out.source_receipt_sha256+
+   "\nPayload SHA-256: "+out.payload_sha256+"\nExpires: "+out.expires_utc+
+   "\n\nA NEW target plan must be separately created and approved after commit.";
+  state("handoff-status","Review the typed value and target. Re-enter password to commit one new note.");
+ }catch(e){state("handoff-status","Preview not available: "+e.message,true)}
+ finally{$("handoff-password").value="";busy=false;setControls()}
+}
+async function handoffCommit(){
+ const p=preview,job=selectedJob;
+ if(!csrf||!p||!job||busy||!caps.typed_agent_handoff)return;
+ const pass=$("handoff-password").value;
+ if(!pass){state("handoff-status","Re-enter current owner password to commit.",true);return}
+ if(!confirm("COMMIT this reviewed typed result into a NEW target Agent note?\n\n"+
+  p.project_id+"/"+p.target_agent_id+"/"+p.target_note_id+
+  "\n"+p.typed_result.kind+" = "+p.typed_result.value+
+  "\nPayload SHA-256: "+p.payload_sha256+
+  "\n\nNo existing target plan will be modified. No retry after uncertain result."))return;
+ busy=true;preview=null;setControls();
+ try{
+  const d=await api("/api/agent-typed-handoff-commit",{
+   preview_id:p.preview_id,payload_sha256:p.payload_sha256,current_password:pass});
+  $("handoff-output").textContent="Commit receipt (no raw value):\n"+JSON.stringify(d,null,2)+
+   "\n\nUse /workspace to select the new target note and create a NEW approved plan.";
+  state("handoff-status","Review receipt "+p.preview_id+". An existing target plan was NOT modified.");
+ }catch(e){
+  state("handoff-status","COMMIT OUTCOME UNCONFIRMED: "+e.message+
+  ". Do not click commit again. Inspect receipt ID "+p.preview_id+" and target note separately.",true);
+ }finally{$("handoff-password").value="";busy=false;setControls()}
+}
+async function inspectHandoffReceipt(){
+ const id=$("handoff-receipt-id").value.trim();
+ if(!csrf||!/^[0-9a-f]{32}$/.test(id)){state("handoff-status","Enter an exact 32-character receipt ID.",true);return}
+ try{
+  const d=await api("/api/agent-typed-handoff-receipt?preview_id="+encodeURIComponent(id));
+  $("handoff-output").textContent="Read-only receipt (no raw value):\n"+JSON.stringify(d,null,2);
+  state("handoff-status","Inspect target memory independently if status is CLAIMED_REVIEW_REQUIRED.");
+ }catch(e){state("handoff-status","Receipt inspection failed: "+e.message,true)}
+}
+async function loadCaps(){
+ const data=await api("/api/local-agent-capabilities");caps=data;
+ $("cap-note").textContent="Durable queue: "+(caps.durable_job_queue?"enabled":"disabled")+
+ ". Two-Agent delegation: "+(caps.bounded_agent_delegation?"enabled":"disabled")+
+ ". Typed result transfer: "+(caps.typed_agent_handoff?"enabled":"disabled")+
+ ". Every mutation needs owner reauthentication. No autonomous execution, external writes or paid AI in this flow.";
+ $("create-job").disabled=!caps.bounded_agent_delegation;setControls();
+}
+async function unlock(){
+ $("gate").hidden=true;$("logout").hidden=false;$("session-state").textContent="Private session";
+ $("password").value="";
+ try{await loadCaps();await Promise.all([loadCandidates(),loadJobs()])}
+ catch(e){$("cap-note").textContent="Backend capabilities unavailable: "+e.message}
+ setControls();
+}
+$("login-form").addEventListener("submit",async e=>{
+ e.preventDefault();$("login").disabled=true;
+ try{
+  const r=await fetch("/api/operator-login",{method:"POST",credentials:"same-origin",cache:"no-store",
+   headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("password").value})});
+  const data=await r.json();if(!r.ok)throw Error(data.error||"login_failed");
+  csrf=data.csrf_token;authEpoch++;await unlock();
+ }catch(error){state("login-status","Login blocked: "+error.message,true)}
+ finally{$("password").value="";$("login").disabled=false}
+});
+$("logout").addEventListener("click",async()=>{try{await api("/api/operator-logout",{})}catch(e){}lock("Signed out.")});
+$("source-plan").addEventListener("change",validPair);$("target-plan").addEventListener("change",validPair);
+$("refresh-plans").addEventListener("click",loadCandidates);
+$("refresh-jobs").addEventListener("click",()=>loadJobs());
+$("refresh-history").addEventListener("click",()=>selectedJob&&loadHistory(selectedJob.job_id));
+$("inspect-plan").addEventListener("click",inspectPlan);
+$("create-form").addEventListener("submit",createJob);
+for(const action of ["arm","run-one","pause","resume","cancel","reconcile"]){
+ const id="job-"+(action==="run-one"?"next":action);
+ $(id).addEventListener("click",()=>jobAction(action));
+}
+$("handoff-preview-form").addEventListener("submit",handoffPreview);
+$("handoff-commit").addEventListener("click",handoffCommit);
+$("handoff-inspect").addEventListener("click",inspectHandoffReceipt);
+$("handoff-note").addEventListener("input",()=>{preview=null;setControls()});
+$("handoff-days").addEventListener("change",()=>{preview=null;setControls()});
+(async()=>{
+ try{
+  const r=await fetch("/api/operator-session",{credentials:"same-origin",cache:"no-store"}),d=await r.json();
+  if(d.authenticated&&d.csrf_token){csrf=d.csrf_token;authEpoch++;await unlock()}
+  else lock("Enter owner password.");
+ }catch(e){lock("Local server unavailable. Use a private localhost/SSH tunnel.")}
+})();
+</script>
+</body>
+</html>
