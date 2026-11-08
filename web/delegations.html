@@ -120,10 +120,11 @@ input:focus,select:focus,textarea:focus{border-color:#7592bc;box-shadow:0 0 0 3p
 "use strict";
 const $=id=>document.getElementById(id);
 let csrf="",caps={},plans=[],jobs=[],selectedJob=null,preview=null,busy=false,authEpoch=0;
+let recoveryInspected=null;
 function state(id,message,error=false){const e=$(id);e.textContent=message;e.classList.toggle("error",error)}
 function clearSecrets(){for(const id of ["create-password","job-password","handoff-password","password"])$(id).value=""}
 function lock(message){
- csrf="";authEpoch++;caps={};plans=[];jobs=[];selectedJob=null;preview=null;busy=false;
+ csrf="";authEpoch++;caps={};plans=[];jobs=[];selectedJob=null;preview=null;recoveryInspected=null;busy=false;
  clearSecrets();$("handoff-receipt-id").value="";$("handoff-output").textContent="Locked";
  $("jobs").textContent="Sign in to load durable jobs.";$("job-detail").textContent="Locked";
  $("job-history").textContent="Locked";$("plan-evidence").textContent="Locked";
@@ -168,7 +169,11 @@ function setControls(){
  for(const [id,show] of [["job-arm",st==="DRAFT"],["job-next",st==="ACTIVE"],["job-pause",st==="ACTIVE"],["job-resume",st==="PAUSED"],["job-cancel",["DRAFT","ACTIVE","PAUSED","REVIEW_REQUIRED"].includes(st)]]){
   $(id).hidden=!show;$(id).disabled=!enabled||!show;
  }
- $("job-reconcile").disabled=!job||st!=="REVIEW_REQUIRED";$("inspect-plan").disabled=!job;
+ const recoveryNode=(job?.nodes||[]).find(n=>n.plan_id===$("reconcile-plan").value&&n.status==="REVIEW_REQUIRED");
+ $("job-reconcile").disabled=!job||st!=="REVIEW_REQUIRED"||!recoveryNode||!recoveryInspected||
+   recoveryInspected.job_id!==job.job_id||recoveryInspected.plan_id!==recoveryNode.plan_id||
+   recoveryInspected.revision!==job.revision||recoveryInspected.results<1;
+ $("inspect-plan").disabled=!job;
  const nodes=job?.nodes||[];
  const canTransfer=!!caps.typed_agent_handoff&&!!job?.delegation&&
    ["ACTIVE","PAUSED"].includes(st)&&nodes.length===2&&nodes[0].status==="COMPLETED"&&nodes[1].status==="WAITING";
@@ -206,6 +211,7 @@ function displayJobs(){
  }
 }
 function showJob(job){
+ if(selectedJob?.job_id!==job?.job_id||selectedJob?.revision!==job?.revision)recoveryInspected=null;
  selectedJob=job;preview=null;$("handoff-output").textContent="No active preview for this selection.";
  $("job-status").textContent=job?.status||"None";$("job-detail").replaceChildren();
  const box=$("job-detail");
@@ -258,6 +264,9 @@ async function inspectPlan(){
   for(const [i,row] of (plan.results||[]).entries())lines.push(
    "RESULT "+(i+1)+" · "+row.tool+"\n"+row.output);
   $("plan-evidence").textContent=lines.join("\n");
+  recoveryInspected={job_id:selectedJob?.job_id,revision:selectedJob?.revision,plan_id:id,
+    results:Array.isArray(plan.results)?plan.results.length:0};
+  setControls();
  }catch(e){$("plan-evidence").textContent="Read-only evidence unavailable: "+e.message}
 }
 async function createJob(e){
@@ -281,6 +290,7 @@ async function createJob(e){
 }
 async function jobAction(action){
  const job=selectedJob;if(!csrf||!job||busy)return;
+ if(action==="reconcile"&&$("job-reconcile").disabled){state("job-history","First inspect a recorded REVIEW_REQUIRED plan with a persisted result; do not replay missing work.",true);return}
  const password=$("job-password").value;if(!password){state("job-history","Owner password required for one action.",true);return}
  if(!confirm((action==="run-one"?"EXECUTE EXACTLY ONE previously approved read-only step":
  action==="reconcile"?"RECONCILE ONLY a verified durably recorded step":action.toUpperCase()+" JOB")+
