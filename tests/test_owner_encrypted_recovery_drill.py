@@ -61,7 +61,7 @@ class OwnerSealedRecoveryDrillTests(unittest.TestCase):
         before=self.dbpath.read_bytes()
         result=self.run_drill()
         self.assertEqual(result["status"],"SEALED_TWO_COPY_RECOVERY_DRILL_VERIFIED")
-        self.assertEqual(result["restored_file_count"],2)
+        self.assertEqual(result["authenticated_archive_file_count"],2)
         self.assertTrue(result["copies_byte_identical"])
         self.assertTrue(result["primary_archive_authenticated"])
         self.assertTrue(result["secondary_archive_authenticated"])
