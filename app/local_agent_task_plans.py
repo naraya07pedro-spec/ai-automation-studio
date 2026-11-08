@@ -550,6 +550,11 @@ class LocalAgentPlanStore:
         except AgentProfileError as exc:
             raise PlanError(str(exc)) from None
 
+    @staticmethod
+    def _verify_global_memory_isolation(agent_binding, legacy_refs):
+        if agent_binding is not None and legacy_refs:
+            raise PlanError("global_memory_not_allowed_for_agent")
+
     def _verify_scoped_memory_refs(self, refs, agent_binding):
         if not refs:
             return
@@ -785,6 +790,7 @@ class LocalAgentPlanStore:
                     except HNStoryReadError:
                         raise PlanError("hn_story_not_allowed") from None
         refs = validate_memory_refs(memory_refs)
+        self._verify_global_memory_isolation(agent_binding, refs)
         self._verify_memory_refs(refs)
         if any(step["tool"] in ("github_public_issues", "github_issue_triage", "github_issue_analysis") for step in steps):
             if self.github_reader is None:
@@ -844,6 +850,7 @@ class LocalAgentPlanStore:
                 if old["status"] != "PREPARED":
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 self._verify_memory_refs(old["memory_refs"])
                 self._verify_scoped_memory_refs(old["scoped_memory_refs"], old["agent_binding"])
                 if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
@@ -892,6 +899,7 @@ class LocalAgentPlanStore:
                 if old["status"] != "INTERRUPTED":
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 self._verify_memory_refs(old["memory_refs"])
                 self._verify_scoped_memory_refs(old["scoped_memory_refs"], old["agent_binding"])
                 if any(step["tool"] == CSV_PROFILE_TOOL for step in old["steps"]):
@@ -931,6 +939,7 @@ class LocalAgentPlanStore:
                 if old["status"] not in ("APPROVED", "NEXT_READY"):
                     raise PlanError("plan_state_conflict")
                 self._verify_agent_binding(old["agent_binding"], old["steps"])
+                self._verify_global_memory_isolation(old["agent_binding"], old["memory_refs"])
                 if from_batch and old["batch_run_status"] != "RUNNING":
                     raise PlanError("plan_batch_stop_requested")
                 self._verify_memory_refs(old["memory_refs"])
