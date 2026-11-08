@@ -1,0 +1,51 @@
+name: Owner-controlled Agent Profiles backend
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_agent_profiles.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_agent_profiles.py'
+      - 'docs/DURABLE_AGENT_PROFILES_V1.md'
+      - '.github/workflows/agent-profiles.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_agent_profiles.py'
+      - 'app/local_agent_task_plans.py'
+      - 'app/local_server.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_agent_profiles.py'
+      - 'docs/DURABLE_AGENT_PROFILES_V1.md'
+      - '.github/workflows/agent-profiles.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile backend and acceptance tests
+        run: python -m py_compile app/local_agent_profiles.py app/local_agent_task_plans.py app/local_server.py app/local_security_audit.py tests/test_agent_profiles.py
+      - name: Agent profiles and HTTP acceptance
+        run: python -m unittest discover -s tests -p 'test_agent_profiles.py' -v
+      - name: Existing plan store, HTTP security and durable queue regression
+        run: |
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans.py' -v
+          python -m unittest discover -s tests -p 'test_local_agent_task_plans_http.py' -v
+          python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
