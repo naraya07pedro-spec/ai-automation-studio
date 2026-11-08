@@ -59,9 +59,7 @@ class AgentWorkspaceSurfaceTests(unittest.TestCase):
         html = self.get("/workspace")[2]
         self.assertIn("/api/agent-profile-create", html)
         self.assertIn("/api/local-agent-plan-create", html)
-        self.assertIn("/api/local-agent-plan-approve", html) if False else None
         self.assertIn('"/api/local-agent-plan-"+name', html)
-        self.assertIn("Confirm", html) if False else None
         self.assertIn("confirm(", html)
         self.assertNotIn("localStorage", html)
         self.assertNotIn("sessionStorage", html)
