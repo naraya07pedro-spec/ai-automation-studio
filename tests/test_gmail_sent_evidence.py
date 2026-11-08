@@ -5,6 +5,11 @@ import json
 import sqlite3
 import sys
 import threading
+import tempfile
+import http.cookiejar
+from http.server import ThreadingHTTPServer
+from urllib.error import HTTPError
+from urllib.request import Request, ProxyHandler, HTTPCookieProcessor, build_opener
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
@@ -35,7 +40,7 @@ class SyntheticGmail:
 
 class GmailSentEvidenceTests(unittest.TestCase):
     def setUp(self):
-        self.db = sqlite3.connect(":memory:")
+        self.db = sqlite3.connect(":memory:",check_same_thread=False)
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("""CREATE TABLE agent_connector_handoffs(
             plan_id TEXT PRIMARY KEY)""")
@@ -159,6 +164,81 @@ class GmailSentEvidenceTests(unittest.TestCase):
     def test_duplicate_header_addresses_not_accepted(self):
         self.gmail.result["to"]="a@example.org, client@example.org"
         self.assertEqual(self.service.verify_one(self.request())["status"],"NOT_CORRELATED")
+
+    def test_real_loopback_http_auth_csrf_password_consent_and_replay(self):
+        import local_server
+        from local_operator_auth import LocalOperatorAuth
+        from local_security_audit import LocalSecurityAudit
+        from local_workflow_core import LocalWorkflowCore
+
+        with tempfile.TemporaryDirectory(prefix="stage120-http-") as td:
+            base=Path(td)
+            password="StudioStage120Owner-Passphrase-2026!"
+            operator=LocalOperatorAuth.provision(base/"operator.json",password)
+            if operator is None:
+                operator=LocalOperatorAuth.load(base/"operator.json")
+            audit=LocalSecurityAudit(base/"audit.sqlite3")
+            core=LocalWorkflowCore(base/"core.sqlite3")
+            server=ThreadingHTTPServer(("127.0.0.1",0),
+                local_server.create_handler(local_core=core,
+                    operator_auth=operator,security_audit=audit,
+                    gmail_sent_evidence=self.service))
+            thread=threading.Thread(target=server.serve_forever,daemon=True)
+            thread.start()
+            url="http://127.0.0.1:"+str(server.server_port)
+            opener=build_opener(ProxyHandler({}),
+                HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+            def post(path,body,csrf=None):
+                h={"Content-Type":"application/json"}
+                if csrf is not None:
+                    h["X-AAS-CSRF"]=csrf
+                req=Request(url+path,json.dumps(body).encode(),headers=h,method="POST")
+                with opener.open(req,timeout=5) as response:
+                    return json.load(response)
+
+            body={**self.request(),"current_password":password,
+                  "consent":"VERIFY_GMAIL_SENT_ARTIFACT_ONCE"}
+            try:
+                with self.assertRaises(HTTPError) as unauth:
+                    opener.open(url+"/api/gmail-sent-evidence-history",timeout=5)
+                self.assertEqual(unauth.exception.code,401)
+                csrf=post("/api/operator-login",{"password":password})["csrf_token"]
+                with self.assertRaises(HTTPError) as missing_csrf:
+                    post("/api/gmail-sent-evidence",body)
+                self.assertEqual(missing_csrf.exception.code,403)
+                with self.assertRaises(HTTPError) as wrong_consent:
+                    post("/api/gmail-sent-evidence",{**body,"consent":"YES"},csrf)
+                self.assertEqual(wrong_consent.exception.code,422)
+                with self.assertRaises(HTTPError) as wrong_password:
+                    post("/api/gmail-sent-evidence",
+                         {**body,"current_password":"wrong"},csrf)
+                self.assertEqual(wrong_password.exception.code,401)
+                self.assertEqual(self.gmail.calls,[])
+                result=post("/api/gmail-sent-evidence",body,csrf)
+                self.assertEqual(result["status"],"SENT_ARTIFACT_MATCHED")
+                self.assertFalse(result["business_effect_verified"])
+                self.assertEqual(self.gmail.calls,[MID])
+                with self.assertRaises(HTTPError) as repeat:
+                    post("/api/gmail-sent-evidence",body,csrf)
+                self.assertEqual(repeat.exception.code,409)
+                with opener.open(url+"/api/gmail-sent-evidence-history",
+                                 timeout=5) as response:
+                    history=json.load(response)
+                self.assertEqual(history["records"][0]["status"],
+                                 "SENT_ARTIFACT_MATCHED")
+                logged=audit.recent()
+                self.assertTrue(any(x["action"]=="GMAIL_SENT_EVIDENCE_VERIFY"
+                                    and x["outcome"]=="SUCCESS" for x in logged))
+                for forbidden in (MID,TO,SUBJECT,password):
+                    self.assertNotIn(forbidden,json.dumps(history))
+                    self.assertNotIn(forbidden,json.dumps(logged))
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+                audit.close()
+                core.close()
 
     def test_daily_limit_checks_before_network(self):
         for i in range(5):
