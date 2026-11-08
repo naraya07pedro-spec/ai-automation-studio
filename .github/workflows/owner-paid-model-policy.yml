@@ -1,0 +1,50 @@
+name: Owner-pinned paid model allowance and local risk-cap acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'app/local_on_demand_remote_ai.py'
+      - 'app/owner_remote_policy.py'
+      - 'app/local_server.py'
+      - 'app/launch_workbench.py'
+      - 'app/local_security_audit.py'
+      - 'tests/test_multi_provider_on_demand.py'
+      - 'tests/test_remote_model_policy_admin.py'
+      - 'tests/test_launch_workbench.py'
+      - 'docs/OWNER_PAID_MODEL_POLICY_V1.md'
+      - '.github/workflows/owner-paid-model-policy.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/local_on_demand_remote_ai.py'
+      - 'app/owner_remote_policy.py'
+      - 'app/local_server.py'
+      - 'app/launch_workbench.py'
+      - 'tests/test_multi_provider_on_demand.py'
+      - 'tests/test_remote_model_policy_admin.py'
+      - '.github/workflows/owner-paid-model-policy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paid-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile owner policy and integration contracts
+        run: |
+          python -m py_compile app/local_on_demand_remote_ai.py app/owner_remote_policy.py app/local_server.py app/launch_workbench.py tests/test_multi_provider_on_demand.py tests/test_remote_model_policy_admin.py
+      - name: Three-provider fake-HTTP charge and immutable ID acceptance
+        run: python -m unittest discover -s tests -p 'test_multi_provider_on_demand.py' -v
+      - name: Offline policy review, restart pinning and uncertain charge quarantine
+        run: python -m unittest discover -s tests -p 'test_remote_model_policy_admin.py' -v
+      - name: Windows launcher correct forwarding and invalid policy denial
+        run: python -m unittest discover -s tests -p 'test_launch_workbench.py' -v
