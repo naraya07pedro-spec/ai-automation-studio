@@ -367,7 +367,8 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         "capacity": SCOPED_MAX_NOTES,
                         "max_selected": SCOPED_MAX_SELECTED,
                         "source": "OWNER_CURATED_UNVERIFIED",
-                        "storage": "PLAINTEXT_OWNER_PRIVATE_SQLITE"})
+                        "storage": ("AES_256_GCM_SCOPED_TEXT" if scoped_memory_store.at_rest_encrypted
+                                    else "PLAINTEXT_OWNER_PRIVATE_SQLITE")})
                 except ValueError:
                     self._send(422, {"error":"invalid_scoped_memory_scope"})
                 except ScopedMemoryError as exc:
