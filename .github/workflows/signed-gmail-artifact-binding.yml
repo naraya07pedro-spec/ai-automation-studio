@@ -7,6 +7,8 @@ on:
       - 'app/local_gmail_sent_evidence.py'
       - 'app/local_server.py'
       - 'app/local_security_audit.py'
+      - 'tools/owner_live_n8n_acceptance.py'
+      - 'tools/owner_signed_gmail_import.py'
       - 'tests/test_signed_gmail_artifact.py'
       - 'docs/SIGNED_GMAIL_ARTIFACT_BINDING_V1.md'
       - '.github/workflows/signed-gmail-artifact-binding.yml'
@@ -50,4 +52,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_n8n_execution_verifier.py' -v
           python -m unittest discover -s tests -p 'test_gmail_sent_evidence.py' -v
       - name: Strict Python syntax
-        run: python -m py_compile app/local_signed_gmail_artifact.py app/local_gmail_sent_evidence.py app/local_server.py app/local_security_audit.py tests/test_signed_gmail_artifact.py
+        run: python -m py_compile app/local_signed_gmail_artifact.py app/local_gmail_sent_evidence.py app/local_server.py app/local_security_audit.py tools/owner_live_n8n_acceptance.py tools/owner_signed_gmail_import.py tests/test_signed_gmail_artifact.py
