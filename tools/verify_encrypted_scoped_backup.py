@@ -91,6 +91,8 @@ def verify_scoped_notes_archive(archive, passphrase, private_key):
                 scopes.add((project,agent))
     except RecoveryProofError:
         raise
+    except (ScopedMemoryCryptoError, ScopedMemoryError, ValueError, TypeError):
+        raise RecoveryProofError("scoped_backup_metadata_or_decryption_failed") from None
     except (BackupError, sqlite3.Error, OSError, ServiceCredentialError):
         # Do not reveal paths, ciphertext, SQL engine diagnostics or secrets.
         raise RecoveryProofError("scoped_backup_authentication_or_database_failed") from None
