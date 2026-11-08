@@ -43,7 +43,7 @@ def _validate(fields):
     identifier = fields["agent_id"]
     if type(identifier) is not str or not AGENT_ID.fullmatch(identifier):
         raise AgentProfileError("invalid_agent_id")
-    if fields["category"] not in CATEGORIES or type(fields["category"]) is not str:
+    if type(fields["category"]) is not str or fields["category"] not in CATEGORIES:
         raise AgentProfileError("invalid_agent_category")
     tools = fields["allowed_tools"]
     if (type(tools) is not list or not 1 <= len(tools) <= len(BATCH_READ_TOOLS)
