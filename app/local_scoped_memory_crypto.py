@@ -38,6 +38,7 @@ class ScopedMemoryCipher:
     def __init__(self, master_key):
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            from cryptography.exceptions import InvalidTag
         except ImportError:
             raise ScopedMemoryCryptoError(
                 "scoped_memory_crypto_dependency_missing") from None
@@ -47,6 +48,7 @@ class ScopedMemoryCipher:
             raise ScopedMemoryCryptoError(
                 "scoped_memory_invalid_32_byte_key") from None
         self._aead = AESGCM(key)
+        self._invalid_tag = InvalidTag
 
     @staticmethod
     def is_sealed(value):
@@ -80,8 +82,5 @@ class ScopedMemoryCipher:
             return answer.decode("utf-8", errors="strict")
         except (ValueError, TypeError, UnicodeError, binascii.Error):
             raise ScopedMemoryCryptoError("scoped_memory_unlock_failed") from None
-        except Exception as exc:
-            # Never return ciphertext, key, nonce, original text or exception detail.
-            if exc.__class__.__name__ == "InvalidTag":
-                raise ScopedMemoryCryptoError("scoped_memory_unlock_failed") from None
-            raise
+        except self._invalid_tag:
+            raise ScopedMemoryCryptoError("scoped_memory_unlock_failed") from None
