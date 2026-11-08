@@ -126,6 +126,54 @@ class LocalOnDemandRemoteAI:
             self.db.execute("""UPDATE remote_asks
                 SET status='OUTCOME_UNCERTAIN'
                 WHERE status='IN_FLIGHT'""")
+            self.db.execute("""CREATE TABLE IF NOT EXISTS remote_one_shot_policy (
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                approved_models_json TEXT NOT NULL,
+                daily_attempt_limit INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                updated_utc TEXT NOT NULL
+            )""")
+            row = self.db.execute("""SELECT approved_models_json,
+                daily_attempt_limit,revision FROM remote_one_shot_policy
+                WHERE id=1""").fetchone()
+            if row is None:
+                if self.model_allowlist is not None or self.daily_attempt_limit < MAX_DAILY_ATTEMPTS:
+                    self.db.execute("""INSERT INTO remote_one_shot_policy
+                       (id,approved_models_json,daily_attempt_limit,revision,updated_utc)
+                       VALUES (1,?,?,1,?)""",
+                       (json.dumps(sorted(p+":"+m for p,m in self.model_allowlist))
+                        if self.model_allowlist is not None else "null",
+                        self.daily_attempt_limit,self._utcnow()))
+            else:
+                try:
+                    stored_raw=json.loads(row[0])
+                    stored=validate_model_allowlist(stored_raw)
+                    stored_cap=row[1]
+                    if (type(stored_cap) is not int
+                            or not 1 <= stored_cap <= MAX_DAILY_ATTEMPTS
+                            or type(row[2]) is not int or row[2] < 1):
+                        raise ValueError
+                except (ValueError,TypeError,OnDemandRemoteAIError):
+                    raise OnDemandRemoteAIError(
+                        "remote_policy_storage_invalid",503) from None
+                if (self.model_allowlist is not None
+                        and self.model_allowlist != stored):
+                    raise OnDemandRemoteAIError(
+                        "remote_policy_change_requires_offline_owner_review",409)
+                if (self.daily_attempt_limit != MAX_DAILY_ATTEMPTS
+                        and self.daily_attempt_limit != stored_cap):
+                    raise OnDemandRemoteAIError(
+                        "remote_policy_change_requires_offline_owner_review",409)
+                # Never silently relax a saved policy on restart when launcher
+                # omitted the flag. Explicit offline owner review is required.
+                self.model_allowlist = stored
+                self.daily_attempt_limit = stored_cap
+        enabled = set((["openai_responses"] if self.runner is not None else [])
+                      + list(self.additional_runners))
+        if self.model_allowlist is not None and not any(
+                p in enabled for p,_ in self.model_allowlist):
+            raise OnDemandRemoteAIError(
+                "remote_policy_has_no_enabled_provider",403)
 
     def attach_gate(self, model_safety, agent_gate, agent_state_lock):
         if model_safety is None or agent_gate is None or agent_state_lock is None:
