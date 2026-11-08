@@ -1797,9 +1797,12 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                         err = str(exc)
                         code = (422 if err.startswith("invalid_") or err == "tool_not_allowed"
                                 else 403 if err in ("public_source_not_allowed",
-                                                    "agent_profile_tool_denied")
-                                else 404 if err == "plan_not_found"
-                                else 409 if err in ("agent_profile_changed_or_disabled",
+                                                    "agent_profile_tool_denied",
+                                                    "scoped_memory_scope_denied")
+                                else 404 if err in ("plan_not_found", "scoped_memory_not_found")
+                                else 409 if err in ("scoped_memory_context_changed",
+                                                    "scoped_memory_expired",
+                                                    "agent_profile_changed_or_disabled",
                                                     "agent_profile_binding_invalid",
                                                     "plan_state_conflict", "plan_capacity_reached",
                                                      "public_source_permission_changed",
@@ -3075,12 +3078,16 @@ def start_local_server(port=8765, enable_local_agent=False,
     plan_store = None
     agent_profiles = None
     memory_store = None
+    scoped_memory_store = None
     hn_policy = (HNStoryPolicy(home / "hn-story-grants.json")
                  if enable_hn_story_read else None)
     if enable_agent_memory:
         memory_store = LocalAgentMemory(home / "agent-memory-cards.sqlite3")
     if enable_agent_plans:
         agent_profiles = LocalAgentProfiles(home / "agent-profiles.sqlite3")
+    if enable_agent_plans and enable_agent_memory:
+        scoped_memory_store = LocalScopedAgentMemory(
+            home / "scoped-agent-memory.sqlite3")
     if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
@@ -3094,7 +3101,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             multi_document_analyzer=(analyze_multiple_documents
                                      if enable_multi_documents else None),
             csv_profiler=(profile_selected_csv if enable_plan_csv else None),
-            agent_profiles=agent_profiles)
+            agent_profiles=agent_profiles,
+            scoped_memory_store=scoped_memory_store)
     if enable_agent_history and enable_local_agent:
         conversation = LocalAgentConversation(home / "agent-conversation.sqlite3")
     # The same durable model checkpoint is REQUIRED for remote-only
@@ -3255,6 +3263,7 @@ def start_local_server(port=8765, enable_local_agent=False,
                             n8n_gmail_output_witness=n8n_gmail_witness,
                             durable_jobs=durable_queue,
                             agent_profiles=agent_profiles,
+                            scoped_memory_store=scoped_memory_store,
                             shared_agent_gate=shared_gate,
                             shared_agent_state_lock=shared_gate_lock,
                            google_gmail=gmail,
@@ -3304,6 +3313,8 @@ def start_local_server(port=8765, enable_local_agent=False,
             managed.close()
         if memory_store is not None:
             memory_store.close()
+        if scoped_memory_store is not None:
+            scoped_memory_store.close()
         if model_safety is not None:
             model_safety.close()
         if plan_store is not None:
