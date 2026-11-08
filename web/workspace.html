@@ -17,7 +17,7 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{
 .nav{display:grid;gap:5px}.nav-caption{margin:0 11px 9px;color:#99aaa3;font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:700}
 .nav button,.nav a{border:0;background:none;color:#aebdb5;text-align:left;width:100%;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;font-size:13px}
 .nav button:hover,.nav a:hover,.nav button.active{background:#34413d;color:#f5f8f5}
-.nav button.active:before{content:"";height:6px;width:6px;border-radius:50%;background:#c5d9c7;margin-right:1px}
+.nav b{display:none;font-size:16px;line-height:1}.nav button.active:before{content:"";height:6px;width:6px;border-radius:50%;background:#c5d9c7;margin-right:1px}
 .rail-foot{margin-top:auto;border-top:1px solid #35413e;padding:15px 10px 2px;color:#9daaa4;font-size:11px;line-height:1.6}
 .main{min-width:0}.topbar{height:70px;background:rgba(255,255,255,.73);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;padding:0 clamp(22px,4vw,62px);gap:18px}
 .crumb{font-size:12px;color:var(--muted)}.crumb strong{color:var(--ink);font-weight:600}.session{display:flex;align-items:center;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px}
@@ -71,7 +71,7 @@ textarea{resize:vertical;min-height:94px;line-height:1.65}textarea:focus,input:f
 dialog{border:1px solid var(--line);border-radius:16px;width:min(500px,calc(100% - 32px));max-height:90vh;overflow:auto;padding:27px;color:var(--ink);box-shadow:0 25px 100px #0004}dialog::backdrop{background:#131d20a8}
 dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var(--muted)}
 .tools{display:flex;gap:18px;flex-wrap:wrap}.tools label{margin:8px 0;font-weight:500}.tools input{width:auto}
-@media(max-width:1020px){.app{grid-template-columns:72px 1fr}.rail{padding:20px 9px}.identity{justify-content:center;padding:0}.identity .brand-copy,.nav-caption,.nav button span,.nav a span,.rail-foot{display:none}.nav button,.nav a{justify-content:center;padding:12px 4px;font-size:17px}.workspace-grid{grid-template-columns:minmax(0,1fr)}.inspector{order:-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}.inspector h2,.inspector .capability{grid-column:1/-1}.inspector .divider{display:none}}
+@media(max-width:1020px){.app{grid-template-columns:72px 1fr}.rail{padding:20px 9px}.identity{justify-content:center;padding:0}.identity .brand-copy,.nav-caption,.nav button span,.nav a span,.rail-foot{display:none}.nav b{display:inline}.nav button,.nav a{justify-content:center;padding:12px 4px;font-size:17px}.workspace-grid{grid-template-columns:minmax(0,1fr)}.inspector{order:-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}.inspector h2,.inspector .capability{grid-column:1/-1}.inspector .divider{display:none}}
 @media(max-width:620px){.app{display:block}.rail{height:auto;padding:9px 12px;display:flex;flex-direction:row;align-items:center;gap:14px}.identity{display:none}.nav{display:flex;gap:3px;overflow:auto}.nav button,.nav a{min-width:42px}.topbar{padding:0 16px;height:58px}.page{padding:28px 13px 45px}.workspace-grid{gap:12px}.stage-top,.comms,.compose,.plan-box{padding-left:16px;padding-right:16px}.inspector{display:block;padding:18px}.stage{min-height:500px}.page-head{margin-bottom:21px}.saved{margin-top:14px;padding:16px}}
 @media(prefers-reduced-motion:no-preference){.button,.task-card,.nav a,.nav button{transition:background-color .12s,border-color .12s}}
 </style>
@@ -82,13 +82,13 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
   <div class="identity"><div class="logo" aria-hidden="true">A/S</div><div class="brand-copy"><strong>Personal AI</strong><small>Private workspace</small></div></div>
   <nav class="nav" aria-label="Sections">
    <div class="nav-caption">Your space</div>
-   <button id="nav-workspace" class="active" type="button" aria-label="Workspace" title="Workspace"><span>Workspace</span></button>
-   <button id="nav-agents" type="button" aria-label="Agents" title="Agents"><span>Agents</span></button>
-   <a href="/" aria-label="Automation library" title="Automation library"><span>Automations</span></a>
-   <a href="/" aria-label="Template library" title="Template library"><span>Library</span></a>
-   <a href="/jobs" aria-label="Activity" title="Activity"><span>Activity</span></a>
-   <a href="/handoff" aria-label="Connections" title="Connections"><span>Connections</span></a>
-   <a href="/mission" aria-label="Advanced controls" title="Advanced controls"><span>Advanced</span></a>
+   <button id="nav-workspace" class="active" type="button" aria-label="Workspace" title="Workspace"><b aria-hidden="true">⌂</b><span>Workspace</span></button>
+   <button id="nav-agents" type="button" aria-label="Agents" title="Agents"><b aria-hidden="true">◇</b><span>Agents</span></button>
+   <a href="/" aria-label="Automation library" title="Automation library"><b aria-hidden="true">↻</b><span>Automations</span></a>
+   <a href="/" aria-label="Template library" title="Template library"><b aria-hidden="true">▤</b><span>Library</span></a>
+   <a href="/jobs" aria-label="Activity" title="Activity"><b aria-hidden="true">◷</b><span>Activity</span></a>
+   <a href="/handoff" aria-label="Connections" title="Connections"><b aria-hidden="true">⌁</b><span>Connections</span></a>
+   <a href="/mission" aria-label="Advanced controls" title="Advanced controls"><b aria-hidden="true">⚙</b><span>Advanced</span></a>
   </nav>
   <div class="rail-foot">Private local runtime.<br>Nothing runs without its required approvals.</div>
  </aside>
