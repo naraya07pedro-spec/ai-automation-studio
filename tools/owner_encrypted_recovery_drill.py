@@ -151,11 +151,12 @@ def drill(owner_root, primary_archive, secondary_archive, password, *,
         "copies_byte_identical":True,
         "sealed_sha256":first_hash,
         "sealed_bytes":first_size,
-        "restored_file_count":first_check["file_count"],
+        "authenticated_archive_file_count":first_check["file_count"],
         "separate_filesystem_reported":distinct_filesystem,
         "physical_off_device_copy_independently_verified":False,
         "plaintext_restored":False,
         "semantic_six_ledger_audit_passed":False,
+        "semantic_audit_performed":False,
         "live_owner_environment_independently_verified":False,
         "external_credentials_recovered":False,
         "provider_business_effect_verified":False,
@@ -176,6 +177,7 @@ def drill(owner_root, primary_archive, secondary_archive, password, *,
                            expected_node=expected_node)
             if report["status"] != "LOCAL_EVIDENCE_CHAIN_CONSISTENT":
                 raise RecoveryDrillError("restored_evidence_chain_not_proven")
+            result["semantic_audit_performed"]=True
             result["semantic_six_ledger_audit_passed"]=True
             result["status"]="RESTORED_SIX_LEDGER_CHAIN_CONSISTENT"
             result["local_ledger_layers_checked"]=len(report["checked_layers"])
