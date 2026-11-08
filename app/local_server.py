@@ -404,6 +404,11 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                                   "n8n_pinned_workflow_id": (n8n_execution_verifier.workflow_id if n8n_execution_verifier is not None else None),
                                   "n8n_pinned_webhook_node": (n8n_execution_verifier.node_name if n8n_execution_verifier is not None else None),
                                  "durable_job_queue": durable_jobs is not None,
+                                  "bounded_agent_delegation": bool(
+                                      durable_jobs is not None
+                                      and local_agent_plan_store is not None
+                                      and local_agent_plan_store.agent_profiles is not None
+                                      and local_agent_plan_store.scoped_memory_store is not None),
                                   "agent_profiles": agent_profiles is not None,
                                   "scoped_agent_memory": scoped_memory_store is not None,
                                  "tools": ["calculate", "utc_now"],
