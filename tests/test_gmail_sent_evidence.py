@@ -288,6 +288,9 @@ class OwnerGmailCLIContractTests(unittest.TestCase):
             if path=="/api/n8n-execution-check-history":
                 return {"records":[{"plan_id":PLAN,"status":n8n_status,
                                     "inbound_delivery_correlated":True}]}
+            if path=="/api/local-agent-capabilities":
+                return {"gmail_sent_artifact_verification":True,
+                        "signed_gmail_artifact_binding_required":False}
             if path=="/api/gmail-sent-evidence-history":
                 return {"records":[{"plan_id":PLAN}] if gmail_checked else []}
             if path=="/api/gmail-sent-evidence":
