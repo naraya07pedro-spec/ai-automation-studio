@@ -47,15 +47,18 @@ class GmailSentEvidenceTests(unittest.TestCase):
         self.db.execute("INSERT INTO agent_connector_handoffs VALUES(?)",(PLAN,))
         self.db.execute("""CREATE TABLE signed_manual_handoff_outcomes(
             plan_id TEXT PRIMARY KEY, delivery_id TEXT, execution_id TEXT,
-            claimed_outcome TEXT)""")
+            claimed_outcome TEXT, connector_id TEXT,
+            signed_message_sha256 TEXT)""")
         self.db.execute("""CREATE TABLE n8n_provider_execution_checks(
             plan_id TEXT PRIMARY KEY, delivery_id TEXT, execution_id TEXT,
             status TEXT, provider_finished INTEGER,
-            inbound_delivery_correlated INTEGER)""")
-        self.db.execute("INSERT INTO signed_manual_handoff_outcomes VALUES(?,?,?,?)",
-                        (PLAN,"d"*32,"12345","COMPLETED"))
-        self.db.execute("INSERT INTO n8n_provider_execution_checks VALUES(?,?,?,?,?,?)",
-                        (PLAN,"d"*32,"12345","EXECUTION_SUCCESS_CORRELATED",1,1))
+            inbound_delivery_correlated INTEGER, connector_id TEXT,
+            signed_message_sha256 TEXT)""")
+        self.db.execute("INSERT INTO signed_manual_handoff_outcomes VALUES(?,?,?,?,?,?)",
+                        (PLAN,"d"*32,"12345","COMPLETED","n8n_manual","f"*64))
+        self.db.execute("INSERT INTO n8n_provider_execution_checks VALUES(?,?,?,?,?,?,?,?)",
+                        (PLAN,"d"*32,"12345","EXECUTION_SUCCESS_CORRELATED",
+                         1,1,"n8n_manual","f"*64))
         self.db.commit()
         self.gmail = SyntheticGmail()
         self.handoff = SimpleNamespace(db=self.db,lock=threading.RLock())
@@ -105,6 +108,19 @@ class GmailSentEvidenceTests(unittest.TestCase):
             self.db.execute(sql)
             with self.assertRaises(GmailSentEvidenceError):
                 self.service.verify_one(self.request())
+        self.assertEqual(self.gmail.calls,[])
+
+    def test_connector_or_signed_digest_mismatch_blocks_remote_reads(self):
+        for field in ("connector_id","signed_message_sha256"):
+            original = self.db.execute(
+                "SELECT "+field+" FROM n8n_provider_execution_checks").fetchone()[0]
+            self.db.execute("UPDATE n8n_provider_execution_checks SET "+
+                            field+"=?",( "tampered",))
+            with self.assertRaisesRegex(GmailSentEvidenceError,
+                                        "verified_n8n_success_chain_required"):
+                self.service.verify_one(self.request())
+            self.db.execute("UPDATE n8n_provider_execution_checks SET "+
+                            field+"=?",(original,))
         self.assertEqual(self.gmail.calls,[])
 
     def test_claimed_failed_outcome_blocks(self):
