@@ -6,6 +6,7 @@ HTTP and replay safety. Does not contact n8n/Gmail in a real owner account.
 import hashlib
 import hmac
 import http.cookiejar
+import importlib.util
 from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -45,6 +46,10 @@ class StubGmail:
                 "to":"Owner Test <"+RECIPIENT+">","subject":SUBJECT}
 
 
+HAS_CRYPTO = importlib.util.find_spec('cryptography') is not None
+
+
+@unittest.skipUnless(HAS_CRYPTO, 'Dedicated Stage 121 CI installs optional cryptography')
 class Stage121SignedBindingTests(unittest.TestCase):
     def setUp(self):
         self.previous=stage117.Stage117VerifierTests()
