@@ -282,10 +282,35 @@ function renderAgents(){
   const name=document.createElement("strong");name.textContent=a.name;
   const desc=document.createElement("p");desc.textContent=a.description||"No description";
   const tools=document.createElement("span");tools.className="state";tools.textContent="Tools: "+(Array.isArray(a.allowed_tools)?a.allowed_tools.join(", "):"not available");
+  const actions=document.createElement("div");actions.className="plan-actions";actions.style.marginTop="4px";
   const use=document.createElement("button");use.className="button";use.textContent=a.enabled?"Use for a task":"Disabled";use.disabled=!a.enabled;
   use.addEventListener("click",()=>{el("agent-select").value=a.agent_id;selectAgent();switchView("workspace")});
-  card.append(cat,name,desc,tools,use);grid.append(card);
+  const edit=document.createElement("button");edit.className="button";edit.textContent="Edit / disable";edit.disabled=!a.enabled;edit.addEventListener("click",()=>openAgentEditor(a));
+  actions.append(use,edit);card.append(cat,name,desc,tools,actions);grid.append(card);
  }
+}
+function agentTools(profile){
+ const root=el("agent-tools");root.replaceChildren();
+ const allowed=new Set(profile?.allowed_tools||["calculate","utc_now"]);
+ const names=[...new Set(["calculate","utc_now",...(profile?.allowed_tools||[])])];
+ for(const name of names){
+  const label=document.createElement("label");const input=document.createElement("input");
+  input.type="checkbox";input.value=name;input.checked=allowed.has(name);
+  label.append(input,document.createTextNode(" "+name));root.append(label);
+ }
+}
+function openAgentEditor(agent=null){
+ if(!csrf||busy)return;
+ editingAgent=agent?{...agent}:null;
+ el("agent-form").reset();el("agent-save-status").textContent="";
+ el("new-id").value=agent?.agent_id||"";el("new-id").readOnly=!!agent;
+ el("new-name").value=agent?.name||"";el("new-category").value=agent?.category||"research";
+ el("new-desc").value=agent?.description||"";el("new-instructions").value=agent?.instructions||"";
+ agentTools(agent);el("new-password").value="";
+ el("dialog-title").textContent=agent?"Edit Agent":"Create an Agent";
+ el("save-agent").textContent=agent?"Save revised profile":"Create saved profile";
+ el("disable-agent").hidden=!agent;
+ el("agent-dialog").showModal();
 }
 function selectAgent(){
  const a=agents.find(x=>x.agent_id===el("agent-select").value);
@@ -294,26 +319,59 @@ function selectAgent(){
  loadMemories();refreshComposer();
 }
 async function loadMemories(){
- const wrap=el("memories");wrap.replaceChildren();
+ const wrap=el("memories"),aid=el("agent-select").value,project=el("project").value.trim();
+ const key=aid+"|"+project,epoch=++memoryEpoch;
+ const prior=memoryScope===key?new Set([...wrap.querySelectorAll("input:checked")].map(x=>x.value)):new Set();
+ memoryScope=key;memoryNotes=[];wrap.replaceChildren();refreshComposer();
  if(!caps.scoped_agent_memory){wrap.textContent="Scoped memory is not enabled here.";return}
- const aid=el("agent-select").value,project=el("project").value.trim();
  if(!aid){wrap.textContent="Select an Agent to see its project notes.";return}
- if(!/^[a-z][a-z0-9_-]{2,59}$/.test(project)){wrap.textContent="Use a lowercase project ID, 3–60 characters.";return}
+ if(!/^[a-z][a-z0-9_-]{2,39}$/.test(project)){wrap.textContent="Use a lowercase project ID, 3–40 characters.";return}
+ wrap.textContent="Loading actual scoped notes…";
  try{
   const d=await api("/api/agent-scoped-memory?project_id="+encodeURIComponent(project)+"&agent_id="+encodeURIComponent(aid));
-  if(!csrf||aid!==el("agent-select").value||project!==el("project").value.trim())return;
-  const notes=(Array.isArray(d.notes)?d.notes:[]).filter(n=>!n.expired);
-  if(!notes.length){wrap.textContent="No active notes in this Agent/project scope. Plans can be created without selected notes.";return}
-  for(const note of notes){
+  if(!csrf||epoch!==memoryEpoch||key!==el("agent-select").value+"|"+el("project").value.trim())return;
+  memoryNotes=Array.isArray(d.notes)?d.notes:[];
+  wrap.replaceChildren();
+  if(!memoryNotes.length){wrap.textContent="No notes in this scope. Create a note or continue without memory.";return}
+  for(const note of memoryNotes){
+   const row=document.createElement("div");row.className="note-row";
    const label=document.createElement("label");label.className="memory-item";
-   const input=document.createElement("input");input.type="checkbox";input.value=note.note_id;input.name="scoped_note";input.addEventListener("change",()=>{
+   const input=document.createElement("input");input.type="checkbox";input.value=note.note_id;input.name="scoped_note";
+   input.checked=!note.expired&&prior.has(note.note_id);
+   input.disabled=!!note.expired;
+   input.addEventListener("change",()=>{
     const selected=[...wrap.querySelectorAll("input:checked")];if(selected.length>3){input.checked=false;setStatus("Select at most 3 memory notes.",true)}
    });
    const text=document.createElement("span");text.textContent=note.note_id;
-   const sub=document.createElement("small");sub.textContent=(note.source_kind||"OWNER_NOTE")+" · unverified context";text.append(sub);
-   label.append(input,text);wrap.append(label);
+   const sub=document.createElement("small");sub.textContent=(note.expired?"Expired · delete only":(note.source_kind||"OWNER_NOTE")+" · revision "+note.revision)+" · expires "+note.expires_utc;
+   text.append(sub);label.append(input,text);
+   const edit=document.createElement("button");edit.className="note-control";edit.type="button";
+   edit.textContent=note.expired?"Delete":"Edit";edit.addEventListener("click",()=>openNoteEditor(note));
+   row.append(label,edit);wrap.append(row);
   }
- }catch(e){wrap.textContent="Notes unavailable: "+e.message}
+  if(wrap.querySelectorAll("input:checked").length>3){
+   [...wrap.querySelectorAll("input:checked")].slice(3).forEach(x=>x.checked=false);
+  }
+ }catch(e){if(epoch===memoryEpoch)wrap.textContent="Notes unavailable: "+e.message}
+}
+function openNoteEditor(note=null){
+ if(!csrf||busy||!caps.scoped_agent_memory)return;
+ const agent=el("agent-select").value,project=el("project").value.trim();
+ if(!agent||!/^[a-z][a-z0-9_-]{2,39}$/.test(project))return;
+ editingNote=note?{...note}:null;scopeEditing={agent_id:agent,project_id:project};
+ el("note-form").reset();el("note-status").textContent="";
+ el("note-id").value=note?.note_id||"";el("note-id").readOnly=!!note;
+ el("note-text").value=note?.text||"";el("note-text").disabled=!!note?.expired;
+ el("note-source").value=note?.source_label||"Owner workspace";
+ el("note-retention").value="30";el("note-retention").disabled=!!note?.expired;
+ el("note-password").value="";
+ el("note-title").textContent=note?(note.expired?"Delete expired note":"Edit memory note"):"Create a note";
+ el("note-scope").textContent="Project: "+project+" · Agent: "+agent+". Revision changes invalidate linked plans. Plaintext may remain in backups.";
+ el("save-note").hidden=!!note?.expired;el("delete-note").hidden=!note;
+ el("note-dialog").showModal();
+}
+function sameNoteScope(){
+ return scopeEditing&&scopeEditing.agent_id===el("agent-select").value&&scopeEditing.project_id===el("project").value.trim();
 }
 async function loadPlans(){
  if(!csrf)return;
