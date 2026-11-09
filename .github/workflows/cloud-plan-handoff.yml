@@ -10,6 +10,8 @@ on:
       - 'app/local_security_audit.py'
       - 'web/mission.html'
       - 'tests/test_cloud_plan_bridge.py'
+      - 'tests/test_multi_provider_cloud_plan.py'
+      - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
       - '.github/workflows/cloud-plan-handoff.yml'
   push:
@@ -22,6 +24,8 @@ on:
       - 'app/local_security_audit.py'
       - 'web/mission.html'
       - 'tests/test_cloud_plan_bridge.py'
+      - 'tests/test_multi_provider_cloud_plan.py'
+      - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
       - '.github/workflows/cloud-plan-handoff.yml'
   workflow_dispatch:
@@ -46,6 +50,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run true authenticated loopback HTTP and deterministic local tool tests
         run: python -m unittest discover -s tests -p 'test_cloud_plan_bridge.py' -v
+          python -m unittest discover -s tests -p 'test_multi_provider_cloud_plan.py' -v
       - name: Regress existing plans, paid one-shot and cloud-only startup
         run: |
           python -m unittest discover -s tests -p 'test_on_demand_remote_ai.py' -v
