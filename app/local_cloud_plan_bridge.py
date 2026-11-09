@@ -110,6 +110,15 @@ class CloudPlanBridge:
             "model": request["model"],
             "steps": steps,
         }
+        origin = {"provider": provider, "request_id": request["request_id"]}
+
+        def require_original_source(plan):
+            source = plan["cloud_origin"]
+            # Existing historical OpenAI/three-provider plans may lack this
+            # column. Never fabricate a provenance claim for those records.
+            if source is not None and source != origin:
+                raise CloudPlanError("cloud_plan_identity_conflict", 409)
+            return "LEGACY_UNBOUND" if source is None else "BOUND"
         try:
             existing = self.plans.get(stable_id)
         except PlanError as exc:
@@ -121,7 +130,9 @@ class CloudPlanBridge:
                     or existing["goal"] != proposal["goal"]
                     or existing["steps"] != proposal["steps"]):
                 raise CloudPlanError("cloud_plan_identity_conflict", 409)
+            origin_status = require_original_source(existing)
             return {
+                "source_provenance": origin_status,
                 "status": "EXISTING_OWNER_REVIEW_PLAN",
                 "provider_calls_this_action": calls_this_action,
                 "plan": existing,
@@ -130,7 +141,8 @@ class CloudPlanBridge:
                 "owner_approval_required": existing["status"] == "PREPARED",
             }
         try:
-            created = self.plans.create(proposal, plan_id=stable_id)
+            created = self.plans.create(
+                proposal, plan_id=stable_id, cloud_origin=origin)
         except PlanError:
             # An overlapping recovery may have won the create-only insert.
             try:
@@ -141,8 +153,10 @@ class CloudPlanBridge:
                     or existing["goal"] != proposal["goal"]
                     or existing["steps"] != proposal["steps"]):
                 raise CloudPlanError("cloud_plan_identity_conflict", 409)
+            require_original_source(existing)
             created = existing
         return {
+            "source_provenance": require_original_source(created),
             "status": "OWNER_REVIEW_PLAN_PREPARED",
             # New plan creation itself is deterministic and does not call AI.
             "provider_calls_this_action": calls_this_action,

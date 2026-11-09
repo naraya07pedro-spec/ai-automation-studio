@@ -8,6 +8,8 @@ on:
       - 'app/local_server.py'
       - 'tests/test_multi_provider_on_demand.py'
       - 'tests/test_multi_provider_cloud_plan.py'
+      - 'tests/test_cloud_plan_provenance.py'
+      - 'docs/CLOUD_PLAN_DURABLE_ORIGIN_V1.md'
       - 'docs/MULTI_PROVIDER_ON_DEMAND_V1.md'
       - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - '.github/workflows/multi-provider-on-demand.yml'
@@ -46,6 +48,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_multi_provider_on_demand.py' -v
           python -m unittest discover -s tests -p 'test_multi_provider_cloud_plan.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_plan_provenance.py' -v
       - name: Existing paid OpenAI and cloud plan regressions
         run: |
           python -m unittest discover -s tests -p 'test_on_demand_remote_ai.py' -v

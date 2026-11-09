@@ -11,6 +11,8 @@ on:
       - 'web/mission.html'
       - 'tests/test_cloud_plan_bridge.py'
       - 'tests/test_multi_provider_cloud_plan.py'
+      - 'tests/test_cloud_plan_provenance.py'
+      - 'docs/CLOUD_PLAN_DURABLE_ORIGIN_V1.md'
       - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
       - '.github/workflows/cloud-plan-handoff.yml'
@@ -25,6 +27,8 @@ on:
       - 'web/mission.html'
       - 'tests/test_cloud_plan_bridge.py'
       - 'tests/test_multi_provider_cloud_plan.py'
+      - 'tests/test_cloud_plan_provenance.py'
+      - 'docs/CLOUD_PLAN_DURABLE_ORIGIN_V1.md'
       - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - 'docs/CLOUD_PLAN_HANDOFF_V1.md'
       - '.github/workflows/cloud-plan-handoff.yml'
@@ -52,6 +56,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_cloud_plan_bridge.py' -v
           python -m unittest discover -s tests -p 'test_multi_provider_cloud_plan.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_plan_provenance.py' -v
       - name: Regress existing plans, paid one-shot and cloud-only startup
         run: |
           python -m unittest discover -s tests -p 'test_on_demand_remote_ai.py' -v

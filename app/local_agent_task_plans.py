@@ -142,6 +142,26 @@ class PlanError(Exception):
     pass
 
 
+CLOUD_REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z")
+CLOUD_PROVIDERS = frozenset(("openai_responses", "anthropic_messages",
+                             "gemini_generate_content"))
+
+
+def _validated_cloud_origin(origin, plan_id):
+    """Validate a bridge-provided receipt pointer; no origin grants permissions."""
+    if origin is None:
+        return None
+    if (type(origin) is not dict or set(origin) != {"provider", "request_id"}
+            or type(origin["provider"]) is not str
+            or origin["provider"] not in CLOUD_PROVIDERS
+            or type(origin["request_id"]) is not str
+            or CLOUD_REQUEST_ID.fullmatch(origin["request_id"]) is None
+            or type(plan_id) is not str
+            or plan_id != origin["request_id"][:24]):
+        raise PlanError("invalid_cloud_plan_origin")
+    return {"provider": origin["provider"], "request_id": origin["request_id"]}
+
+
 def _validate_goal_model(goal, model):
     if (type(goal) is not str or not 1 <= len(goal.strip()) <= MAX_GOAL
             or not (valid_model_name(model) or valid_remote_model_name(model))):
@@ -487,7 +507,8 @@ class LocalAgentPlanStore:
                     handoff_log_json TEXT NOT NULL DEFAULT '[]',
                     batch_run_status TEXT NOT NULL DEFAULT 'IDLE',
                     csv_json TEXT NOT NULL DEFAULT '',
-                    hn_approval_epoch INTEGER)""")
+                    hn_approval_epoch INTEGER,
+                    cloud_origin_json TEXT NOT NULL DEFAULT '')""")
                 columns = {col[1] for col in self.db.execute(
                     "PRAGMA table_info(agent_task_plans)").fetchall()}
                 if "approval_epoch" not in columns:
@@ -530,6 +551,9 @@ class LocalAgentPlanStore:
                 if "scoped_memory_refs_json" not in columns:
                     self.db.execute("""ALTER TABLE agent_task_plans
                         ADD COLUMN scoped_memory_refs_json TEXT NOT NULL DEFAULT '[]'""")
+                if "cloud_origin_json" not in columns:
+                    self.db.execute("""ALTER TABLE agent_task_plans
+                        ADD COLUMN cloud_origin_json TEXT NOT NULL DEFAULT ''""")
                 # Never redispatch a persisted server run after service restart.
                 self.db.execute("""UPDATE agent_task_plans SET
                     batch_run_status='INTERRUPTED' WHERE
@@ -655,7 +679,7 @@ class LocalAgentPlanStore:
                 report_json,document_json,document_set_json,
                 handoff_log_json,batch_run_status,csv_json,
                 hn_approval_epoch,agent_binding_json,
-                scoped_memory_refs_json FROM agent_task_plans
+                scoped_memory_refs_json,cloud_origin_json FROM agent_task_plans
                 WHERE plan_id=?""", (plan_id,)).fetchone()
         if row is None:
             raise PlanError("plan_not_found")
@@ -670,6 +694,11 @@ class LocalAgentPlanStore:
             selected_csv = self._stored_csv(plan_id) if row[14] else None
             agent_binding = json.loads(row[16]) if row[16] else None
             scoped_memory_refs = json.loads(row[17])
+            cloud_origin = json.loads(row[18]) if row[18] else None
+            try:
+                cloud_origin = _validated_cloud_origin(cloud_origin, plan_id)
+            except PlanError:
+                raise PlanError("plan_storage_invalid") from None
             if type(scoped_memory_refs) is not list:
                 raise PlanError("plan_storage_invalid")
             if scoped_memory_refs:
@@ -709,6 +738,7 @@ class LocalAgentPlanStore:
                 "created_utc": row[6],
                 "agent_binding": agent_binding,
                 "scoped_memory_refs": scoped_memory_refs,
+                "cloud_origin": cloud_origin,
                 "approval_epoch": row[7],
                 "hn_approval_epoch": row[15],
                 "memory_refs": memory_refs,
@@ -740,12 +770,14 @@ class LocalAgentPlanStore:
 
     def create(self, proposed, memory_refs=None, document_snapshot=None,
                document_set_snapshot=None, csv_snapshot=None, *, plan_id=None,
-               agent_binding=None, scoped_memory_refs=None):
+               agent_binding=None, scoped_memory_refs=None,
+               cloud_origin=None):
         # A trusted internal paid-request bridge may bind a plan to a stable
         # id; HTTP/model input must never supply this parameter directly.
         if plan_id is not None and (type(plan_id) is not str
                                     or ID_PATTERN.fullmatch(plan_id) is None):
             raise PlanError("invalid_plan_id")
+        origin = _validated_cloud_origin(cloud_origin, plan_id)
         if type(proposed) is not dict or set(proposed) != {"model", "goal", "steps"}:
             raise PlanError("invalid_model_plan")
         _validate_goal_model(proposed["goal"], proposed["model"])
@@ -824,8 +856,9 @@ class LocalAgentPlanStore:
                 self.db.execute("""INSERT INTO agent_task_plans
                     (plan_id,model,goal,steps_json,results_json,next_index,status,
                      created_utc,memory_refs_json,document_json,document_set_json,
-                     csv_json,agent_binding_json,scoped_memory_refs_json)
-                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?,?,?,?)""",
+                     csv_json,agent_binding_json,scoped_memory_refs_json,
+                     cloud_origin_json)
+                    VALUES(?,?,?,?,?,0,'PREPARED',?,?,?,?,?,?,?,?)""",
                     (pid, proposed["model"], proposed["goal"],
                      json.dumps(steps, separators=(",", ":")), "[]", created,
                      json.dumps(refs, separators=(",", ":")),
@@ -839,7 +872,9 @@ class LocalAgentPlanStore:
                      if selected_csv is not None else "",
                      json.dumps(agent_binding, sort_keys=True, separators=(",", ":"))
                      if agent_binding is not None else "",
-                     json.dumps(scoped_refs, separators=(",", ":"), sort_keys=True)))
+                     json.dumps(scoped_refs, separators=(",", ":"), sort_keys=True),
+                     json.dumps(origin, separators=(",", ":"), sort_keys=True)
+                     if origin is not None else ""))
                 return self._fetch(pid)
         except sqlite3.Error:
             raise PlanError("plan_storage_unavailable") from None
