@@ -5,8 +5,10 @@ on:
     paths:
       - 'app/local_durable_plan_queue.py'
       - 'app/local_agent_task_plans.py'
+      - 'app/local_typed_agent_handoff.py'
       - 'tests/test_queue_cloud_origin.py'
       - 'tests/test_durable_plan_queue.py'
+      - 'tests/test_typed_agent_handoff.py'
       - '.github/workflows/queue-cloud-origin.yml'
   pull_request:
     paths:
@@ -33,4 +35,5 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_queue_cloud_origin.py' -v
           python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
+          python -m unittest discover -s tests -p 'test_typed_agent_handoff.py' -v
           python -m unittest discover -s tests -p 'test_cloud_plan_provenance.py' -v
