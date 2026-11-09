@@ -13,10 +13,10 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 from unittest.mock import patch
-import local_server
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
+import local_server
 
 from local_agent_task_plans import LocalAgentPlanStore
 from local_cloud_plan_bridge import CloudPlanBridge, CloudPlanError, paid_planning_prompt
