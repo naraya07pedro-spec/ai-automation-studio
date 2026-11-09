@@ -3209,7 +3209,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             home / "scoped-agent-memory.sqlite3",
             encryption_key=(read_runtime_secret("AAS_SCOPED_MEMORY_KEY")
                             if enable_encrypted_scoped_memory else None))
-    if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
+    if (enable_agent_plans or enable_scheduled_openai
+            or enable_anthropic_on_demand or enable_gemini_on_demand
+            or enable_n8n_execution_verify):
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None
