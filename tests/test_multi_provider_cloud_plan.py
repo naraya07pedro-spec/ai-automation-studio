@@ -12,6 +12,8 @@ import threading
 import unittest
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
+from unittest.mock import patch
+import local_server
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
@@ -255,6 +257,41 @@ class ProviderOnlyHTTP(unittest.TestCase):
         self.assertEqual(recovery["provider_calls_this_action"], 0)
         self.assertEqual(recovery["plan"]["status"], "COMPLETED")
         self.assertEqual(len(self.calls), 1)
+
+class NativeProviderOnlyBoot(unittest.TestCase):
+    def test_native_cloud_only_server_allocates_plan_store_without_openai_or_ollama(self):
+        class NoSocketServer:
+            def __init__(self, address, handler):
+                self.server_port = address[1]
+            def serve_forever(self):
+                return
+            def server_close(self):
+                return
+        for provider in ("anthropic", "gemini"):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as temp:
+                home = Path(temp)
+                private = home / ".ai-automation-studio"
+                private.mkdir(mode=0o700)
+                LocalOperatorAuth.provision(private / "operator.json", PASSWORD)
+                with patch.object(local_server.Path, "home", return_value=home), \\
+                     patch.object(local_server, "ThreadingHTTPServer", NoSocketServer), \\
+                     patch.object(local_server, "read_runtime_secret",
+                                  return_value="fixture-private-key-long-enough-2026") as secret, \\
+                     patch.object(local_server, "installed_models",
+                                  side_effect=AssertionError("Ollama used")), \\
+                     patch.object(local_server, "run_agent",
+                                  side_effect=AssertionError("Ollama inference used")):
+                    local_server.start_local_server(
+                        enable_anthropic_on_demand=provider == "anthropic",
+                        enable_gemini_on_demand=provider == "gemini")
+                self.assertTrue((private / "agent-task-plans.sqlite3").exists(),
+                                "Cloud-only provider must have durable reviewed-plan storage")
+                self.assertTrue((private / "on-demand-remote-ai.sqlite3").exists())
+                self.assertTrue((private / "ollama-safety.sqlite3").exists(),
+                                "Cloud-only inference still needs a durable safety checkpoint")
+                secret.assert_called_once_with(
+                    "AAS_ANTHROPIC_API_KEY" if provider == "anthropic"
+                    else "AAS_GEMINI_API_KEY")
 
 
 if __name__ == "__main__":
