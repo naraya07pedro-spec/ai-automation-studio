@@ -1,0 +1,36 @@
+name: Cloud plan origin pinned to durable job execution
+
+on:
+  push:
+    paths:
+      - 'app/local_durable_plan_queue.py'
+      - 'app/local_agent_task_plans.py'
+      - 'tests/test_queue_cloud_origin.py'
+      - 'tests/test_durable_plan_queue.py'
+      - '.github/workflows/queue-cloud-origin.yml'
+  pull_request:
+    paths:
+      - 'app/local_durable_plan_queue.py'
+      - 'app/local_agent_task_plans.py'
+      - 'tests/test_queue_cloud_origin.py'
+      - 'tests/test_durable_plan_queue.py'
+      - '.github/workflows/queue-cloud-origin.yml'
+  workflow_dispatch:
+
+jobs:
+  backend-queue-security:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cloud origin immutability and full durable queue regression
+        run: |
+          python -m unittest discover -s tests -p 'test_queue_cloud_origin.py' -v
+          python -m unittest discover -s tests -p 'test_durable_plan_queue.py' -v
+          python -m unittest discover -s tests -p 'test_cloud_plan_provenance.py' -v
