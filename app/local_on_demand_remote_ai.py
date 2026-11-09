@@ -240,7 +240,7 @@ class LocalOnDemandRemoteAI:
             raise OnDemandRemoteAIError("remote_ask_not_found", 404)
         return self._public_receipt(row)
 
-    def bound_receipt(self, request_id, model, prompt):
+    def bound_receipt(self, request_id, model, prompt, *, provider="openai_responses"):
         """Read a receipt only if the caller reproduces the exact paid request.
 
         This is an internal binding check; not an HTTP endpoint. Prevents
@@ -248,7 +248,13 @@ class LocalOnDemandRemoteAI:
         """
         if type(request_id) is not str or not REQUEST_ID.fullmatch(request_id):
             raise OnDemandRemoteAIError("invalid_remote_ask_id")
-        if not valid_remote_model_name(model):
+        if provider not in PROVIDERS:
+            raise OnDemandRemoteAIError("invalid_remote_provider")
+        if (not valid_remote_model_name(model)
+                or (provider == "anthropic_messages"
+                    and ANTHROPIC_MODEL.fullmatch(model) is None)
+                or (provider == "gemini_generate_content"
+                    and GEMINI_MODEL.fullmatch(model) is None)):
             raise OnDemandRemoteAIError("invalid_remote_model_name")
         if type(prompt) is not str or not 1 <= len(prompt.strip()) <= MAX_PROMPT:
             raise OnDemandRemoteAIError("invalid_remote_ask_prompt")
@@ -261,7 +267,7 @@ class LocalOnDemandRemoteAI:
             ).fetchone()
             if row is None:
                 raise OnDemandRemoteAIError("remote_ask_not_found", 404)
-            if (row[1] != model or row[2] != "openai_responses"
+            if (row[1] != model or row[2] != provider
                     or not compare_digest(row[0], digest)):
                 raise OnDemandRemoteAIError("remote_ask_binding_mismatch", 409)
             # Keep the database lock until the entire receipt is read.
