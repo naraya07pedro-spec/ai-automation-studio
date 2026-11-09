@@ -15,6 +15,7 @@ import threading
 
 from local_ollama_agent import (AgentError, calculate, execute_tool,
                                 ollama_transport, valid_model_name)
+from openai_readonly_responses import valid_remote_model_name
 from local_agent_github_reader import valid_repo, GitHubPlanReadError
 from local_agent_issue_analysis import analyze_public_issue_metadata
 from local_document_analysis import (analyze_local_document, validate_document,
@@ -143,7 +144,7 @@ class PlanError(Exception):
 
 def _validate_goal_model(goal, model):
     if (type(goal) is not str or not 1 <= len(goal.strip()) <= MAX_GOAL
-            or not valid_model_name(model)):
+            or not (valid_model_name(model) or valid_remote_model_name(model))):
         raise PlanError("invalid_plan_request")
 
 
