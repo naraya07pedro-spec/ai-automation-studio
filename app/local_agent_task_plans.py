@@ -142,7 +142,7 @@ class PlanError(Exception):
     pass
 
 
-CLOUD_REQUEST_ID = re.compile(r"[0-9a-f]{32}\\Z")
+CLOUD_REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z")
 CLOUD_PROVIDERS = frozenset(("openai_responses", "anthropic_messages",
                              "gemini_generate_content"))
 
