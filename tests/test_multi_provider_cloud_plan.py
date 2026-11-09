@@ -273,12 +273,12 @@ class NativeProviderOnlyBoot(unittest.TestCase):
                 private = home / ".ai-automation-studio"
                 private.mkdir(mode=0o700)
                 LocalOperatorAuth.provision(private / "operator.json", PASSWORD)
-                with patch.object(local_server.Path, "home", return_value=home), \\
-                     patch.object(local_server, "ThreadingHTTPServer", NoSocketServer), \\
+                with patch.object(local_server.Path, "home", return_value=home), \
+                     patch.object(local_server, "ThreadingHTTPServer", NoSocketServer), \
                      patch.object(local_server, "read_runtime_secret",
-                                  return_value="fixture-private-key-long-enough-2026") as secret, \\
+                                  return_value="fixture-private-key-long-enough-2026") as secret, \
                      patch.object(local_server, "installed_models",
-                                  side_effect=AssertionError("Ollama used")), \\
+                                  side_effect=AssertionError("Ollama used")), \
                      patch.object(local_server, "run_agent",
                                   side_effect=AssertionError("Ollama inference used")):
                     local_server.start_local_server(
