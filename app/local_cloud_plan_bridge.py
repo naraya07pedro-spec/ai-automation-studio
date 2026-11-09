@@ -12,7 +12,8 @@ import json
 from local_agent_task_plans import (
     MAX_GOAL, PlanError, validate_steps,
 )
-from local_on_demand_remote_ai import OnDemandRemoteAIError
+from local_on_demand_remote_ai import OnDemandRemoteAIError, PROVIDERS
+from multi_provider_readonly import ANTHROPIC_MODEL, GEMINI_MODEL
 from openai_readonly_responses import valid_remote_model_name
 
 ALLOWED = frozenset(("calculate", "utc_now"))
@@ -42,14 +43,22 @@ def validate_cloud_plan_request(request, *, recovery=False):
     fields = {"request_id", "model", "goal"}
     if not recovery:
         fields.add("paid_api_consent")
-    if type(request) is not dict or set(request) != fields:
+    if type(request) is not dict or set(request) not in (
+            fields, fields | {"provider"}):
         raise CloudPlanError("invalid_cloud_plan_fields")
     if not recovery and request["paid_api_consent"] is not True:
         raise CloudPlanError("cloud_plan_paid_consent_required", 403)
     goal = request["goal"]
     if type(goal) is not str or not 1 <= len(goal.strip()) <= MAX_GOAL:
         raise CloudPlanError("invalid_cloud_plan_goal")
-    if not valid_remote_model_name(request["model"]):
+    provider = request.get("provider", "openai_responses")
+    if type(provider) is not str or provider not in PROVIDERS:
+        raise CloudPlanError("invalid_cloud_plan_provider")
+    if (not valid_remote_model_name(request["model"])
+            or (provider == "anthropic_messages"
+                and ANTHROPIC_MODEL.fullmatch(request["model"]) is None)
+            or (provider == "gemini_generate_content"
+                and GEMINI_MODEL.fullmatch(request["model"]) is None)):
         raise CloudPlanError("invalid_cloud_plan_model")
     from local_on_demand_remote_ai import REQUEST_ID
     if type(request["request_id"]) is not str or not REQUEST_ID.fullmatch(
@@ -88,6 +97,9 @@ class CloudPlanBridge:
         self.plans = plan_store
 
     def _materialize(self, request, receipt, *, calls_this_action):
+        provider = request.get("provider", "openai_responses")
+        if receipt.get("provider") != provider or receipt.get("model") != request["model"]:
+            raise CloudPlanError("cloud_plan_receipt_provider_mismatch", 409)
         if receipt["status"] != "COMPLETED" or type(receipt["answer"]) is not str:
             raise CloudPlanError("cloud_plan_receipt_not_completed", 409)
         steps = _parse_checked_plan(receipt["answer"])
@@ -114,6 +126,7 @@ class CloudPlanBridge:
                 "provider_calls_this_action": calls_this_action,
                 "plan": existing,
                 "request_id": request["request_id"],
+                "provider": provider,
                 "owner_approval_required": existing["status"] == "PREPARED",
             }
         try:
@@ -135,6 +148,7 @@ class CloudPlanBridge:
             "provider_calls_this_action": calls_this_action,
             "plan": created,
             "request_id": request["request_id"],
+            "provider": provider,
             "owner_approval_required": created["status"] == "PREPARED",
         }
 
@@ -148,6 +162,7 @@ class CloudPlanBridge:
             "model": request["model"],
             "prompt": prompt,
             "paid_api_consent": True,
+            "provider": request.get("provider", "openai_responses"),
         })
         return self._materialize(request, receipt, calls_this_action=1)
 
@@ -155,6 +170,7 @@ class CloudPlanBridge:
         validate_cloud_plan_request(request, recovery=True)
         prompt = paid_planning_prompt(request["goal"])
         receipt = self.remote.bound_receipt(
-            request["request_id"], request["model"], prompt)
+            request["request_id"], request["model"], prompt,
+            provider=request.get("provider", "openai_responses"))
         # No model calls, no paid consent field or retries in this path.
         return self._materialize(request, receipt, calls_this_action=0)
