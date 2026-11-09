@@ -89,6 +89,10 @@ class DelegationsBrowserTests(unittest.TestCase):
         expect(page.locator("#handoff-output")).to_contain_text("DECIMAL_NUMBER")
         expect(page.locator("#handoff-output")).to_contain_text("Value: 56")
         expect(page.locator("#handoff-output")).to_contain_text("PREVIEW ONLY")
+        # A same-revision refresh must not erase a reviewed typed preview.
+        page.locator("#refresh-jobs").click()
+        expect(page.locator("#handoff-output")).to_contain_text("DECIMAL_NUMBER")
+        expect(page.locator("#handoff-commit")).to_be_enabled()
         page.locator("#handoff-password").fill(PASS)
         page.once("dialog",lambda d:d.accept())
         page.locator("#handoff-commit").click()
