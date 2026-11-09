@@ -389,14 +389,20 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
   </div>
 </section>
 
-<section class="panel" id="on-demand-cloud-ai-panel" aria-label="On-demand OpenAI text inference" style="margin-top:20px">
+<section class="panel" id="on-demand-cloud-ai-panel" aria-label="On-demand selected cloud provider text inference" style="margin-top:20px">
  <div class="split"><h2>13 · Ask Cloud AI Now · One request</h2><span class="pill" id="cloud-ask-badge">Checking</span></div>
  <p class="sub">Ask one text question without Ollama. Every call requires owner approval, incurs possible separate API charges, and sends the prompt to the provider. Maximum 5 attempts per UTC day and 200 total attempts. No web, MCP, shell, email, n8n, or model tools. Prompt hash, reply and token usage persist in local plaintext SQLite.</p>
  <div class="grid">
   <div>
-   <label for="cloud-ask-model">Model ID enabled in your OpenAI API account</label><input id="cloud-ask-model" maxlength="80" autocomplete="off" placeholder="Exact OpenAI API model ID">
+   <label for="cloud-ask-provider">Paid API provider</label>
+   <select id="cloud-ask-provider">
+    <option value="openai_responses">OpenAI Responses</option>
+    <option value="anthropic_messages">Anthropic Messages</option>
+    <option value="gemini_generate_content">Google Gemini</option>
+   </select>
+   <label for="cloud-ask-model">Exact enabled model ID</label><input id="cloud-ask-model" maxlength="80" autocomplete="off" placeholder="Exact model enabled in your provider account">
    <label for="cloud-ask-prompt">One text question (max 3000 characters)</label><textarea id="cloud-ask-prompt" rows="5" maxlength="3000" placeholder="Ask a brief nonsensitive question."></textarea>
-   <label><input id="cloud-ask-consent" type="checkbox"> I authorize one potentially billable OpenAI API request. Billing is separate from ChatGPT and no USD cap is guaranteed.</label>
+   <label><input id="cloud-ask-consent" type="checkbox"> I authorize one potentially billable request to the selected API provider. Separate billing applies; no USD cap is guaranteed.</label>
    <label for="cloud-ask-owner">Current owner password</label><input id="cloud-ask-owner" type="password" autocomplete="off">
    <div class="btnrow"><button id="cloud-ask-submit" type="button" class="btn primary" disabled>Send one paid text request</button><button id="cloud-ask-recover" type="button" class="btn" disabled>Check last receipt (no retry)</button></div>
    <p class="status" id="cloud-ask-status" role="status">No request made.</p>
@@ -412,12 +418,18 @@ footer{margin-top:30px;color:#8b9fae;font-size:12px;line-height:1.7}
 
 <section class="panel" id="cloud-plan-panel" aria-label="Cloud generated approved local tool plans" style="margin-top:20px">
  <div class="split"><h2>14 · Cloud AI → Reviewed Local Plan</h2><span class="pill" id="cloud-plan-badge">Checking</span></div>
- <p class="sub">Ask OpenAI for up to 3 read-only calculation/UTC clock steps. The model NEVER executes a tool. Review its validated proposal in section 02, then separately approve and run the steps. No shell, Gmail, n8n, GitHub edits, external writes or unsupervised actions.</p>
+ <p class="sub">Ask the explicitly selected paid API provider for up to 3 read-only calculation/UTC clock steps. The model NEVER executes a tool. Review its validated proposal in section 02, then separately approve and run the steps. No shell, Gmail, n8n, GitHub edits, external writes or unsupervised actions.</p>
  <div class="grid">
   <div>
-   <label for="cloud-plan-model">OpenAI API model ID</label><input id="cloud-plan-model" maxlength="80" autocomplete="off" placeholder="Exact model enabled in your API account">
+   <label for="cloud-plan-provider">Planning provider</label>
+   <select id="cloud-plan-provider">
+    <option value="openai_responses">OpenAI Responses</option>
+    <option value="anthropic_messages">Anthropic Messages</option>
+    <option value="gemini_generate_content">Google Gemini</option>
+   </select>
+   <label for="cloud-plan-model">Exact provider model ID</label><input id="cloud-plan-model" maxlength="80" autocomplete="off" placeholder="Exact model enabled in your API account">
    <label for="cloud-plan-goal">Goal (up to 1,200 characters)</label><textarea id="cloud-plan-goal" maxlength="1200" rows="4" placeholder="Calculate 18 × 7 then show current UTC time."></textarea>
-   <label><input id="cloud-plan-consent" type="checkbox"> I authorize exactly ONE potentially billable OpenAI API proposal. My goal leaves this device, with billing separate from ChatGPT.</label>
+   <label><input id="cloud-plan-consent" type="checkbox"> I authorize ONE potentially billable proposal to the selected provider. My goal leaves this device, with separate API billing.</label>
    <label for="cloud-plan-owner">Current owner password, required for every proposal/recovery</label><input id="cloud-plan-owner" type="password" autocomplete="off">
    <div class="btnrow"><button id="cloud-plan-propose" type="button" class="btn primary" disabled>Create one reviewed plan proposal</button></div>
    <p class="status" id="cloud-plan-status" role="status">No cloud proposal submitted.</p>
@@ -497,6 +509,7 @@ async function loadCapabilities(){
  try{
   const info=await request("/api/local-agent-capabilities");
   const enabled=!!info.enabled;
+  configureCloudProviders(info.remote_on_demand_providers);
   cloudAskEnabled=!!info.remote_on_demand_ai;cloudAskControls();
   cloudPlanningEnabled=!!info.cloud_plan_review;cloudPlanControls();
   if(cloudAskEnabled)loadCloudAskReceipts();
@@ -1043,10 +1056,21 @@ let gmailEnabled=false,gmailConnected=false,gmailBusy=false;
 
 
 
+let cloudProviders=[];
+function configureCloudProviders(providers){
+ const valid=["openai_responses","anthropic_messages","gemini_generate_content"];
+ cloudProviders=Array.isArray(providers)?providers.filter(p=>valid.includes(p)):[];
+ for(const id of ["cloud-plan-provider","cloud-ask-provider"]){
+  const select=$(id);
+  for(const option of select.options){option.disabled=!cloudProviders.includes(option.value);}
+  if(!cloudProviders.includes(select.value))select.value=cloudProviders[0]||"";
+ }
+}
 let cloudPlanBusy=false;
 function cloudPlanControls(){
  $("cloud-plan-badge").textContent=cloudPlanningEnabled?"Cloud planning enabled":"Disabled";
  const enabled=!!csrf&&!busy&&!cloudPlanBusy&&cloudPlanningEnabled&&
+  cloudProviders.includes($("cloud-plan-provider").value)&&
   !!$("cloud-plan-goal").value.trim()&&!!$("cloud-plan-model").value.trim()&&
   !!$("cloud-plan-owner").value;
  $("cloud-plan-propose").disabled=!enabled||!$("cloud-plan-consent").checked;
@@ -1067,7 +1091,7 @@ async function cloudPlanRequest(recover){
  const goal=$("cloud-plan-goal").value.trim(),model=$("cloud-plan-model").value.trim();
  const current_password=$("cloud-plan-owner").value;
  if(!goal||!model||!current_password)return;
- if(!recover&&!confirm("Authorize ONE potentially billable OpenAI API planning request? The model can only PROPOSE calculation/time steps. No tools will run before your separate approval."))return;
+ if(!recover&&!confirm("Authorize ONE potentially billable "+$("cloud-plan-provider").selectedOptions[0].textContent+" planning request? The model can only PROPOSE calculation/time steps. No tools will run before your separate approval."))return;
  if(!recover&&(!window.crypto||!window.crypto.getRandomValues)){
   status("cloud-plan-status","Secure request ID generation unavailable.",true);return;
  }
@@ -1079,7 +1103,7 @@ async function cloudPlanRequest(recover){
   request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
   $("cloud-plan-request-id").value=request_id;
  }
- const body={request_id,model,goal,current_password};
+ const body={request_id,model,goal,current_password,provider:$("cloud-plan-provider").value};
  if(!recover)body.paid_api_consent=true;
  $("cloud-plan-owner").value="";$("cloud-plan-consent").checked=false;
  cloudPlanBusy=true;cloudPlanControls();
@@ -1089,7 +1113,7 @@ async function cloudPlanRequest(recover){
   const result=await request(recover?"/api/cloud-ai-plan-recover":
    "/api/cloud-ai-plan-create",body);
   if(!csrf)return;
-  $("cloud-plan-result").textContent="Request ID "+result.request_id+
+  $("cloud-plan-result").textContent="Provider "+result.provider+"\nRequest ID "+result.request_id+
    "\nPlan: "+result.plan.plan_id+" · "+result.plan.status+
    "\n\n"+result.plan.steps.map((x,i)=>(i+1)+". "+x.tool+" "+JSON.stringify(x.args)).join("\n")+
    "\n\nTools executed: ZERO. Owner review is required in section 02.";
@@ -1108,14 +1132,16 @@ async function cloudPlanRequest(recover){
 for(const id of ["cloud-plan-goal","cloud-plan-model","cloud-plan-owner","cloud-plan-request-id"]){
  $(id).addEventListener("input",cloudPlanControls);
 }
+$("cloud-plan-provider").addEventListener("change",cloudPlanControls);
 $("cloud-plan-consent").addEventListener("change",cloudPlanControls);
 $("cloud-plan-propose").addEventListener("click",()=>cloudPlanRequest(false));
 $("cloud-plan-recover").addEventListener("click",()=>cloudPlanRequest(true));
 
 let cloudAskEnabled=false,cloudAskBusy=false,cloudAskLastId=null;
 function cloudAskControls(){
- $("cloud-ask-badge").textContent=cloudAskEnabled?"OpenAI enabled":"Disabled";
+ $("cloud-ask-badge").textContent=cloudAskEnabled?"Cloud API enabled":"Disabled";
  $("cloud-ask-submit").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||
+  !cloudProviders.includes($("cloud-ask-provider").value)||
   !$("cloud-ask-model").value.trim()||!$("cloud-ask-prompt").value.trim()||
   !$("cloud-ask-owner").value||!$("cloud-ask-consent").checked;
  $("cloud-ask-recover").disabled=!csrf||busy||cloudAskBusy||!cloudAskEnabled||!cloudAskLastId;
@@ -1135,7 +1161,7 @@ function cloudAskShow(receipt){
  $("cloud-ask-answer").textContent=
   (receipt.status==="COMPLETED"&&typeof receipt.answer==="string"?
    receipt.answer:"No verified response saved; status: "+receipt.status)+
-  "\n\nReceipt "+receipt.request_id+" · "+receipt.status+
+  "\n\nProvider "+receipt.provider+" · Receipt "+receipt.request_id+" · "+receipt.status+
   (used?" · Tokens in="+used.input_tokens+" out="+used.output_tokens:"")+
   "\nProvider billing NOT independently verified. No automatic retries.";
 }
@@ -1153,10 +1179,10 @@ async function loadCloudAskReceipts(){
   if(!csrf)return;
   const box=$("cloud-ask-receipts");box.replaceChildren();
   const items=Array.isArray(data.receipts)?data.receipts:[];
-  if(!items.length){box.textContent="No direct OpenAI attempts recorded.";return;}
+  if(!items.length){box.textContent="No direct paid API attempts recorded.";return;}
   for(const item of items){
    const btn=document.createElement("button");btn.type="button";btn.className="record";
-   btn.textContent=item.status+" · "+item.model+" · "+item.created_utc+" · ID "+item.request_id;
+   btn.textContent=item.status+" · "+item.provider+" · "+item.model+" · "+item.created_utc+" · ID "+item.request_id;
    btn.addEventListener("click",()=>cloudAskLookup(item.request_id));
    box.append(btn);
   }
@@ -1166,12 +1192,13 @@ async function loadCloudAskReceipts(){
 for(const id of ["cloud-ask-prompt","cloud-ask-model","cloud-ask-owner"]){
  $(id).addEventListener("input",cloudAskControls);
 }
+$("cloud-ask-provider").addEventListener("change",cloudAskControls);
 $("cloud-ask-consent").addEventListener("change",cloudAskControls);
 $("cloud-ask-refresh").addEventListener("click",loadCloudAskReceipts);
 $("cloud-ask-recover").addEventListener("click",()=>cloudAskLookup(cloudAskLastId));
 $("cloud-ask-submit").addEventListener("click",async()=>{
  if(!csrf||busy||cloudAskBusy||!cloudAskEnabled||!$("cloud-ask-consent").checked)return;
- if(!window.confirm("Authorize exactly ONE potentially billable OpenAI API text request? Your prompt leaves the device, with separate billing and no model tools. Continue?"))return;
+ if(!window.confirm("Authorize exactly ONE potentially billable "+$("cloud-ask-provider").selectedOptions[0].textContent+" text request? Your prompt leaves the device, with separate billing and no model tools. Continue?"))return;
  if(!window.crypto||!window.crypto.getRandomValues){
   status("cloud-ask-status","Secure random request ID unavailable.",true);return;
  }
@@ -1179,6 +1206,7 @@ $("cloud-ask-submit").addEventListener("click",async()=>{
  const request_id=Array.from(bytes,x=>x.toString(16).padStart(2,"0")).join("");
  cloudAskLastId=request_id;
  const body={request_id,model:$("cloud-ask-model").value.trim(),
+  provider:$("cloud-ask-provider").value,
   prompt:$("cloud-ask-prompt").value.trim(),paid_api_consent:true,
   current_password:$("cloud-ask-owner").value};
  $("cloud-ask-owner").value="";$("cloud-ask-consent").checked=false;

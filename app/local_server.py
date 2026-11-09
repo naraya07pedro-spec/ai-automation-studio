@@ -160,8 +160,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     if on_demand_ai is not None:
         on_demand_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     cloud_plan_bridge = (CloudPlanBridge(on_demand_ai, local_agent_plan_store)
-                         if (on_demand_ai is not None and on_demand_ai.runner is not None)
-                         and local_agent_plan_store is not None
+                         if on_demand_ai is not None and local_agent_plan_store is not None
                          else None)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
@@ -3210,7 +3209,9 @@ def start_local_server(port=8765, enable_local_agent=False,
             home / "scoped-agent-memory.sqlite3",
             encryption_key=(read_runtime_secret("AAS_SCOPED_MEMORY_KEY")
                             if enable_encrypted_scoped_memory else None))
-    if enable_agent_plans or enable_scheduled_openai or enable_n8n_execution_verify:
+    if (enable_agent_plans or enable_scheduled_openai
+            or enable_anthropic_on_demand or enable_gemini_on_demand
+            or enable_n8n_execution_verify):
         reader = (AllowedGitHubIssuesReader(source_policy)
                   if enable_agent_github_read else None)
         hn_reader = AllowedHNStoryReader(hn_policy) if hn_policy is not None else None

@@ -7,7 +7,9 @@ on:
       - 'app/local_on_demand_remote_ai.py'
       - 'app/local_server.py'
       - 'tests/test_multi_provider_on_demand.py'
+      - 'tests/test_multi_provider_cloud_plan.py'
       - 'docs/MULTI_PROVIDER_ON_DEMAND_V1.md'
+      - 'docs/MULTI_PROVIDER_CLOUD_PLANS_V1.md'
       - '.github/workflows/multi-provider-on-demand.yml'
   push:
     branches: [main]
@@ -41,7 +43,9 @@ jobs:
       - name: Compile adapters, ledger, HTTP server and tests
         run: python -m py_compile app/multi_provider_readonly.py app/local_on_demand_remote_ai.py app/local_server.py tests/test_multi_provider_on_demand.py
       - name: Three-provider fixed-host and owner-authenticated integration
-        run: python -m unittest discover -s tests -p 'test_multi_provider_on_demand.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_multi_provider_on_demand.py' -v
+          python -m unittest discover -s tests -p 'test_multi_provider_cloud_plan.py' -v
       - name: Existing paid OpenAI and cloud plan regressions
         run: |
           python -m unittest discover -s tests -p 'test_on_demand_remote_ai.py' -v
