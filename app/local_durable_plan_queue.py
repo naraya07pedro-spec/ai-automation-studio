@@ -113,6 +113,22 @@ def _security_fingerprint(plan):
     )})
 
 
+def _versioned_security_fingerprint(plan):
+    """Bind newly enrolled jobs to full paid-plan origin, preserving old hashes."""
+    return "v2:" + _digest({
+        "legacy_security_sha256": _security_fingerprint(plan),
+        "cloud_origin": plan["cloud_origin"],
+    })
+
+
+def _security_matches(plan, recorded):
+    # Old durable jobs store an unprefixed SHA-256. Do not silently migrate
+    # their approved intent or pretend old jobs had source-origin pinning.
+    if recorded.startswith("v2:"):
+        return recorded == _versioned_security_fingerprint(plan)
+    return recorded == _security_fingerprint(plan)
+
+
 class LocalDurablePlanQueue:
     """A single-machine owner-driven DAG with crash quarantine and fair priority."""
 
@@ -215,7 +231,7 @@ class LocalDurablePlanQueue:
             raise DurableQueueError("job_plan_missing_or_unavailable", 409) from None
         if original is not None and _fingerprint(p) != original:
             raise DurableQueueError("job_plan_source_changed", 409)
-        if security and _security_fingerprint(p) != security:
+        if security and not _security_matches(p, security):
             raise DurableQueueError("job_plan_permission_binding_changed", 409)
         try:
             self.plans._verify_agent_binding(p["agent_binding"],p["steps"])
@@ -328,7 +344,7 @@ class LocalDurablePlanQueue:
             checked = []
             for n in nodes:
                 p = self._plan(n["plan_id"])
-                checked.append((n, _fingerprint(p), _security_fingerprint(p)))
+                checked.append((n, _fingerprint(p), _versioned_security_fingerprint(p)))
             if delegation is not None:
                 self._check_delegation(delegation, nodes)
             try:
@@ -551,7 +567,7 @@ class LocalDurablePlanQueue:
                     if _fingerprint(p)!=node["plan_sha256"]:
                         raise DurableQueueError("job_plan_source_changed")
                     if (node["security_sha256"] and
-                            _security_fingerprint(p)!=node["security_sha256"]):
+                            not _security_matches(p, node["security_sha256"])):
                         raise DurableQueueError("job_plan_permission_binding_changed")
                     ix=node["next_index"]
                     if (p["next_index"]!=ix+1 or len(p["results"])!=ix+1

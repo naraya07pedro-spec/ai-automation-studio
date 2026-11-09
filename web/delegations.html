@@ -120,7 +120,7 @@ input:focus,select:focus,textarea:focus{border-color:#7592bc;box-shadow:0 0 0 3p
 "use strict";
 const $=id=>document.getElementById(id);
 let csrf="",caps={},plans=[],jobs=[],selectedJob=null,preview=null,busy=false,authEpoch=0;
-let recoveryInspected=null;
+let recoveryInspected=null, jobsRequestSeq=0;
 function state(id,message,error=false){const e=$(id);e.textContent=message;e.classList.toggle("error",error)}
 function clearSecrets(){for(const id of ["create-password","job-password","handoff-password","password"])$(id).value=""}
 function lock(message){
@@ -211,8 +211,13 @@ function displayJobs(){
  }
 }
 function showJob(job){
- if(selectedJob?.job_id!==job?.job_id||selectedJob?.revision!==job?.revision)recoveryInspected=null;
- selectedJob=job;preview=null;$("handoff-output").textContent="No active preview for this selection.";
+ const changed=selectedJob?.job_id!==job?.job_id||selectedJob?.revision!==job?.revision;
+ if(changed){
+  recoveryInspected=null;
+  preview=null;
+  $("handoff-output").textContent="No active preview for this selection.";
+ }
+ selectedJob=job;
  $("job-status").textContent=job?.status||"None";$("job-detail").replaceChildren();
  const box=$("job-detail");
  if(job){
@@ -236,9 +241,11 @@ function showJob(job){
 }
 async function loadJobs(preferred){
  if(!csrf)return;
- const epoch=authEpoch;
+ const epoch=authEpoch, requestSeq=++jobsRequestSeq;
  try{
-  const data=await api("/api/durable-jobs");if(!csrf||epoch!==authEpoch)return;
+  const data=await api("/api/durable-jobs");
+  // An older response must never overwrite a newer job revision or preview.
+  if(!csrf||epoch!==authEpoch||requestSeq!==jobsRequestSeq)return;
   jobs=Array.isArray(data.jobs)?data.jobs:[];
   const chosen=jobs.find(x=>x.job_id===(preferred||selectedJob?.job_id));
   if(chosen)showJob(chosen);else{selectedJob=null;$("job-detail").textContent="Choose a saved job.";displayJobs();setControls()}

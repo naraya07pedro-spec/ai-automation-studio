@@ -17,7 +17,7 @@ import sqlite3
 import threading
 
 from local_agent_delegation import validate_delegation, DelegationError
-from local_durable_plan_queue import _digest, _fingerprint, _security_fingerprint, DurableQueueError
+from local_durable_plan_queue import _digest, _fingerprint, _security_matches, DurableQueueError
 from local_scoped_agent_memory import NOTE_ID, RETENTION_DAYS, ScopedMemoryError
 from local_private_sqlite_path import prepare_private_sqlite, PrivateSQLitePathError
 
@@ -143,9 +143,9 @@ class LocalTypedAgentHandoff:
                         or target["status"] != "APPROVED"
                         or target["results"] or target["next_index"] != 0
                         or _fingerprint(source) != nodes[0]["plan_sha256"]
-                        or _security_fingerprint(source) != nodes[0]["security_sha256"]
+                        or not _security_matches(source, nodes[0]["security_sha256"])
                         or _fingerprint(target) != nodes[1]["plan_sha256"]
-                        or _security_fingerprint(target) != nodes[1]["security_sha256"]):
+                        or not _security_matches(target, nodes[1]["security_sha256"])):
                     raise TypedHandoffError("handoff_source_or_target_changed", 409)
                 ix = request["source_step_index"]
                 if ix >= len(source["results"]) or ix >= len(source["steps"]):
@@ -277,7 +277,7 @@ class LocalTypedAgentHandoff:
                         ix == len(source["steps"])-1 and
                         ix < len(source["results"]) and
                         _fingerprint(source) == nodes[0]["plan_sha256"] and
-                        _security_fingerprint(source) == nodes[0]["security_sha256"] and
+                        _security_matches(source, nodes[0]["security_sha256"]) and
                         nodes[0]["last_receipt_sha256"] == _digest({
                             "plan_id":source["plan_id"],"index":ix,
                             "result":source["results"][ix]})
