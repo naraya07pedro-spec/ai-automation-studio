@@ -160,8 +160,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
     if on_demand_ai is not None:
         on_demand_ai.attach_gate(model_safety, agent_gate, agent_state_lock)
     cloud_plan_bridge = (CloudPlanBridge(on_demand_ai, local_agent_plan_store)
-                         if (on_demand_ai is not None and on_demand_ai.runner is not None)
-                         and local_agent_plan_store is not None
+                         if on_demand_ai is not None and local_agent_plan_store is not None
                          else None)
     batch_runner = (LocalAgentBatchRunner(local_agent_plan_store, model_safety,
                                         agent_gate, agent_state_lock)
