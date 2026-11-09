@@ -38,6 +38,8 @@ html,body{background:var(--canvas);color:var(--ink);font-family:Inter,ui-sans-se
 .workspace-grid{grid-template-columns:minmax(205px,.83fr) minmax(420px,2.34fr) minmax(220px,.88fr);align-items:stretch;gap:15px}
 .studio-context,.studio-work-column,.studio-right{min-width:0}
 .studio-context{align-self:stretch}
+/* Do not inherit the legacy two-column inspector below 1020px. */
+.studio-context.inspector{display:block}
 .stage,.inspector,.saved,.agent-list,.studio-widget,.studio-module{border:1px solid #e5e3f2;border-radius:var(--studio-radius);box-shadow:var(--studio-shadow);background:white}
 .inspector{padding:19px 16px;border-radius:var(--studio-radius)}
 .inspector h2{font-size:14px;margin:0 0 10px;font-weight:790;color:#2d294c}
