@@ -124,5 +124,23 @@ class ReferenceWorkspaceBrowserTests(unittest.TestCase):
         self.assertEqual(failures,[])
 
 
+    def test_related_module_pages_match_selected_light_theme(self):
+        page,context,failures=self.setup_page(1200,900)
+        self.login(page)
+        for route in ("/automations","/delegations","/jobs","/mission","/handoff"):
+            with self.subTest(route=route):
+                page.goto(URL+route,wait_until="domcontentloaded")
+                nav=page.locator(".studio-module-nav")
+                expect(nav).to_be_visible()
+                expect(nav.locator('a[aria-current="page"]')).to_have_count(1)
+                expect(nav.locator('a[href="/workspace"]')).to_be_visible()
+                self.assertEqual(page.evaluate(
+                    "getComputedStyle(document.documentElement).colorScheme"),"light")
+                self.assertFalse(page.evaluate(
+                    "document.documentElement.scrollWidth > innerWidth + 2"))
+        self.assertEqual(context.request.get(URL+"/assets/studio-pages.css").status,200)
+        self.assertEqual(failures,[])
+
+
 if __name__=="__main__":
     unittest.main()
