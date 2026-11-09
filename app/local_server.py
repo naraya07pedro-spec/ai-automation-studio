@@ -96,6 +96,9 @@ MAX_BODY = 8192
 WEB = ROOT / "web" / "index.html"
 MISSION = ROOT / "web" / "mission.html"
 WORKSPACE = ROOT / "web" / "workspace.html"
+STUDIO_WORKSPACE_CSS = ROOT / "web" / "studio-workspace.css"
+STUDIO_PAGES_CSS = ROOT / "web" / "studio-pages.css"
+STUDIO_WORKSPACE_JS = ROOT / "web" / "studio-workspace.js"
 DELEGATIONS = ROOT / "web" / "delegations.html"
 AUTOMATIONS = ROOT / "web" / "automations.html"
 HANDOFF = ROOT / "web" / "handoff.html"
@@ -347,7 +350,7 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
                     else:
                         self._send(200, {"authenticated": True, **session})
                 return
-            if route.path not in ("/", "/mission", "/workspace", "/delegations", "/automations", "/api/health"):
+            if route.path not in ("/", "/mission", "/workspace", "/delegations", "/automations", "/api/health", "/assets/studio-workspace.css", "/assets/studio-workspace.js", "/assets/studio-pages.css"):
                 if not self._operator_authorized():
                     return
             if route.path == "/api/agent-scoped-memory":
@@ -956,6 +959,15 @@ def create_handler(flow=None, local_core=None, github_fetcher=None, github_clock
             elif self.path == "/workspace":
                 self._send(200, WORKSPACE.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")
+            elif self.path == "/assets/studio-pages.css":
+                self._send(200, STUDIO_PAGES_CSS.read_text(encoding="utf-8"),
+                           "text/css; charset=utf-8")
+            elif self.path == "/assets/studio-workspace.css":
+                self._send(200, STUDIO_WORKSPACE_CSS.read_text(encoding="utf-8"),
+                           "text/css; charset=utf-8")
+            elif self.path == "/assets/studio-workspace.js":
+                self._send(200, STUDIO_WORKSPACE_JS.read_text(encoding="utf-8"),
+                           "text/javascript; charset=utf-8")
             elif self.path == "/delegations":
                 self._send(200, DELEGATIONS.read_text(encoding="utf-8"),
                            "text/html; charset=utf-8")

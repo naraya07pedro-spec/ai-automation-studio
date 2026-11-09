@@ -1,0 +1,146 @@
+/* Consistent lavender visual language for existing functional module pages.
+   No fake buttons, changed API semantics, or permission bypasses. */
+:root{
+  color-scheme:light;--bg:#f8f7ff;--shell:#fff;--panel:#fff;
+  --text:#29253f;--ink:#29253f;--muted:#817c96;
+  --line:#e5e2f2;--paper:#fff;--primary:#6d51e6;
+  --blue:#6950e5;--amber:#ab793c;--red:#b33e64;--warn:#a86d40;
+}
+body[data-studio-module]{
+  background:linear-gradient(120deg,#fdfcff 0%,#f7f6ff 67%,#f9f8ff)!important;
+  color:#2f2b4e!important;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+body[data-studio-module] a{color:#6550d8;text-decoration:none}
+body[data-studio-module] :focus-visible{outline:3px solid #8c79e8;outline-offset:3px}
+body[data-studio-module] header{
+  background:rgba(255,255,255,.85);
+  border-color:#e7e2f4;
+  backdrop-filter:blur(10px);
+}
+body[data-studio-module] header .brand,
+body[data-studio-module] header .identity,
+body[data-studio-module] header .logo{color:#332b53}
+body[data-studio-module] header .mark,
+body[data-studio-module] header .glyph{
+  color:#fff;background:linear-gradient(125deg,#4b39d6,#9874f0);
+  box-shadow:0 6px 18px #7059da36;
+}
+body[data-studio-module] .studio-module-nav{
+  position:relative;z-index:2;display:flex;align-items:center;gap:6px;
+  padding:10px clamp(16px,3vw,40px);overflow-x:auto;white-space:nowrap;
+  background:#fdfcff;border-bottom:1px solid #ebe7f5;scrollbar-width:thin;
+}
+body[data-studio-module] .studio-module-nav a{
+  font-size:11px;font-weight:710;display:flex;align-items:center;gap:7px;
+  border-radius:9px;padding:8px 12px;color:#706b8b;
+}
+body[data-studio-module] .studio-module-nav a:hover{background:#f1edff;color:#5740d4}
+body[data-studio-module] .studio-module-nav a[aria-current="page"]{
+  color:#fff;background:linear-gradient(105deg,#6149db,#9a71f2);
+  box-shadow:0 3px 12px #6650da29;
+}
+body[data-studio-module] main,
+body[data-studio-module] .shell{max-width:1310px}
+body[data-studio-module] h1,
+body[data-studio-module] .hero h1{
+  font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+  font-weight:820;letter-spacing:-.047em;line-height:1.14;color:#2c2548;
+  font-size:clamp(29px,3.7vw,49px);
+}
+body[data-studio-module] h2,body[data-studio-module] h3{color:#352e55}
+body[data-studio-module] .hero p,
+body[data-studio-module] .intro,
+body[data-studio-module] .lede,
+body[data-studio-module] .lead,
+body[data-studio-module] .sub,
+body[data-studio-module] p{color:#78748e}
+body[data-studio-module] .panel,
+body[data-studio-module] .agent-card,
+body[data-studio-module] .cards .card{
+  background:#fff!important;
+  border:1px solid #e8e4f3!important;
+  border-radius:16px!important;
+  box-shadow:0 8px 25px #4735a10b;
+}
+body[data-studio-module] .panel h2{font-size:17px;font-weight:790}
+body[data-studio-module] .notice,
+body[data-studio-module] .note{
+  background:#fffaf3!important;color:#8a663a!important;
+  border-color:#eadcc3!important;border-left:3px solid #c99651!important;
+  border-radius:10px!important;
+}
+body[data-studio-module] label{color:#514b6c!important;font-size:12px;font-weight:710}
+body[data-studio-module] input,
+body[data-studio-module] select,
+body[data-studio-module] textarea{
+  background:#fefeff!important;color:#302947!important;
+  border:1px solid #ddd9ec!important;border-radius:9px!important;
+}
+body[data-studio-module] input:focus,
+body[data-studio-module] select:focus,
+body[data-studio-module] textarea:focus{
+  outline:none!important;border-color:#9b89e9!important;
+  box-shadow:0 0 0 3px #7461e222!important;
+}
+body[data-studio-module] button,
+body[data-studio-module] .btn,
+body[data-studio-module] .button{
+  background:#fff;color:#51476b;border:1px solid #ddd9eb;
+  border-radius:9px;font-weight:690;
+}
+body[data-studio-module] button:hover:enabled,
+body[data-studio-module] .btn:hover:enabled,
+body[data-studio-module] .button:hover:enabled{
+  background:#f5f1ff;color:#5c43d7;border-color:#c9c0f1;
+}
+body[data-studio-module] button.primary,
+body[data-studio-module] .button.primary,
+body[data-studio-module] .btn.primary{
+  background:linear-gradient(110deg,#644ce0,#9270f3)!important;
+  border-color:transparent!important;color:#fff!important;
+}
+body[data-studio-module] button.primary:hover:enabled{
+  background:linear-gradient(110deg,#543bd1,#7855e5)!important;color:#fff!important;
+}
+body[data-studio-module] button.warn,
+body[data-studio-module] .btn.warn{
+  background:#fff4e9;border-color:#f2d9bb;color:#98622c;
+}
+body[data-studio-module] .output,
+body[data-studio-module] .result,
+body[data-studio-module] .record,
+body[data-studio-module] .step{
+  background:#f9f8ff!important;color:#534b6e!important;
+  border:1px solid #eae6f6!important;border-radius:10px!important;
+}
+body[data-studio-module] .record strong{color:#3c3456}
+body[data-studio-module] .record small,
+body[data-studio-module] .record span{color:#7f7995}
+body[data-studio-module] .status,
+body[data-studio-module] .state{color:#5b5792}
+body[data-studio-module] .pill,
+body[data-studio-module] .tag{color:#614bd5;background:#efebff;border-color:#ded6fb}
+body[data-studio-module] .gate,
+body[data-studio-module] .overlay{
+  background:#201344ac;backdrop-filter:blur(6px)
+}
+body[data-studio-module] .login{
+  background:#fff;border:1px solid #e4def3;
+  border-radius:17px;box-shadow:0 25px 85px #21164955;
+}
+body[data-studio-module] .login h2{
+  color:#342b56;font-family:Inter,system-ui,sans-serif;font-weight:820;
+}
+body[data-studio-module] .login p{color:#858099}
+body[data-studio-module] footer,
+body[data-studio-module] .footer{color:#8b85a1}
+@media(max-width:680px){
+  body[data-studio-module] .studio-module-nav{padding:8px 9px;gap:3px}
+  body[data-studio-module] .studio-module-nav a{font-size:10px;padding:7px 9px}
+  body[data-studio-module] .panel{padding:16px!important}
+  body[data-studio-module] h1{font-size:29px}
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-studio-module] *{scroll-behavior:auto!important}
+}

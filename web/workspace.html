@@ -75,6 +75,7 @@ dialog h2{margin:0;font:400 27px Georgia,serif}dialog p{font-size:12px;color:var
 @media(max-width:620px){.app{display:block}.rail{height:auto;padding:9px 12px;display:flex;flex-direction:row;align-items:center;gap:14px}.identity{display:none}.nav{display:flex;gap:3px;overflow:auto}.nav button,.nav a{min-width:42px}.topbar{padding:0 16px;height:58px}.page{padding:28px 13px 45px}.workspace-grid{gap:12px}.stage-top,.comms,.compose,.plan-box{padding-left:16px;padding-right:16px}.inspector{display:block;padding:18px}.stage{min-height:500px}.page-head{margin-bottom:21px}.saved{margin-top:14px;padding:16px}}
 @media(prefers-reduced-motion:no-preference){.button,.task-card,.nav a,.nav button{transition:background-color .12s,border-color .12s}}
 </style>
+<link rel="stylesheet" href="/assets/studio-workspace.css">
 </head>
 <body>
 <div class="app">
@@ -679,5 +680,6 @@ el("cloud-receipt-check").addEventListener("click",inspectCloudReceipt);
  }catch(e){lock("Local server unavailable. Open through your private tunnel.")}
 })();
 </script>
+<script src="/assets/studio-workspace.js" defer></script>
 </body>
 </html>
