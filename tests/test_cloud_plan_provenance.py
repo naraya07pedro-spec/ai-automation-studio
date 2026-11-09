@@ -115,7 +115,7 @@ class PersistedCloudProvenance(unittest.TestCase):
         invalid = (
             {"provider": "unauthorized_provider", "request_id": RID},
             {"provider": PROVIDER, "request_id": "a" * 23},
-            {"provider": PROVIDER, "request_id": RID_COLLIDE},
+            {"provider": PROVIDER, "request_id": "b" * 24 + "1" * 8},
             {"provider": PROVIDER, "request_id": RID, "extra": "bad"},
         )
         for item in invalid:
