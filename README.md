@@ -1,5 +1,19 @@
 # AI Automation Studio
 
+## Selected Agent Workspace UI · responsive light lavender
+
+Open the existing **[`/workspace`](http://127.0.0.1:8765/workspace)** after launching the local Studio (the Windows launcher opens this route in non-offline modes). The owner-selected light/lavender design includes:
+
+- Left sidebar with Agent Library, Memories, Projects, Delegations, Automations, Jobs and existing advanced controls.
+- Original functional task/AI chat, plan review, explicit step approval, optional local or paid cloud mode, Agent profile editor and scoped memory controls.
+- Live, authenticated local job queue summary and capability status from the existing backend. **Blank and unavailable values stay blank or explicitly unavailable**; no mock Agent identities, fabricated token costs, real VPS uptime or backup success badges.
+- Quick actions, Agent search (Ctrl/Cmd+K), eight navigable workspace modules, and tablet/mobile responsive layout.
+- Existing `/automations`, `/delegations`, `/jobs`, `/mission` and `/handoff` pages use the same light theme and navigation while retaining their previously reviewed permissions and forms.
+- Backup & Security links to the offline encrypted scoped-backup recovery runbook, **not** an invented browser backup/restore control.
+
+New browser regressions exercise login/logout, actual plan/chat mode controls, Agent search, navigation, mobile overflow and cross-page theming. The static CSS/JS are served by the existing **loopback-only** backend with its CSP and auth gates. Frontend styling and green synthetic tests do not establish a real Ollama model, separately billed provider account, n8n delivery, off-device backup, or Tencent VPS deployment.
+
+
 ## Stage #119 · Real owner-run n8n acceptance client (explicit one-read consent)
 
 `python tools/owner_live_n8n_acceptance.py inspect ...` checks the actual localhost owner session, pinned provider host/workflow/node, previously accepted HMAC-signed final-step claim and no earlier provider lookup. **Inspect makes zero n8n requests.** `verify ...` separately requires a hidden owner password and a typed explicit confirmation before it can call the existing Stage #117 endpoint for **one official n8n execution GET**. Remote read errors are reported without retries or leaked secrets. CLI exit code is nonzero for failed n8n execution, uncertainty or mismatch; an execution success still **does NOT prove a downstream business effect**. Owner Windows commands: [Stage #119 guide](docs/OWNER_LIVE_N8N_ACCEPTANCE_V1.md). GitHub CI uses a stub n8n API and does not establish live owner acceptance.
