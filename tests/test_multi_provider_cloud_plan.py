@@ -78,7 +78,7 @@ class ThreeProviderPlanBackend(unittest.TestCase):
     def test_each_provider_proposes_only_then_owner_executes_real_local_steps(self):
         for number, (provider, model, _) in enumerate(PROVIDERS, 1):
             with self.subTest(provider=provider):
-                rid = format(number, "032x")
+                rid = format(number, "024x") + "0" * 8
                 result = self.bridge.propose(request(rid, provider, model))
                 self.assertEqual(result["provider"], provider)
                 self.assertEqual(result["plan"]["model"], model)
